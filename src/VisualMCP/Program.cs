@@ -5,6 +5,12 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using VisualMCP.Logging;
 
+// Redirect stdout to null immediately: the MCP stdio transport uses the raw
+// stdout stream directly, so Console.SetOut does not affect it, but it does
+// prevent any stray text (host startup banners, log lines) from corrupting
+// the JSON protocol before our FileLoggerProvider takes over.
+Console.SetOut(TextWriter.Null);
+
 // Must be called before any MSBuild/Roslyn types are JIT-compiled.
 MSBuildLocator.RegisterDefaults();
 
