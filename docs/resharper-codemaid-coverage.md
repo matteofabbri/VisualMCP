@@ -1,0 +1,104 @@
+# ReSharper & CodeMaid — Feature Coverage
+
+Comparison of VisualMCP tools against ReSharper and CodeMaid features.
+Legend: ✅ implemented · ⚠️ partial · ❌ missing
+
+---
+
+## ReSharper
+
+### Navigation & Search
+
+| Feature | Tool | Status |
+|---|---|---|
+| Find symbol by name (semantic) | `find_symbol` | ✅ |
+| Find all references | `find_references` | ✅ |
+| Find implementations of interface | `find_implementations` | ✅ |
+| Find derived types / subclasses | `find_derived_types` | ✅ |
+| Call hierarchy (find callers) | `find_callers` | ✅ |
+| Hover info / resolve symbol at position | `get_symbol_info` | ✅ |
+| List type members with signatures | `get_type_members` | ✅ |
+| Go to file / type by fuzzy name | — | ❌ |
+| Navigate to recent files / edits | — | ❌ |
+
+### Analysis & Inspections
+
+| Feature | Tool | Status |
+|---|---|---|
+| Compiler errors & warnings | `get_diagnostics` | ✅ |
+| Project dependency graph + cycle detection | `analyze_dependencies` | ✅ |
+| Dead code / unused symbols | `find_unused_symbols` | ✅ |
+| Cyclomatic complexity, LOC, nesting | `get_metrics` | ✅ |
+| Code smells (async void, empty catch, long methods…) | `find_code_smells` | ✅ |
+| Full inspections (null checks, LINQ, closures, boxing…) | — | ❌ |
+| Structural Search & Replace (SSR) | — | ❌ |
+| Dependency matrix | — | ❌ |
+| Solution-wide background error analysis | — | ❌ (model not applicable) |
+
+### Documentation
+
+| Feature | Tool | Status |
+|---|---|---|
+| Read XML doc comment for a symbol | `get_xml_docs` | ✅ |
+| Find public API missing XML docs | `find_undocumented_public_api` | ✅ |
+
+### Refactoring
+
+| Feature | Tool | Status |
+|---|---|---|
+| Preview rename | `preview_rename` | ✅ |
+| **Apply rename** (write changes to disk) | `apply_rename` | ✅ (added) |
+| Extract method candidates | `extract_method_candidates` | ✅ |
+| Remove unused `using` directives | `optimize_usings` | ✅ (added) |
+| Sort `using` directives | `optimize_usings` | ✅ (added) |
+| Reorder members by convention | `reorder_members` | ✅ (added) |
+| **Move type to matching file** | `move_type` | ✅ (added) |
+| **Extract interface** | `extract_interface` | ✅ (added) |
+| **Safe delete** | `safe_delete` | ✅ (added) |
+| Inline method / variable | — | ❌ |
+| Change method signature | — | ❌ |
+| Introduce variable / field / parameter | — | ❌ |
+| Encapsulate field (generate property) | — | ❌ |
+| Pull members up / Push members down | — | ❌ |
+
+### Code Generation
+
+| Feature | Tool | Status |
+|---|---|---|
+| Generate constructor | — | ❌ |
+| Generate Equals / GetHashCode | — | ❌ |
+| Generate ToString | — | ❌ |
+| Implement INotifyPropertyChanged | — | ❌ |
+
+### Testing
+
+| Feature | Tool | Status |
+|---|---|---|
+| Run tests, parse results | `run_tests` | ✅ |
+| Per-class / per-method coverage | `get_test_coverage_map` | ✅ |
+
+---
+
+## CodeMaid
+
+| Feature | Tool | Status |
+|---|---|---|
+| Remove unused `using` directives | `optimize_usings` | ✅ (added) |
+| Sort `using` directives | `optimize_usings` | ✅ (added) |
+| Reorder members (access modifier order) | `reorder_members` | ✅ (added) |
+| Code outline / Spade view | — | ❌ |
+| Remove regions | — | ❌ |
+| Format document | — | ❌ |
+| Comment formatting / wrapping | — | ❌ |
+| Join lines / remove excess blank lines | — | ❌ |
+| Collapse to definitions | — | ❌ (IDE-only) |
+
+---
+
+## Remaining high-value gaps (priority order)
+
+1. **`generate_members`** — constructor, Equals/GetHashCode, ToString in one tool
+2. **`inline_symbol`** — inline a variable or single-use method back into its callers
+3. **`encapsulate_field`** — generate property from a field and update all references
+4. **`change_signature`** — reorder/add/remove method parameters, update all call sites
+5. **`remove_regions`** — remove all `#region` / `#endregion` blocks (CodeMaid)
