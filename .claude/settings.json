@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "powershell",
+            "statusMessage": "Building VisualMCP...",
+            "command": "$j = [Console]::In.ReadToEnd() | ConvertFrom-Json; $f = $j.tool_input.file_path; if ($f -match '\\.cs$') { dotnet build src/VisualMCP/VisualMCP.csproj 2>&1 | Where-Object { $_ -match 'error|warning|Compilazione|succeeded' } | Select-Object -Last 5 }",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

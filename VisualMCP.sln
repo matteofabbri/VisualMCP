@@ -1,9 +1,18 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.6.11822.322 stable
+VisualStudioVersion = 18.6.11822.322
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisualMCP", "src\VisualMCP\VisualMCP.csproj", "{32D6EAB4-085A-944C-0D4A-38E77FCAC104}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Elementi di soluzione", "Elementi di soluzione", "{33C9BE42-6DE4-495A-893F-57AE100752C4}"
+	ProjectSection(SolutionItems) = preProject
+		.mcp.json = .mcp.json
+		CLAUDE_PROJECT_RULES.md = CLAUDE_PROJECT_RULES.md
+		install.bat = install.bat
+		install.ps1 = install.ps1
+		README.md = README.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
