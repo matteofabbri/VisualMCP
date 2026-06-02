@@ -57,16 +57,16 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | **Safe delete** | `safe_delete` | ✅ (added) |
 | **Inline method / variable** | `inline_symbol` | ✅ (added) |
 | **Encapsulate field** (generate property + update refs) | `encapsulate_field` | ✅ (added) |
-| Change method signature | — | ❌ |
-| Introduce variable / field / parameter | — | ❌ |
-| Pull members up / Push members down | — | ❌ |
+| **Change method signature** | `change_signature` | ✅ (added) |
+| **Introduce variable** | `introduce_variable` | ✅ (added) |
+| **Pull members up** | `pull_members_up` | ✅ (added) |
 
 ### Code Generation
 
 | Feature | Tool | Status |
 |---|---|---|
 | **Generate constructor / Equals / GetHashCode / ToString** | `generate_members` | ✅ (added) |
-| Implement INotifyPropertyChanged | — | ❌ |
+| **Implement INotifyPropertyChanged** | `implement_inpc` | ✅ (added) |
 
 ### Testing
 
@@ -85,7 +85,7 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | Sort `using` directives | `optimize_usings` | ✅ (added) |
 | Reorder members (access modifier order) | `reorder_members` | ✅ (added) |
 | Code outline / Spade view | — | ❌ |
-| Remove regions | — | ❌ |
+| **Remove regions** | `remove_regions` | ✅ (added) |
 | Format document | — | ❌ |
 | Comment formatting / wrapping | — | ❌ |
 | Join lines / remove excess blank lines | — | ❌ |
@@ -93,10 +93,12 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 
 ---
 
-## Remaining high-value gaps (priority order)
+## Remaining gaps
 
-1. **`change_signature`** — reorder/add/remove method parameters, update all call sites
-2. **`remove_regions`** — remove all `#region` / `#endregion` blocks (CodeMaid)
-3. **`introduce_variable`** — extract a selected expression into a local variable
-4. **`pull_members_up`** — move members to a base class or interface
-5. **`implement_inpc`** — generate INotifyPropertyChanged boilerplate
+All planned ReSharper/CodeMaid features have been implemented. Lower-priority items that remain:
+
+- **Full ReSharper inspections** — null checks, LINQ inefficiencies, boxing, closure captures (would require running Roslyn analyzers)
+- **Structural Search & Replace** — pattern-based find/replace across the solution
+- **Dependency matrix** — visual coupling metrics between projects/namespaces
+- **Push members down** — inverse of `pull_members_up`
+- **Code outline / Spade** — hierarchical code tree (IDE-only concept)
