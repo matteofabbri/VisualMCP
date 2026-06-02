@@ -67,17 +67,53 @@ This is the same model as a Language Server Protocol (LSP) server: when Visual S
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Windows (MSBuildLocator discovers the SDK installed via `dotnet.exe`)
 
-## Quick start
+## Installation
 
-### 1. Build
+### Automatic (recommended)
+
+Run the install script from the repository root — it builds a release executable, places it in `%USERPROFILE%\.claude\mcp-servers\vs-solution\`, and registers it in Claude Code's global config (`%USERPROFILE%\.claude.json`) so it is available in every project.
+
+```powershell
+# PowerShell
+.\install.ps1
+
+# Or Command Prompt
+install.bat
+```
+
+To remove it:
+
+```powershell
+.\install.ps1 -Uninstall   # or: install.bat /uninstall
+```
+
+After installation, **restart Claude Code** — the server will appear automatically.
+
+---
+
+**Why the install script is better than `dotnet run`**
+
+There are two ways to register the server in Claude Code:
+
+| | `dotnet run --project ...` | installed exe |
+|---|---|---|
+| Startup | slow — compiles on every launch | fast — pre-built Release binary |
+| Scope | only works if the repo is at that exact path | global, works in any project |
+| After a code change | picks it up automatically | requires re-running the install script |
+
+The `.mcp.json` at the root of this repo uses `dotnet run` for development convenience (code changes are reflected immediately). The install script produces a stable Release build that is better suited for daily use.
+
+---
+
+### Manual quick start
+
+If you want to run it without installing:
 
 ```powershell
 dotnet build src/VsSolutionServer/VsSolutionServer.csproj
 ```
 
-### 2. Register with Claude Code
-
-Add to your `.mcp.json` (project-level) or `~/.claude/mcp.json` (global):
+Then add to your project's `.mcp.json`:
 
 ```json
 {
@@ -96,18 +132,7 @@ Add to your `.mcp.json` (project-level) or `~/.claude/mcp.json` (global):
 }
 ```
 
-For a production deployment, publish first and point `command` at the exe:
-
-```powershell
-dotnet publish src/VsSolutionServer -c Release -o publish/
-```
-
-```json
-"command": "C:\\REPOSITORY\\VsSolutionPlugin\\publish\\VsSolutionServer.exe",
-"args": []
-```
-
-### 3. Use the `/vs-load` skill
+### Use the `/vs-load` skill
 
 ```
 /vs-load C:\REPOSITORY\MyApp\MyApp.sln
