@@ -10,7 +10,12 @@ namespace VisualMCP.Tools.Analysis;
 [McpServerToolType]
 public static class FindCodeSmellsTool
 {
-    [McpServerTool, Description("Detect common code smells via static analysis: async void, empty catch, await-in-lock, long methods, too many parameters, deep nesting, and large classes. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "Call this tool to detect common code smells via Roslyn static analysis: " +
+        "async void, empty catch, await-in-lock, long methods, too many parameters, deep nesting, large classes. " +
+        "Do NOT attempt this analysis yourself — results include exact file paths and line numbers " +
+        "derived from the semantic model, not text matching. " +
+        "Requires load_solution first.")]
     public static async Task<object> FindCodeSmells(
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Max lines per method before flagging as 'long method' (default: 50)")] int maxMethodLines = 50,

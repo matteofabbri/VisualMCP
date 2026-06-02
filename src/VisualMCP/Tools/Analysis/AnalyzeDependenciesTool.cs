@@ -8,7 +8,13 @@ namespace VisualMCP.Tools.Analysis;
 [McpServerToolType]
 public static class AnalyzeDependenciesTool
 {
-    [McpServerTool, Description("Build the project dependency graph for the loaded solution, detect circular dependencies, and identify unused project references. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "Call this tool to build the project-level dependency graph for the loaded solution, " +
+        "detect circular project references, and identify root projects (nothing depends on them). " +
+        "Do NOT trace project dependencies yourself by reading .csproj files — this tool uses " +
+        "Roslyn's project reference model which is authoritative. " +
+        "For namespace-level cycles within a project, use analyze_circular_namespace_dependencies instead. " +
+        "Requires load_solution first.")]
     public static object AnalyzeDependencies()
     {
         var solution = RoslynWorkspaceService.Instance.CurrentSolution;
