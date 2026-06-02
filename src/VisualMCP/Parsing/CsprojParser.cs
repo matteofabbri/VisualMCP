@@ -1,16 +1,7 @@
 ﻿using System.Xml.Linq;
+using VisualMCP.Parsing.Model;
 
 namespace VisualMCP.Parsing;
-
-public record ProjectInfo(
-    string ProjectPath,
-    string Name,
-    string TargetFramework,
-    IReadOnlyList<string> SourceFiles,
-    IReadOnlyList<string> ProjectReferences,
-    IReadOnlyList<PackageRef> PackageReferences);
-
-public record PackageRef(string Name, string Version);
 
 public static class CsprojParser
 {

@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using VisualMCP.Parsing.Model;
 
 namespace VisualMCP.Parsing;
 

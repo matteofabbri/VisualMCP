@@ -1,10 +1,7 @@
 ﻿using System.Xml.Linq;
+using VisualMCP.Parsing.Model;
 
 namespace VisualMCP.Parsing;
-
-public record SolutionProject(string Name, string Path, string? TypeGuid);
-
-public record SolutionInfo(string SolutionPath, IReadOnlyList<SolutionProject> Projects);
 
 public static class SlnxParser
 {
