@@ -1,40 +1,64 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
-using System.Text.RegularExpressions;
-using VsSolutionServer.Parsing;
+using VsSolutionServer.Workspace;
 
 namespace VsSolutionServer.Tools;
 
 [McpServerToolType]
 public static class FindSymbolTool
 {
-    [McpServerTool, Description("Search for a class, interface, method, record, or enum by name across all .cs files in a solution or project directory.")]
-    public static object FindSymbol(
-        [Description("Symbol name to search for (class, interface, method, record, enum)")] string symbolName,
-        [Description("Root directory to search in (solution folder or project folder)")] string rootPath)
+    [McpServerTool, Description("Search for a named symbol (class, interface, method, record, enum, struct) using Roslyn's semantic model across the loaded solution. Requires LoadSolution to have been called first.")]
+    public static async Task<object> FindSymbol(
+        [Description("Symbol name to search for (supports partial/contains match)")] string symbolName,
+        [Description("If true, matches any symbol whose name contains symbolName; if false (default), matches the exact name")] bool partialMatch = false)
     {
-        rootPath = Path.GetFullPath(rootPath);
-        if (!Directory.Exists(rootPath))
-            return new { error = $"Directory not found: {rootPath}" };
+        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        if (solution is null)
+            return new { error = "No solution loaded. Call load_solution first." };
 
-        var pattern = new Regex(
-            $@"\b(class|interface|record|enum|struct)\s+{Regex.Escape(symbolName)}\b|\bvoid\s+{Regex.Escape(symbolName)}\s*[\(<]|\b\w[\w<>]*\s+{Regex.Escape(symbolName)}\s*[\(<]",
-            RegexOptions.Compiled);
+        IEnumerable<ISymbol> symbols;
 
-        var files = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"));
-
-        var results = new List<object>();
-        foreach (var file in files)
+        if (partialMatch)
         {
-            var lines = File.ReadAllLines(file);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                if (pattern.IsMatch(lines[i]))
-                    results.Add(new { file, line = i + 1, text = lines[i].Trim() });
-            }
+            symbols = await SymbolFinder.FindSourceDeclarationsAsync(
+                solution,
+                name => name.Contains(symbolName, StringComparison.OrdinalIgnoreCase),
+                SymbolFilter.TypeAndMember);
+        }
+        else
+        {
+            symbols = await SymbolFinder.FindSourceDeclarationsAsync(
+                solution,
+                symbolName,
+                ignoreCase: true,
+                filter: SymbolFilter.TypeAndMember);
         }
 
-        return new { symbolName, rootPath, matchCount = results.Count, matches = results };
+        var matches = symbols.Select(s =>
+        {
+            var loc = s.Locations.FirstOrDefault(l => l.IsInSource);
+            var filePath = loc?.SourceTree?.FilePath;
+            var line = loc?.GetLineSpan().StartLinePosition.Line + 1;
+            return new
+            {
+                Name = s.Name,
+                Kind = s.Kind.ToString(),
+                ContainingType = s.ContainingType?.ToDisplayString(),
+                ContainingNamespace = s.ContainingNamespace?.ToDisplayString(),
+                FullyQualifiedName = s.ToDisplayString(),
+                FilePath = filePath,
+                Line = line,
+            };
+        }).ToList();
+
+        return new
+        {
+            symbolName,
+            partialMatch,
+            matchCount = matches.Count,
+            matches
+        };
     }
 }

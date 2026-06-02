@@ -1,49 +1,41 @@
+using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
-using VsSolutionServer.Parsing;
+using VsSolutionServer.Workspace;
 
 namespace VsSolutionServer.Tools;
 
 [McpServerToolType]
 public static class LoadSolutionTool
 {
-    [McpServerTool, Description("Load a Visual Studio solution (.sln or .slnx) and return its projects with metadata.")]
-    public static object LoadSolution(
-        [Description("Absolute or relative path to the .sln or .slnx file")] string path)
+    [McpServerTool, Description("Load a Visual Studio solution (.sln or .slnx) using Roslyn MSBuildWorkspace — the same way Visual Studio loads it — and return its projects with full metadata.")]
+    public static async Task<object> LoadSolution(
+        [Description("Absolute path to the .sln or .slnx file")] string path)
     {
         path = Path.GetFullPath(path);
         if (!File.Exists(path))
             return new { error = $"File not found: {path}" };
 
-        var ext = Path.GetExtension(path).ToLowerInvariant();
-        SolutionInfo solution = ext switch
-        {
-            ".slnx" => SlnxParser.Parse(path),
-            ".sln"  => SlnParser.Parse(path),
-            _       => throw new ArgumentException($"Unsupported extension: {ext}")
-        };
+        var result = await RoslynWorkspaceService.Instance.LoadSolutionAsync(path);
+        var solution = result.Solution;
 
-        var solutionDir = Path.GetDirectoryName(path)!;
-        var projects = solution.Projects
-            .Select(p =>
-            {
-                var absPath = Path.IsPathRooted(p.Path)
-                    ? p.Path
-                    : Path.GetFullPath(Path.Combine(solutionDir, p.Path));
-                return new
-                {
-                    p.Name,
-                    Path = absPath,
-                    Exists = File.Exists(absPath)
-                };
-            })
-            .ToList();
+        var projects = solution.Projects.Select(p => new
+        {
+            p.Name,
+            Path = p.FilePath,
+            Language = p.Language,
+            AssemblyName = p.AssemblyName,
+            DocumentCount = p.Documents.Count(),
+            ProjectReferenceCount = p.ProjectReferences.Count(),
+            MetadataReferenceCount = p.MetadataReferences.Count,
+        }).ToList();
 
         return new
         {
             solution = Path.GetFileName(path),
-            directory = solutionDir,
+            directory = Path.GetDirectoryName(path),
             projectCount = projects.Count,
+            workspaceDiagnostics = result.Diagnostics,
             projects
         };
     }
