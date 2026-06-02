@@ -1,4 +1,4 @@
-# CLAUDE_PROJECT_RULES
+﻿# CLAUDE_PROJECT_RULES
 
 Rules and conventions for Claude Code when working on **VsSolutionPlugin**.
 
@@ -11,13 +11,13 @@ An MCP server written in C# (.NET 10) that exposes Visual Studio solution analys
 ## Build & test
 
 ```powershell
-dotnet build src/VsSolutionServer/VsSolutionServer.csproj
+dotnet build src/VisualMCP/VisualMCP.csproj
 ```
 
 Always build before committing. The MCP server process locks the output `.exe` when running — kill it first:
 
 ```powershell
-Stop-Process -Name VsSolutionServer -Force -ErrorAction SilentlyContinue
+Stop-Process -Name VisualMCP -Force -ErrorAction SilentlyContinue
 ```
 
 There are no automated tests in this repo yet. Verify changes manually via Claude Code with the MCP server registered.
@@ -27,7 +27,7 @@ There are no automated tests in this repo yet. Verify changes manually via Claud
 ## Project layout
 
 ```
-src/VsSolutionServer/
+src/VisualMCP/
   Program.cs                  ← startup; MSBuildLocator.RegisterDefaults() MUST be first
   Workspace/
     RoslynWorkspaceService.cs ← the singleton that owns the loaded Solution
@@ -71,7 +71,7 @@ Roslyn's `Project.MetadataReferences` contains assembly paths, not package names
 
 ## Adding a new tool
 
-1. Create `src/VsSolutionServer/Tools/MyNewTool.cs`
+1. Create `src/VisualMCP/Tools/MyNewTool.cs`
 2. Decorate the class with `[McpServerToolType]` and the method with `[McpServerTool, Description("...")]`
 3. Make the class `static` (no DI needed — use `RoslynWorkspaceService.Instance` directly)
 4. Return `object` (or `Task<object>` for async)

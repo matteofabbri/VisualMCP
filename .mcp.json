@@ -6,7 +6,7 @@
       "args": [
         "run",
         "--project",
-        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VsSolutionServer\\VsSolutionServer.csproj",
+        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VisualMCP\\VisualMCP.csproj",
         "--no-build"
       ]
     }

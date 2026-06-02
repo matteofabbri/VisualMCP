@@ -1,4 +1,4 @@
-# VsSolutionPlugin
+﻿# VsSolutionPlugin
 
 An MCP (Model Context Protocol) server that lets Claude Code read, navigate, and analyse Visual Studio solutions as if it were Visual Studio — using Roslyn's `MSBuildWorkspace` for full semantic understanding.
 
@@ -10,7 +10,7 @@ When you install this plugin, you are installing a **local executable**. Claude 
 Your machine
 ┌─────────────────────────────────────────────────────┐
 │                                                     │
-│   Claude Code ──stdin/stdout──▶ VsSolutionServer   │
+│   Claude Code ──stdin/stdout──▶ VisualMCP   │
 │                                       │             │
 │                                  reads your         │
 │                                  local files        │
@@ -110,7 +110,7 @@ The `.mcp.json` at the root of this repo uses `dotnet run` for development conve
 If you want to run it without installing:
 
 ```powershell
-dotnet build src/VsSolutionServer/VsSolutionServer.csproj
+dotnet build src/VisualMCP/VisualMCP.csproj
 ```
 
 Then add to your project's `.mcp.json`:
@@ -124,7 +124,7 @@ Then add to your project's `.mcp.json`:
       "args": [
         "run",
         "--project",
-        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VsSolutionServer\\VsSolutionServer.csproj",
+        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VisualMCP\\VisualMCP.csproj",
         "--no-build"
       ]
     }
@@ -243,10 +243,10 @@ Parsing/                                  ← legacy XML parsers (kept for NuGet
 
 ```powershell
 # Build
-dotnet build src/VsSolutionServer
+dotnet build src/VisualMCP
 
 # Watch (auto-rebuild on save)
-dotnet watch --project src/VsSolutionServer build
+dotnet watch --project src/VisualMCP build
 ```
 
 The MCP server communicates over stdio — there is no HTTP endpoint to test directly. Use Claude Code with the MCP registration above, or write an integration test that sends JSON-RPC over stdin.

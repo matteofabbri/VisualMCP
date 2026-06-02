@@ -1,5 +1,5 @@
 {
-  "name": "vs-solution",
+  "name": "VisualMCP",
   "description": "Read and navigate Visual Studio solutions (.sln, .slnx) and their projects from Claude Code",
   "version": "1.0.0",
   "author": "Matteo Fabbri"

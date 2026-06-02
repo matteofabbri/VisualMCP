@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installa VsSolutionPlugin come server MCP globale in Claude Code.
+    Installa VisualMCP come server MCP globale in Claude Code.
 
 .DESCRIPTION
     1. Verifica i prerequisiti (.NET SDK)
@@ -36,9 +36,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ServerName    = "vs-solution"
-$ProjectFile   = Join-Path $PSScriptRoot "src\VsSolutionServer\VsSolutionServer.csproj"
+$ProjectFile   = Join-Path $PSScriptRoot "src\VisualMCP\VisualMCP.csproj"
 $PublishDir    = Join-Path $env:USERPROFILE ".claude\mcp-servers\vs-solution"
-$ExePath       = Join-Path $PublishDir "VsSolutionServer.exe"
+$ExePath       = Join-Path $PublishDir "VisualMCP.exe"
 $ClaudeConfig  = Join-Path $env:USERPROFILE ".claude.json"
 
 function Write-Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }

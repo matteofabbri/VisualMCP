@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: ============================================================
-:: install.bat  —  Installa VsSolutionPlugin in Claude Code
+:: install.bat  —  Installa VisualMCP in Claude Code
 ::
 :: Uso:
 ::   install.bat                                      -> installa
@@ -13,9 +13,9 @@ setlocal enabledelayedexpansion
 
 set SERVER_NAME=vs-solution
 set SCRIPT_DIR=%~dp0
-set PROJECT=%SCRIPT_DIR%src\VsSolutionServer\VsSolutionServer.csproj
+set PROJECT=%SCRIPT_DIR%src\VisualMCP\VisualMCP.csproj
 set PUBLISH_DIR=%USERPROFILE%\.claude\mcp-servers\vs-solution
-set EXE_PATH=%PUBLISH_DIR%\VsSolutionServer.exe
+set EXE_PATH=%PUBLISH_DIR%\VisualMCP.exe
 set CLAUDE_CFG=%USERPROFILE%\.claude.json
 
 if /i "%1"=="/uninstall"      goto :uninstall
