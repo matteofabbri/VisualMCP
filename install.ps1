@@ -35,11 +35,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ServerName   = "VisualMCP"
-$ProjectFile  = Join-Path $PSScriptRoot "src\VisualMCP\VisualMCP.csproj"
-$PublishDir   = Join-Path $env:USERPROFILE ".claude\mcp-servers\VisualMCP"
-$ExePath      = Join-Path $PublishDir "VisualMCP.exe"
-$ClaudeConfig = Join-Path $env:USERPROFILE ".claude.json"
+$ServerName         = "VisualMCP"
+$ProjectFile        = Join-Path $PSScriptRoot "src\VisualMCP\VisualMCP.csproj"
+$PublishDir         = Join-Path $env:USERPROFILE ".claude\mcp-servers\VisualMCP"
+$ExePath            = Join-Path $PublishDir "VisualMCP.exe"
+$ClaudeConfig       = Join-Path $env:USERPROFILE ".claude.json"
+$DesktopAppConfig   = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
 
 function Write-Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
@@ -139,12 +140,24 @@ if ($Uninstall) {
         }
     }
 
+    if (Test-Path $DesktopAppConfig) {
+        $dcfg = Get-Content $DesktopAppConfig -Raw | ConvertFrom-Json
+        if ($dcfg.PSObject.Properties["mcpServers"] -and
+            $dcfg.mcpServers.PSObject.Properties[$ServerName]) {
+            $dcfg.mcpServers.PSObject.Properties.Remove($ServerName)
+            $dcfg | ConvertTo-Json -Depth 20 | Set-Content $DesktopAppConfig -Encoding UTF8
+            Write-Ok "Rimosso da $DesktopAppConfig"
+        } else {
+            Write-Host "    (non presente in $DesktopAppConfig)"
+        }
+    }
+
     if (Test-Path $PublishDir) {
         Remove-Item $PublishDir -Recurse -Force
         Write-Ok "Rimossa directory $PublishDir"
     }
 
-    Write-Host "`nDisinstallazione completata. Riavvia Claude Code." -ForegroundColor Yellow
+    Write-Host "`nDisinstallazione completata. Riavvia Claude Code e l'app desktop." -ForegroundColor Yellow
     exit 0
 }
 
@@ -207,13 +220,36 @@ if ($cfg.mcpServers.PSObject.Properties[$ServerName]) {
 $cfg | ConvertTo-Json -Depth 20 | Set-Content $ClaudeConfig -Encoding UTF8
 Write-Ok "Aggiunto '$ServerName' in $ClaudeConfig"
 
+# Registrazione in app desktop Claude
+Write-Step "Registrazione in $DesktopAppConfig ..."
+
+if (Test-Path $DesktopAppConfig) {
+    $dcfg = Get-Content $DesktopAppConfig -Raw | ConvertFrom-Json
+} else {
+    $null = New-Item -ItemType Directory -Path (Split-Path $DesktopAppConfig) -Force
+    $dcfg = [PSCustomObject]@{}
+}
+
+if (-not $dcfg.PSObject.Properties["mcpServers"]) {
+    $dcfg | Add-Member -MemberType NoteProperty -Name "mcpServers" -Value ([PSCustomObject]@{})
+}
+
+if ($dcfg.mcpServers.PSObject.Properties[$ServerName]) {
+    $dcfg.mcpServers.PSObject.Properties[$ServerName].Value = $entry
+} else {
+    $dcfg.mcpServers | Add-Member -MemberType NoteProperty -Name $ServerName -Value $entry
+}
+
+$dcfg | ConvertTo-Json -Depth 20 | Set-Content $DesktopAppConfig -Encoding UTF8
+Write-Ok "Aggiunto '$ServerName' in $DesktopAppConfig"
+
 # Fine
 Write-Host @"
 
 Installazione completata.
 
-Il server MCP '$ServerName' e' ora disponibile globalmente in Claude Code.
-Riavvia Claude Code per attivarlo, poi configura ogni progetto C# con:
+Il server MCP '$ServerName' e' ora disponibile in Claude Code CLI e nell'app desktop.
+Riavvia Claude Code e l'app desktop per attivarlo, poi configura ogni progetto C# con:
 
   .\install.ps1 -SetupProject C:\REPOSITORY\MioProgetto
   .\install.ps1 -SetupProject C:\REPOSITORY\MioProgetto -SolutionPath C:\REPOSITORY\MioProgetto\MioProgetto.sln
