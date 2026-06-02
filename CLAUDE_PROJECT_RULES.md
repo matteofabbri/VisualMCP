@@ -105,6 +105,7 @@ Do not add NuGet packages without a concrete reason. Prefer .NET BCL APIs over t
 
 ## Known constraints
 
+- **Everything runs locally — no upload.** The server is a child process launched by Claude Code on the user's machine via stdin/stdout (stdio transport). Source files are read directly from the local filesystem and never sent anywhere. The only data that reaches Anthropic is the text of the conversation. This also means the server cannot be deployed as a remote service without a filesystem mount, because it opens absolute paths like `C:\REPOSITORY\...` directly.
 - **Windows only** — `MSBuildLocator.RegisterDefaults()` discovers the SDK via `dotnet.exe` on the PATH. Linux/macOS is untested.
 - **Single active solution** — `RoslynWorkspaceService` holds one `Solution` at a time. Parallel MCP sessions would interfere; this is acceptable for the current single-user MCP model.
 - **No incremental reload** — changing a file on disk is not automatically reflected; the caller must call `load_solution` again.

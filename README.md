@@ -2,17 +2,65 @@
 
 An MCP (Model Context Protocol) server that lets Claude Code read, navigate, and analyse Visual Studio solutions as if it were Visual Studio — using Roslyn's `MSBuildWorkspace` for full semantic understanding.
 
+## How it works — nothing leaves your machine
+
+When you install this plugin, you are installing a **local executable**. Claude Code launches it as a child process on your own PC and communicates with it over stdin/stdout. There is no remote server, no upload, no network connection involved.
+
+```
+Your machine
+┌─────────────────────────────────────────────────────┐
+│                                                     │
+│   Claude Code ──stdin/stdout──▶ VsSolutionServer   │
+│                                       │             │
+│                                  reads your         │
+│                                  local files        │
+│                                       │             │
+│                               C:\REPOSITORY\...     │
+└─────────────────────────────────────────────────────┘
+                        │
+                        │  only this reaches Anthropic
+                        ▼
+              the text of the conversation
+              (never your source files)
+```
+
+The only thing that reaches Anthropic's servers is the **text of the chat** — what you type and what Claude replies. Your source files stay on your local disk. Claude sees only the structured JSON results the server produces (symbol names, line numbers, diagnostics) — not the raw file contents, unless you explicitly call `read_file`.
+
+This is the same model as a Language Server Protocol (LSP) server: when Visual Studio analyses your code it runs a local process (`roslyn.exe`, `omnisharp`, etc.) that reads files and replies to the IDE. Nothing is sent anywhere.
+
+> **Running it remotely would break it** — the server opens paths like `C:\REPOSITORY\...` directly on the filesystem. If the process ran on a different machine those paths would not exist. The stdio transport is intentionally local-only.
+
 ## Features
 
 | Tool | Description |
 |------|-------------|
 | `list_solutions` | Scan a directory tree for `.sln` / `.slnx` files |
 | `load_solution` | Open a solution with Roslyn MSBuildWorkspace (loads the full semantic model) |
-| `get_project_info` | Return documents, project/assembly references, and NuGet packages for a project |
-| `find_symbol` | Semantic search for any named symbol across the loaded solution |
-| `find_implementations` | Find every type that implements an interface, with per-member mapping |
-| `run_tests` | Execute all tests via `dotnet test`, parse TRX output, return structured results |
+| `get_project_info` | Documents, project/assembly references, and NuGet packages for a project |
 | `read_file` | Read a source file with line numbers and optional range |
+| **Navigation** | |
+| `find_symbol` | Semantic search for any named symbol across the loaded solution |
+| `find_references` | Every location where a symbol is used (not just declared) |
+| `find_implementations` | All types that implement an interface, with per-member mapping |
+| `find_derived_types` | Downward inheritance tree for a class or interface |
+| `find_callers` | Call hierarchy — every method that calls a given method |
+| `get_symbol_info` | Resolve the symbol at a specific file + line (like hovering in VS) |
+| `get_type_members` | All members of a type with full signatures and XML docs |
+| **Analysis** | |
+| `get_diagnostics` | Compiler errors and warnings (equivalent to VS Error List) |
+| `analyze_dependencies` | Project dependency graph, cycle detection, root projects |
+| `find_unused_symbols` | Public/internal symbols with zero references (dead code) |
+| `get_metrics` | Cyclomatic complexity, lines of code, nesting depth per method |
+| `find_code_smells` | Static detection: `async void`, empty catch, await-in-lock, long methods, etc. |
+| **Documentation** | |
+| `get_xml_docs` | XML documentation comment for a symbol, parsed into structured fields |
+| `find_undocumented_public_api` | Public/protected symbols missing XML docs |
+| **Refactoring** | |
+| `preview_rename` | Preview a symbol rename across the solution without applying it |
+| `extract_method_candidates` | Identify code blocks in long methods suitable for extraction |
+| **Testing** | |
+| `run_tests` | Execute tests via `dotnet test`, parse TRX output, return structured results |
+| `get_test_coverage_map` | Per-class and per-method line coverage via XPlat Code Coverage |
 
 ## Requirements
 
