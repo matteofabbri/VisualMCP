@@ -55,19 +55,17 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 | **Move type to matching file** | `move_type` | ✅ (added) |
 | **Extract interface** | `extract_interface` | ✅ (added) |
 | **Safe delete** | `safe_delete` | ✅ (added) |
-| Inline method / variable | — | ❌ |
+| **Inline method / variable** | `inline_symbol` | ✅ (added) |
+| **Encapsulate field** (generate property + update refs) | `encapsulate_field` | ✅ (added) |
 | Change method signature | — | ❌ |
 | Introduce variable / field / parameter | — | ❌ |
-| Encapsulate field (generate property) | — | ❌ |
 | Pull members up / Push members down | — | ❌ |
 
 ### Code Generation
 
 | Feature | Tool | Status |
 |---|---|---|
-| Generate constructor | — | ❌ |
-| Generate Equals / GetHashCode | — | ❌ |
-| Generate ToString | — | ❌ |
+| **Generate constructor / Equals / GetHashCode / ToString** | `generate_members` | ✅ (added) |
 | Implement INotifyPropertyChanged | — | ❌ |
 
 ### Testing
@@ -97,8 +95,8 @@ Legend: ✅ implemented · ⚠️ partial · ❌ missing
 
 ## Remaining high-value gaps (priority order)
 
-1. **`generate_members`** — constructor, Equals/GetHashCode, ToString in one tool
-2. **`inline_symbol`** — inline a variable or single-use method back into its callers
-3. **`encapsulate_field`** — generate property from a field and update all references
-4. **`change_signature`** — reorder/add/remove method parameters, update all call sites
-5. **`remove_regions`** — remove all `#region` / `#endregion` blocks (CodeMaid)
+1. **`change_signature`** — reorder/add/remove method parameters, update all call sites
+2. **`remove_regions`** — remove all `#region` / `#endregion` blocks (CodeMaid)
+3. **`introduce_variable`** — extract a selected expression into a local variable
+4. **`pull_members_up`** — move members to a base class or interface
+5. **`implement_inpc`** — generate INotifyPropertyChanged boilerplate
