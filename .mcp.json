@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "vs-solution": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VsSolutionServer\\VsSolutionServer.csproj",
+        "--no-build"
+      ]
+    }
+  }
+}
