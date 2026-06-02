@@ -1,8 +1,8 @@
-@echo off
+﻿@echo off
 setlocal enabledelayedexpansion
 
 :: ============================================================
-:: install.bat  —  Installa VisualMCP in Claude Code
+:: install.bat  â€”  Installa VisualMCP in Claude Code
 ::
 :: Uso:
 ::   install.bat                                      -> installa
@@ -11,17 +11,17 @@ setlocal enabledelayedexpansion
 ::   install.bat /setup-project C:\PATH\MioProgetto /sln C:\PATH\MioProgetto\App.sln
 :: ============================================================
 
-set SERVER_NAME=vs-solution
+set SERVER_NAME=VisualMCP
 set SCRIPT_DIR=%~dp0
 set PROJECT=%SCRIPT_DIR%src\VisualMCP\VisualMCP.csproj
-set PUBLISH_DIR=%USERPROFILE%\.claude\mcp-servers\vs-solution
+set PUBLISH_DIR=%USERPROFILE%\.claude\mcp-servers\VisualMCP
 set EXE_PATH=%PUBLISH_DIR%\VisualMCP.exe
 set CLAUDE_CFG=%USERPROFILE%\.claude.json
 
 if /i "%1"=="/uninstall"      goto :uninstall
 if /i "%1"=="/setup-project"  goto :setup_project
 
-:: ── Prerequisiti ─────────────────────────────────────────────
+:: â”€â”€ Prerequisiti â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 echo.
 echo =^> Verifica prerequisiti...
 where dotnet >nul 2>&1
@@ -38,7 +38,7 @@ if not exist "%PROJECT%" (
 )
 echo    OK   Progetto trovato
 
-:: ── Publish ──────────────────────────────────────────────────
+:: â”€â”€ Publish â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 echo.
 echo =^> Pubblicazione in %PUBLISH_DIR% ...
 if not exist "%PUBLISH_DIR%" mkdir "%PUBLISH_DIR%"
@@ -54,7 +54,7 @@ if errorlevel 1 ( echo    ERR  dotnet publish fallito. & exit /b 1 )
 if not exist "%EXE_PATH%" ( echo    ERR  Exe non trovato: %EXE_PATH% & exit /b 1 )
 echo    OK   Pubblicato: %EXE_PATH%
 
-:: ── Registrazione in ~/.claude.json ──────────────────────────
+:: â”€â”€ Registrazione in ~/.claude.json â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 echo.
 echo =^> Registrazione in %CLAUDE_CFG% ...
 
@@ -69,7 +69,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 if errorlevel 1 ( echo    ERR  Registrazione fallita. & exit /b 1 )
 
-:: ── Fine ─────────────────────────────────────────────────────
+:: â”€â”€ Fine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 echo.
 echo Installazione completata.
 echo.
@@ -83,7 +83,7 @@ echo Oppure dall'interno di Claude Code:  /vs-init
 echo Per disinstallare: install.bat /uninstall
 goto :eof
 
-:: ── Setup-Project ─────────────────────────────────────────────
+:: â”€â”€ Setup-Project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 :setup_project
 set TARGET_DIR=%2
 set SLN_PATH=^<path\to\solution.sln^>
@@ -110,10 +110,10 @@ echo =^> Configurazione progetto in %TARGET_DIR% ...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$slnDisplay = '%SLN_PATH%'; ^
      $claudeMd   = '%CLAUDE_MD:\=\\%'; ^
-     $block = \"`n## vs-solution MCP\`n\`nQuesto progetto usa il server MCP ``vs-solution`` per l'analisi semantica del codice C#.\`n\`n### Regole obbligatorie\`n\`n- All'inizio di ogni sessione chiama ``load_solution`` con il path della soluzione.\`n  Soluzione di default: $slnDisplay\`n\`n- Usa i tool MCP invece di Grep/Bash/PowerShell per qualsiasi operazione su codice C#.\`n  Tool disponibili: find_symbol, find_references, find_implementations, find_derived_types,\`n  find_callers, get_symbol_info, get_type_members, get_diagnostics, analyze_dependencies,\`n  find_unused_symbols, get_metrics, find_code_smells, get_xml_docs,\`n  find_undocumented_public_api, preview_rename, extract_method_candidates,\`n  run_tests, get_test_coverage_map.\`n\`n- Usa Grep/Bash/PowerShell solo per file non-C# o quando il server MCP non e' disponibile.\`n\"; ^
+     $block = \"`n## VisualMCP MCP\`n\`nQuesto progetto usa il server MCP ``VisualMCP`` per l'analisi semantica del codice C#.\`n\`n### Regole obbligatorie\`n\`n- All'inizio di ogni sessione chiama ``load_solution`` con il path della soluzione.\`n  Soluzione di default: $slnDisplay\`n\`n- Usa i tool MCP invece di Grep/Bash/PowerShell per qualsiasi operazione su codice C#.\`n  Tool disponibili: find_symbol, find_references, find_implementations, find_derived_types,\`n  find_callers, get_symbol_info, get_type_members, get_diagnostics, analyze_dependencies,\`n  find_unused_symbols, get_metrics, find_code_smells, get_xml_docs,\`n  find_undocumented_public_api, preview_rename, extract_method_candidates,\`n  run_tests, get_test_coverage_map.\`n\`n- Usa Grep/Bash/PowerShell solo per file non-C# o quando il server MCP non e' disponibile.\`n\"; ^
      if (Test-Path $claudeMd) { ^
          $existing = Get-Content $claudeMd -Raw; ^
-         if ($existing -match 'vs-solution MCP') { Write-Host '   (CLAUDE.md gia'' configurato — nessuna modifica)' } ^
+         if ($existing -match 'VisualMCP MCP') { Write-Host '   (CLAUDE.md gia'' configurato â€” nessuna modifica)' } ^
          else { Add-Content $claudeMd $block -Encoding UTF8; Write-Host '   OK   Sezione aggiunta a' $claudeMd } ^
      } else { ^
          Set-Content $claudeMd $block.TrimStart() -Encoding UTF8; ^
@@ -127,7 +127,7 @@ echo Setup completato. Claude usera' i tool MCP per il codice C# in questo proge
 echo Soluzione configurata: %SLN_PATH%
 goto :eof
 
-:: ── Uninstall ────────────────────────────────────────────────
+:: â”€â”€ Uninstall â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 :uninstall
 echo.
 echo =^> Rimozione server MCP '%SERVER_NAME%'...

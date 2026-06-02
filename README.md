@@ -71,7 +71,7 @@ This is the same model as a Language Server Protocol (LSP) server: when Visual S
 
 ### Automatic (recommended)
 
-Run the install script from the repository root — it builds a release executable, places it in `%USERPROFILE%\.claude\mcp-servers\vs-solution\`, and registers it in Claude Code's global config (`%USERPROFILE%\.claude.json`) so it is available in every project.
+Run the install script from the repository root — it builds a release executable, places it in `%USERPROFILE%\.claude\mcp-servers\VisualMCP\`, and registers it in Claude Code's global config (`%USERPROFILE%\.claude.json`) so it is available in every project.
 
 ```powershell
 # PowerShell
@@ -118,7 +118,7 @@ Then add to your project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "vs-solution": {
+    "VisualMCP": {
       "type": "stdio",
       "command": "dotnet",
       "args": [

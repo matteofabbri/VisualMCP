@@ -1,6 +1,6 @@
-{
+﻿{
   "mcpServers": {
-    "vs-solution": {
+    "VisualMCP": {
       "type": "stdio",
       "command": "dotnet",
       "args": [

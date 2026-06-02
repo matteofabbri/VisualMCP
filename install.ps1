@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     1. Verifica i prerequisiti (.NET SDK)
-    2. Pubblica il server in %USERPROFILE%\.claude\mcp-servers\vs-solution\
+    2. Pubblica il server in %USERPROFILE%\.claude\mcp-servers\VisualMCP\
     3. Registra il server in %USERPROFILE%\.claude.json (config globale di Claude Code)
 
 .PARAMETER Uninstall
@@ -35,19 +35,19 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ServerName    = "vs-solution"
-$ProjectFile   = Join-Path $PSScriptRoot "src\VisualMCP\VisualMCP.csproj"
-$PublishDir    = Join-Path $env:USERPROFILE ".claude\mcp-servers\vs-solution"
-$ExePath       = Join-Path $PublishDir "VisualMCP.exe"
-$ClaudeConfig  = Join-Path $env:USERPROFILE ".claude.json"
+$ServerName   = "VisualMCP"
+$ProjectFile  = Join-Path $PSScriptRoot "src\VisualMCP\VisualMCP.csproj"
+$PublishDir   = Join-Path $env:USERPROFILE ".claude\mcp-servers\VisualMCP"
+$ExePath      = Join-Path $PublishDir "VisualMCP.exe"
+$ClaudeConfig = Join-Path $env:USERPROFILE ".claude.json"
 
 function Write-Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
 function Write-Err([string]$msg)  { Write-Host "    ERR $msg" -ForegroundColor Red; exit 1 }
 
-# ── Setup-Project ─────────────────────────────────────────────────────────────
+# Setup-Project
 if ($SetupProject -ne "") {
-    $targetDir = Resolve-Path $SetupProject -ErrorAction SilentlyContinue
+    $targetDir  = Resolve-Path $SetupProject -ErrorAction SilentlyContinue
     if (-not $targetDir) { Write-Err "Directory non trovata: $SetupProject" }
 
     $claudeMd   = Join-Path $targetDir "CLAUDE.md"
@@ -55,9 +55,9 @@ if ($SetupProject -ne "") {
 
     $block = @"
 
-## vs-solution MCP
+## VisualMCP MCP
 
-Questo progetto usa il server MCP ``vs-solution`` per l'analisi semantica del codice C#.
+Questo progetto usa il server MCP ``VisualMCP`` per l'analisi semantica del codice C#.
 
 ### Regole obbligatorie
 
@@ -66,44 +66,44 @@ Questo progetto usa il server MCP ``vs-solution`` per l'analisi semantica del co
 
 - Per qualsiasi operazione su codice C# usa i tool MCP, NON Grep/Bash/PowerShell:
 
-  | Operazione                        | Tool MCP da usare              |
-  |-----------------------------------|--------------------------------|
-  | Cercare una classe/metodo/tipo    | ``find_symbol``                |
-  | Trovare tutti i riferimenti       | ``find_references``            |
-  | Implementazioni di un'interfaccia | ``find_implementations``       |
-  | Gerarchia di ereditarietà         | ``find_derived_types``         |
-  | Chi chiama un metodo              | ``find_callers``               |
-  | Simbolo a riga specifica          | ``get_symbol_info``            |
-  | Membri di un tipo                 | ``get_type_members``           |
-  | Errori e warning del compilatore  | ``get_diagnostics``            |
-  | Dipendenze tra progetti           | ``analyze_dependencies``       |
-  | Codice morto                      | ``find_unused_symbols``        |
-  | Complessità ciclomatica           | ``get_metrics``                |
-  | Code smell                        | ``find_code_smells``           |
-  | Documentazione XML                | ``get_xml_docs``               |
-  | API pubbliche senza doc           | ``find_undocumented_public_api``|
-  | Anteprima rename                  | ``preview_rename``             |
-  | Candidati estrazione metodo       | ``extract_method_candidates``  |
-  | Eseguire i test                   | ``run_tests``                  |
-  | Coverage dei test                 | ``get_test_coverage_map``      |
+  | Operazione                         | Tool MCP da usare               |
+  |------------------------------------|---------------------------------|
+  | Cercare una classe/metodo/tipo     | ``find_symbol``                 |
+  | Trovare tutti i riferimenti        | ``find_references``             |
+  | Implementazioni di un'interfaccia  | ``find_implementations``        |
+  | Gerarchia di ereditarieta'         | ``find_derived_types``          |
+  | Chi chiama un metodo               | ``find_callers``                |
+  | Simbolo a riga specifica           | ``get_symbol_info``             |
+  | Membri di un tipo                  | ``get_type_members``            |
+  | Errori e warning del compilatore   | ``get_diagnostics``             |
+  | Dipendenze tra progetti            | ``analyze_dependencies``        |
+  | Codice morto                       | ``find_unused_symbols``         |
+  | Complessita' ciclomatica           | ``get_metrics``                 |
+  | Code smell                         | ``find_code_smells``            |
+  | Documentazione XML                 | ``get_xml_docs``                |
+  | API pubbliche senza doc            | ``find_undocumented_public_api``|
+  | Anteprima rename                   | ``preview_rename``              |
+  | Candidati estrazione metodo        | ``extract_method_candidates``   |
+  | Eseguire i test                    | ``run_tests``                   |
+  | Coverage dei test                  | ``get_test_coverage_map``       |
 
 - Usa Grep/Bash/PowerShell solo per file non-C# (JSON, YAML, log, script, ecc.)
   o quando il server MCP non e' disponibile.
 
 ### Note
 
-Il server ``vs-solution`` e' un processo locale — non trasmette file sorgente da nessuna parte.
+Il server ``VisualMCP`` e' un processo locale -- non trasmette file sorgente da nessuna parte.
 "@
 
     Write-Step "Configurazione progetto in $targetDir ..."
 
     if (Test-Path $claudeMd) {
         $existing = Get-Content $claudeMd -Raw
-        if ($existing -match "vs-solution MCP") {
-            Write-Host "    (CLAUDE.md esiste gia' con la sezione vs-solution — nessuna modifica)" -ForegroundColor Yellow
+        if ($existing -match "VisualMCP MCP") {
+            Write-Host "    (CLAUDE.md gia' configurato -- nessuna modifica)" -ForegroundColor Yellow
         } else {
             Add-Content $claudeMd $block -Encoding UTF8
-            Write-Ok "Sezione vs-solution aggiunta a $claudeMd"
+            Write-Ok "Sezione VisualMCP aggiunta a $claudeMd"
         }
     } else {
         Set-Content $claudeMd $block.TrimStart() -Encoding UTF8
@@ -117,13 +117,13 @@ Setup completato.
 Claude Code usera' i tool MCP per l'analisi C# in questo progetto.
 Soluzione configurata: $slnDisplay
 
-Se hai modificato la soluzione, aggiorna il path in $claudeMd
-oppure riesegui:  .\install.ps1 -SetupProject "$targetDir" -SolutionPath "path\to\solution.sln"
+Per aggiornare il path:
+  .\install.ps1 -SetupProject "$targetDir" -SolutionPath "path\to\solution.sln"
 "@ -ForegroundColor Green
     exit 0
 }
 
-# ── Uninstall ────────────────────────────────────────────────────────────────
+# Uninstall
 if ($Uninstall) {
     Write-Step "Rimozione server MCP '$ServerName'..."
 
@@ -148,7 +148,7 @@ if ($Uninstall) {
     exit 0
 }
 
-# ── Prerequisiti ─────────────────────────────────────────────────────────────
+# Prerequisiti
 Write-Step "Verifica prerequisiti..."
 
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -162,7 +162,7 @@ if (-not (Test-Path $ProjectFile)) {
 }
 Write-Ok "Progetto trovato: $ProjectFile"
 
-# ── Publish ───────────────────────────────────────────────────────────────────
+# Publish
 Write-Step "Pubblicazione in $PublishDir ..."
 
 $null = New-Item -ItemType Directory -Path $PublishDir -Force
@@ -179,7 +179,7 @@ if (-not (Test-Path $ExePath)) { Write-Err "Exe non trovato dopo la pubblicazion
 
 Write-Ok "Pubblicato: $ExePath"
 
-# ── Registrazione in ~/.claude.json ─────────────────────────────────────────
+# Registrazione in ~/.claude.json
 Write-Step "Registrazione in $ClaudeConfig ..."
 
 if (Test-Path $ClaudeConfig) {
@@ -207,7 +207,7 @@ if ($cfg.mcpServers.PSObject.Properties[$ServerName]) {
 $cfg | ConvertTo-Json -Depth 20 | Set-Content $ClaudeConfig -Encoding UTF8
 Write-Ok "Aggiunto '$ServerName' in $ClaudeConfig"
 
-# ── Fine ─────────────────────────────────────────────────────────────────────
+# Fine
 Write-Host @"
 
 Installazione completata.
