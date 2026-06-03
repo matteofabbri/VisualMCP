@@ -24,15 +24,18 @@ public static class ReorderMembersTool
     // 11. Methods
     // 12. Nested types
 
-    [McpServerTool, Description("Reorder members of all types in a file (or project) by convention: public first, then protected, then private; within each group: constants, fields, constructors, properties, events, methods, nested types. Writes changes to disk. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want members ordered to a consistent convention, use this INSTEAD OF rearranging by hand: it reorders all types in a file/project " +
+        "(public→protected→private; within each: constants, fields, constructors, properties, events, methods, nested types) and writes to disk, preserving each member's body. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> ReorderMembers(
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Optional: restrict to a single file by absolute path")] string? filePath = null,
         [Description("Dry run â€” report which files would change without writing (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

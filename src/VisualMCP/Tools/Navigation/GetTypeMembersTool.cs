@@ -9,14 +9,17 @@ namespace VisualMCP.Tools.Navigation;
 [McpServerToolType]
 public static class GetTypeMembersTool
 {
-    [McpServerTool, Description("Return all members of a type (methods, properties, fields, events, constructors) with full signatures and XML docs. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you need the full member list of a type (methods, properties, fields, events, constructors) with resolved signatures and XML docs, use this INSTEAD OF reading the file. " +
+        "Roslyn gives fully-resolved signatures and can include inherited members from base types, which reading one file cannot show. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> GetTypeMembers(
         [Description("Full or partial type name (class, interface, struct, record, enum)")] string typeName,
         [Description("Include inherited members from base types (default: false)")] bool includeInherited = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(
             solution,

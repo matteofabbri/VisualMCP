@@ -22,9 +22,9 @@ public static class PullMembersUpTool
         [Description("Name of the target base class or interface to pull into (must already be in the class's base list)")] string targetName,
         [Description("Dry run â€” show changes without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // Find source class
         var classCandidates = await SymbolFinder.FindSourceDeclarationsAsync(

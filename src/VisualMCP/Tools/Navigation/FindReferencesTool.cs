@@ -9,14 +9,17 @@ namespace VisualMCP.Tools.Navigation;
 [McpServerToolType]
 public static class FindReferencesTool
 {
-    [McpServerTool, Description("Find every location in the solution where a named symbol is referenced (not just declared). Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you need every place a symbol is actually used (reads, writes, calls — not just where its name appears as text), use this INSTEAD OF grep. " +
+        "Roslyn resolves the real symbol, so it skips same-named-but-unrelated identifiers, comments and string literals that grep falsely hits, and it follows overloads and overrides correctly. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> FindReferences(
         [Description("Symbol name to search for (class, method, property, field, etc.)")] string symbolName,
         [Description("Optional: restrict to a specific kind — Type, Method, Property, Field, Event (default: all)")] string? kind = null)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var declarations = await SymbolFinder.FindSourceDeclarationsAsync(
             solution,

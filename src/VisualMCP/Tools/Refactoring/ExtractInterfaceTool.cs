@@ -11,7 +11,10 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class ExtractInterfaceTool
 {
-    [McpServerTool, Description("Generate an interface from the public instance members of a class and optionally add it to the class's base list. Writes the interface to a new file. Equivalent to ReSharper 'Extract Interface'. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want an interface for a class's public surface, use this INSTEAD OF writing it by hand: it generates the interface from the class's public instance members " +
+        "(with correct signatures), writes it to a new file, and optionally adds it to the class's base list (ReSharper 'Extract Interface'). " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> ExtractInterface(
         [Description("Name of the class to extract an interface from")] string className,
         [Description("Name for the new interface (default: 'I' + className)")] string? interfaceName = null,
@@ -22,9 +25,9 @@ public static class ExtractInterfaceTool
         [Description("Target directory for the new interface file (default: same directory as the class)")] string? targetDirectory = null,
         [Description("Dry run â€” return generated code without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         interfaceName ??= "I" + className;
 

@@ -11,7 +11,10 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class GenerateMembersTool
 {
-    [McpServerTool, Description("Generate boilerplate members for a class: constructor (from fields/properties), Equals/GetHashCode (value equality), and/or ToString. Inserts the generated code into the class and writes to disk. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When a class needs boilerplate, use this INSTEAD OF hand-writing it: it generates a constructor (from fields/properties), value-equality Equals/GetHashCode, and/or ToString " +
+        "from the class's actual members, inserts them and writes to disk. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> GenerateMembers(
         [Description("Name of the class to generate members for")] string className,
         [Description("Generate a constructor that assigns all eligible fields/properties (default: true)")] bool generateConstructor = true,
@@ -19,9 +22,9 @@ public static class GenerateMembersTool
         [Description("Generate a ToString returning a readable summary of all eligible fields/properties (default: true)")] bool generateToString = true,
         [Description("Dry run â€” return generated code without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(
             solution,

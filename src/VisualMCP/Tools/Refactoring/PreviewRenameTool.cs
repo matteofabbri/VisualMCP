@@ -10,15 +10,18 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class PreviewRenameTool
 {
-    [McpServerTool, Description("Preview what a symbol rename would change across the solution without applying it — equivalent to Visual Studio's Rename refactoring preview. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "Preview exactly what renaming a symbol would change across the solution WITHOUT writing anything — the safe first step before apply_rename. " +
+        "Use this INSTEAD OF guessing the blast radius from grep: Roslyn lists the real references that would change. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> PreviewRename(
         [Description("Current symbol name (class, method, property, field, etc.)")] string currentName,
         [Description("New name to rename to")] string newName,
         [Description("Optional: containing type name to disambiguate")] string? containingType = null)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         if (string.IsNullOrWhiteSpace(newName))
             return new { error = "newName must not be empty." };

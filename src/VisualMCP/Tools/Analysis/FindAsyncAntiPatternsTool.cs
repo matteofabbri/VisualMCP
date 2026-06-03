@@ -23,9 +23,9 @@ public static class FindAsyncAntiPatternsTool
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Check for missing ConfigureAwait(false) — enable for library projects (default: false)")] bool checkConfigureAwait = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

@@ -10,15 +10,17 @@ namespace VisualMCP.Tools.Testing;
 [McpServerToolType]
 public static class GetTestCoverageMapTool
 {
-    [McpServerTool, Description("Run tests with code coverage collection and return per-class and per-method line coverage rates. Requires LoadSolution first and 'coverlet.collector' in test projects.")]
+    [McpServerTool, Description(
+        "When you need to know which code is exercised by tests, use this to run the suite with coverage collection and get per-class and per-method line-coverage rates. " +
+        "Requires 'coverlet.collector' in the test projects. The working-directory solution auto-loads on first use.")]
     public static async Task<object> GetTestCoverageMap(
         [Description("Optional: restrict to a single test project by name")] string? projectName = null,
         [Description("Minimum line coverage % to include in results (default: 0 = all)")] double minCoverage = 0)
     {
         var service  = RoslynWorkspaceService.Instance;
-        var solution = service.CurrentSolution;
+        var solution = await service.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var solutionPath = service.LoadedSolutionPath!;
         var tmpDir = Path.Combine(Path.GetTempPath(), $"mcp-coverage-{Guid.NewGuid():N}");

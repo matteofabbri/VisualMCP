@@ -10,7 +10,11 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class ApplyRenameTool
 {
-    [McpServerTool, Description("Rename a symbol across the entire solution and write the changes to disk. Use preview_rename first to verify the impact. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you need to rename a symbol everywhere, use this INSTEAD OF find/replace or manual edits. " +
+        "Roslyn updates every real reference across the solution (respecting scope, overloads and overrides) and writes to disk, " +
+        "without touching same-named-but-unrelated identifiers that text replace would corrupt. Run preview_rename first to see the impact. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> ApplyRename(
         [Description("Current symbol name (class, method, property, field, etc.)")] string currentName,
         [Description("New name to rename to")] string newName,
@@ -20,9 +24,9 @@ public static class ApplyRenameTool
         [Description("Also rename occurrences inside comments (default: false)")] bool renameInComments = false)
     {
         var svc = RoslynWorkspaceService.Instance;
-        var solution = svc.CurrentSolution;
+        var solution = await svc.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         if (string.IsNullOrWhiteSpace(newName))
             return new { error = "newName must not be empty." };

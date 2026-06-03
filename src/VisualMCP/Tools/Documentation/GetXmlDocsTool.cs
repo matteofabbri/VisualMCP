@@ -10,14 +10,17 @@ namespace VisualMCP.Tools.Documentation;
 [McpServerToolType]
 public static class GetXmlDocsTool
 {
-    [McpServerTool, Description("Return the XML documentation comment for a named symbol, parsed into structured fields (summary, params, returns, exceptions, remarks). Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you need a symbol's XML documentation parsed into structured fields (summary, params, returns, exceptions, remarks), use this INSTEAD OF reading the comment block by hand. " +
+        "It resolves the symbol and parses the doc XML for you, including docs inherited via <inheritdoc>. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> GetXmlDocs(
         [Description("Symbol name (type, method, property, field, event)")] string symbolName,
         [Description("Optional: containing type name to disambiguate")] string? containingType = null)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(
             solution,

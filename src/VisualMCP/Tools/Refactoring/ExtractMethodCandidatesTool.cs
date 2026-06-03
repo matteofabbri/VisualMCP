@@ -10,15 +10,18 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class ExtractMethodCandidatesTool
 {
-    [McpServerTool, Description("Identify code blocks within long methods that are good candidates for extraction into separate methods: consecutive statements that form a cohesive unit (same local variables, single responsibility). Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want to break up long methods, use this INSTEAD OF eyeballing the source: it analyses data flow via Roslyn to find cohesive statement blocks " +
+        "(shared locals, single responsibility) that are good Extract Method candidates, and reports their location and span. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> ExtractMethodCandidates(
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Minimum method length in lines to analyse (default: 30)")] int minMethodLines = 30,
         [Description("Minimum block size in lines to suggest extraction (default: 8)")] int minBlockLines = 8)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

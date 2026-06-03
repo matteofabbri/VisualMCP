@@ -10,12 +10,12 @@ namespace VisualMCP.Tools.IO;
 public static class GetProjectInfoTool
 {
     [McpServerTool, Description("Return detailed info about a project in the loaded solution: source files, project references, NuGet packages, and diagnostics. Requires LoadSolution to have been called first.")]
-    public static object GetProjectInfo(
+    public static async Task<object> GetProjectInfo(
         [Description("Project name (as returned by load_solution) or absolute path to the .csproj file")] string nameOrPath)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var project = FindProject(solution, nameOrPath);
         if (project is null)

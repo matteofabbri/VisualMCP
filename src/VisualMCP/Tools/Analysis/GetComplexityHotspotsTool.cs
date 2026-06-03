@@ -22,9 +22,9 @@ public static class GetComplexityHotspotsTool
         [Description("Number of top hotspots to return (default: 20)")] int topN = 20,
         [Description("Minimum cyclomatic complexity to include (default: 5)")] int minComplexity = 5)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

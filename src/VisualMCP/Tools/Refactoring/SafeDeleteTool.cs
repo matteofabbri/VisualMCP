@@ -11,15 +11,18 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class SafeDeleteTool
 {
-    [McpServerTool, Description("Delete a symbol (type, method, property, field) from source only if it has zero references in the solution. Refuses and lists all references if any exist â€” equivalent to ReSharper Safe Delete. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want to remove a type/method/property/field, use this INSTEAD OF deleting by hand: it first verifies via Roslyn that the symbol has zero references in the solution, " +
+        "and refuses (listing every reference) if any exist — the ReSharper Safe Delete behaviour that prevents breaking the build. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> SafeDelete(
         [Description("Symbol name to delete (class, method, property, field, etc.)")] string symbolName,
         [Description("Optional: containing type name to disambiguate")] string? containingType = null,
         [Description("Dry run â€” verify safety without deleting (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(
             solution,

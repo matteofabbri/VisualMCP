@@ -11,15 +11,18 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class MoveTypeTool
 {
-    [McpServerTool, Description("Move a type declaration to a new file whose name matches the type name (e.g. MyClass -> MyClass.cs in the same directory). Equivalent to ReSharper 'Move to File'. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want a type in its own file named after it (e.g. MyClass -> MyClass.cs), use this INSTEAD OF cut-and-paste: " +
+        "it moves the declaration and preserves the namespace and required usings (ReSharper 'Move to File'). " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> MoveType(
         [Description("Name of the type to move (class, struct, interface, enum, record)")] string typeName,
         [Description("Optional: target directory for the new file. Defaults to the same directory as the source file.")] string? targetDirectory = null,
         [Description("Dry run â€” show what would happen without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // Find the type symbol
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(

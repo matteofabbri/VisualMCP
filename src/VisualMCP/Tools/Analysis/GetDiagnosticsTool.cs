@@ -18,9 +18,9 @@ public static class GetDiagnosticsTool
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Minimum severity to include: Error, Warning, Info, Hidden (default: Warning)")] string minSeverity = "Warning")
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var threshold = minSeverity.ToLowerInvariant() switch
         {

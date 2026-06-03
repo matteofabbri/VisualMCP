@@ -9,14 +9,17 @@ namespace VisualMCP.Tools.Navigation;
 [McpServerToolType]
 public static class FindCallersTool
 {
-    [McpServerTool, Description("Find all methods/properties that call a given method or access a given property — the Call Hierarchy view from Visual Studio. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you need to know who calls a method/constructor or accesses a property (the Visual Studio Call Hierarchy), use this INSTEAD OF grep. " +
+        "It resolves callers semantically through overloads and interface dispatch, which plain text search cannot do. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> FindCallers(
         [Description("Name of the method, property, or constructor to analyse")] string symbolName,
         [Description("Optional: containing type name to disambiguate overloads")] string? containingType = null)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(
             solution,

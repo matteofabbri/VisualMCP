@@ -7,7 +7,10 @@ namespace VisualMCP.Tools.IO;
 [McpServerToolType]
 public static class CheckSolutionTool
 {
-    [McpServerTool, Description("Check whether a .NET C# solution is currently loaded. Call this before any other tool. If the result says no solution is loaded, stop — there is nothing this plugin can do for the current workspace.")]
+    [McpServerTool, Description(
+        "Report whether a C# solution is currently loaded, and basic info about it (path, project count, whether it contains C#). " +
+        "Tools auto-load the working-directory solution on demand, so you normally do NOT need to call this first — " +
+        "use it to inspect workspace state or to confirm which solution was auto-loaded.")]
     public static object CheckSolution()
     {
         var svc = RoslynWorkspaceService.Instance;

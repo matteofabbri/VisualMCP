@@ -20,9 +20,9 @@ public static class AnalyzeCircularNamespaceDependenciesTool
     public static async Task<object> AnalyzeCircularNamespaceDependencies(
         [Description("Optional: restrict analysis to namespaces whose name contains this string")] string? namespaceFilter = null)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // Build directed graph: ns -> set of namespaces it depends on
         var graph = new Dictionary<string, HashSet<string>>();

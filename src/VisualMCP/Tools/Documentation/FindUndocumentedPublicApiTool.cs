@@ -9,14 +9,17 @@ namespace VisualMCP.Tools.Documentation;
 [McpServerToolType]
 public static class FindUndocumentedPublicApiTool
 {
-    [McpServerTool, Description("Find all public/protected symbols (types and members) that have no XML documentation comment. Useful before publishing a library. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you need to find public/protected types and members that lack XML doc comments (e.g. before publishing a library), use this INSTEAD OF scanning files manually. " +
+        "Roslyn enumerates the real public surface across the whole solution, so nothing is missed and internal members are correctly excluded. " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> FindUndocumentedPublicApi(
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Include protected members in addition to public (default: true)")] bool includeProtected = true)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

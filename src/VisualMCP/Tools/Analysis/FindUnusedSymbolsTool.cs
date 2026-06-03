@@ -20,9 +20,9 @@ public static class FindUnusedSymbolsTool
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Symbol kinds to check — comma-separated: Type,Method,Property,Field,Event (default: Type,Method)")] string kinds = "Type,Method")
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var kindSet = kinds.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                           .Select(k => k.ToLowerInvariant())

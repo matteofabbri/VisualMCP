@@ -25,9 +25,9 @@ public static class PlanFeatureChangeTool
         [Description("Optional: containing type name to disambiguate (e.g. if the method name is not unique)")] string? containingType = null,
         [Description("Include transitive callers (callers of callers) up to this depth — 0 means direct only (default: 1)")] int callerDepth = 1)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // ── 1. Resolve the target symbol ──────────────────────────────────────
         var allDeclarations = await SymbolFinder.FindSourceDeclarationsAsync(

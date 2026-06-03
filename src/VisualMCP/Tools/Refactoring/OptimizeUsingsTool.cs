@@ -10,16 +10,19 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class OptimizeUsingsTool
 {
-    [McpServerTool, Description("Remove unused 'using' directives and optionally sort the remaining ones alphabetically, then write changes to disk. Equivalent to ReSharper 'Optimize Usings' / CodeMaid cleanup. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want to clean up 'using' directives, use this INSTEAD OF hand-pruning: Roslyn knows which usings are actually unused (text inspection cannot), " +
+        "removes them, optionally sorts the rest, and writes to disk (ReSharper 'Optimize Usings'). " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> OptimizeUsings(
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Optional: restrict to a single file by absolute path")] string? filePath = null,
         [Description("Sort remaining using directives alphabetically (default: true)")] bool sort = true,
         [Description("Dry run â€” report changes without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

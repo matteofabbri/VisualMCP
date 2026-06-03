@@ -26,9 +26,9 @@ public static class ChangeSignatureTool
         [Description("For removed required parameters: literal expression to insert at every call site, keyed by parameter name. E.g. {\"count\": \"0\"}")] Dictionary<string, string>? defaultForRemoved = null,
         [Description("Dry run â€” show changes without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // Find the method symbol
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(

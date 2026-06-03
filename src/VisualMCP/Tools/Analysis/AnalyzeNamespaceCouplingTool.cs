@@ -20,9 +20,9 @@ public static class AnalyzeNamespaceCouplingTool
         [Description("Optional: restrict analysis to namespaces whose name contains this string")] string? namespaceFilter = null,
         [Description("Only return namespaces with instability above this threshold (0.0–1.0, default: 0 = all)")] double minInstability = 0.0)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // Map: namespace -> set of namespaces it depends on (efferent)
         var efferent = new Dictionary<string, HashSet<string>>();

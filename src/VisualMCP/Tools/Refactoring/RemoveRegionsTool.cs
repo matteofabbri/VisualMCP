@@ -10,15 +10,17 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class RemoveRegionsTool
 {
-    [McpServerTool, Description("Remove all #region and #endregion directives from source files, leaving the code inside intact. Equivalent to CodeMaid 'Remove Regions'. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want to strip #region/#endregion directives, use this INSTEAD OF hand-editing: it removes them across files while leaving the enclosed code intact " +
+        "(CodeMaid 'Remove Regions'). The working-directory solution auto-loads on first use.")]
     public static async Task<object> RemoveRegions(
         [Description("Optional: restrict to a single project by name")] string? projectName = null,
         [Description("Optional: restrict to a single file by absolute path")] string? filePath = null,
         [Description("Dry run â€” report which files would change without writing (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))

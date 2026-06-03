@@ -18,9 +18,9 @@ public static class RunTestsTool
         [Description("Optional: extra arguments forwarded verbatim to 'dotnet test' (e.g. '--no-build', '--configuration Release')")] string? extraArgs = null)
     {
         var service  = RoslynWorkspaceService.Instance;
-        var solution = service.CurrentSolution;
+        var solution = await service.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var solutionPath = service.LoadedSolutionPath!;
 

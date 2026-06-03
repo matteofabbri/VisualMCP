@@ -11,16 +11,19 @@ namespace VisualMCP.Tools.Refactoring;
 [McpServerToolType]
 public static class EncapsulateFieldTool
 {
-    [McpServerTool, Description("Encapsulate a field: make it private, generate a public property with get/set, and update all references in the solution to use the property name. Equivalent to ReSharper 'Encapsulate Field'. Requires LoadSolution first.")]
+    [McpServerTool, Description(
+        "When you want to wrap a field in a property, use this INSTEAD OF manual edits: it makes the field private, generates a public get/set property, " +
+        "and rewrites every reference across the solution to use the property (ReSharper 'Encapsulate Field'). " +
+        "The working-directory solution auto-loads on first use.")]
     public static async Task<object> EncapsulateField(
         [Description("Name of the field to encapsulate")] string fieldName,
         [Description("Containing type name to disambiguate (required if multiple types have a field with this name)")] string? containingType = null,
         [Description("Name for the generated property (default: PascalCase version of the field name)")] string? propertyName = null,
         [Description("Dry run â€” show changes without writing to disk (default: false)")] bool dryRun = false)
     {
-        var solution = RoslynWorkspaceService.Instance.CurrentSolution;
+        var solution = await RoslynWorkspaceService.Instance.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No solution loaded. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         // Find the field symbol
         var candidates = await SymbolFinder.FindSourceDeclarationsAsync(
