@@ -43,7 +43,11 @@ static async Task RunServerAsync(string[] args)
         "- Rename, extract, change signature, move type, etc. -> the Refactoring tools (semantic and safe, " +
         "they update every reference; do NOT hand-edit for these).\n" +
         "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n" +
-        "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n\n" +
+        "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
+        "- Check if the solution/project compiles and get structured errors/warnings -> build_project " +
+        "(runs 'dotnet build', works even while the app is running).\n" +
+        "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
+        "- Test a SignalR hub (connect, subscribe, invoke, drain events) -> signalr_connect / signalr_subscribe / signalr_invoke / signalr_events / signalr_disconnect.\n\n" +
         "SETUP: The solution in the working directory is auto-discovered and loaded on demand, so you can " +
         "call any tool directly. Only call load_solution if a tool reports that no solution could be located, " +
         "or to target a specific .sln/.slnx by path. Use list_analysis_tools for the full catalogue.";

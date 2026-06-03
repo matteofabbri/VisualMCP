@@ -1,6 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
-using System.Text;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 using VisualMCP.Workspace;
@@ -86,60 +84,9 @@ public static class RunProjectTool
     private static bool IsRunnable(Project p) =>
         p.CompilationOptions?.OutputKind is OutputKind.ConsoleApplication or OutputKind.WindowsApplication;
 
-    private static string Truncate(string s, int max = 16000) =>
-        s.Length <= max ? s : s[..max] + $"\n…(truncated, {s.Length - max} more chars)";
+    private static string Truncate(string s, int max = 16000) => ProcessRunner.Truncate(s, max);
 
-    private static async Task<(int exitCode, bool timedOut, string stdout, string stderr, TimeSpan elapsed)>
-        ExecWithTimeoutAsync(string exe, string args, string workingDir, int timeoutSeconds)
-    {
-        var psi = new ProcessStartInfo(exe, args)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-            WorkingDirectory       = workingDir,
-        };
-
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-
-        using var proc = new Process { StartInfo = psi };
-        proc.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (stdout) stdout.AppendLine(e.Data); };
-        proc.ErrorDataReceived  += (_, e) => { if (e.Data is not null) lock (stderr) stderr.AppendLine(e.Data); };
-
-        var sw = Stopwatch.StartNew();
-        proc.Start();
-        proc.BeginOutputReadLine();
-        proc.BeginErrorReadLine();
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-        var timedOut = false;
-        try
-        {
-            await proc.WaitForExitAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            timedOut = true;
-            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-            try { await proc.WaitForExitAsync(); } catch { /* best-effort */ }
-        }
-        sw.Stop();
-
-        // Ensure buffered async output is flushed.
-        try { proc.WaitForExit(500); } catch { /* best-effort */ }
-
-        string outStr, errStr;
-        lock (stdout) outStr = stdout.ToString();
-        lock (stderr) errStr = stderr.ToString();
-
-        var exitCode = timedOut ? -1 : SafeExitCode(proc);
-        return (exitCode, timedOut, outStr, errStr, sw.Elapsed);
-    }
-
-    private static int SafeExitCode(Process p)
-    {
-        try { return p.ExitCode; } catch { return -1; }
-    }
+    private static Task<(int exitCode, bool timedOut, string stdout, string stderr, TimeSpan elapsed)>
+        ExecWithTimeoutAsync(string exe, string args, string workingDir, int timeoutSeconds) =>
+        ProcessRunner.RunAsync(exe, args, workingDir, timeoutSeconds);
 }
