@@ -44,6 +44,7 @@ static async Task RunServerAsync(string[] args)
         "they update every reference; do NOT hand-edit for these).\n" +
         "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n" +
         "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
+        "- Run a build/export/packaging script or any shell command (incl. nested PowerShell, pipes, redirection) -> run_command.\n" +
         "- Check if the solution/project compiles and get structured errors/warnings -> build_project " +
         "(runs 'dotnet build', works even while the app is running).\n" +
         "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
