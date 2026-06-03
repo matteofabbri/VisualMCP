@@ -13,6 +13,7 @@ internal static class ProcessRunner
         {
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
+            RedirectStandardInput  = true,   // don't let children inherit the MCP stdio pipe
             UseShellExecute        = false,
             CreateNoWindow         = true,
             WorkingDirectory       = workingDir,
@@ -27,6 +28,9 @@ internal static class ProcessRunner
 
         var sw = Stopwatch.StartNew();
         proc.Start();
+        // Give the child an immediate EOF on stdin instead of the inherited
+        // server pipe — otherwise shells like bash block waiting for input.
+        try { proc.StandardInput.Close(); } catch { /* best-effort */ }
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
 
