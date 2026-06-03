@@ -4,10 +4,7 @@
       "type": "stdio",
       "command": "dotnet",
       "args": [
-        "run",
-        "--project",
-        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VisualMCP\\VisualMCP.csproj",
-        "--no-build"
+        "C:\\REPOSITORY\\VisualMCP\\src\\VisualMCP\\bin\\Debug\\net10.0\\VisualMCP.dll"
       ]
     }
   }
