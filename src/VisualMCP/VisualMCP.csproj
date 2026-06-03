@@ -7,7 +7,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>VisualMCP</AssemblyName>
     <RootNamespace>VisualMCP</RootNamespace>
-    <PublishSingleFile>true</PublishSingleFile>
+    <!-- PublishSingleFile must stay OFF: Roslyn's MSBuildWorkspace locates its
+         out-of-process BuildHost via the assembly location, which is empty in a
+         single-file bundle and throws ArgumentNullException (Path.Combine) on
+         the first solution load. A normal folder publish keeps the BuildHost
+         discoverable next to the exe. -->
+    <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
