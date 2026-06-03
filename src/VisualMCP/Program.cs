@@ -42,7 +42,8 @@ static async Task RunServerAsync(string[] args)
         "(reliable detection needs the control-flow graph, which only Roslyn can build — do NOT infer these by reading source).\n" +
         "- Rename, extract, change signature, move type, etc. -> the Refactoring tools (semantic and safe, " +
         "they update every reference; do NOT hand-edit for these).\n" +
-        "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n\n" +
+        "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n" +
+        "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n\n" +
         "SETUP: The solution in the working directory is auto-discovered and loaded on demand, so you can " +
         "call any tool directly. Only call load_solution if a tool reports that no solution could be located, " +
         "or to target a specific .sln/.slnx by path. Use list_analysis_tools for the full catalogue.";
