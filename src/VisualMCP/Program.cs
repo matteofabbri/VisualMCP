@@ -61,7 +61,8 @@ static async Task RunServerAsync(string[] args)
                     options.ServerInstructions = ServerInstructions;
                 })
                 .WithStdioServerTransport()
-                .WithToolsFromAssembly();
+                .WithToolsFromAssembly()
+                .WithToolCallLogging();
         })
         .Build();
 
