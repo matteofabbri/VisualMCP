@@ -1,4 +1,4 @@
-﻿# VsSolutionPlugin
+﻿# VisualMCP
 
 An MCP (Model Context Protocol) server that lets Claude Code read, navigate, and analyse Visual Studio solutions as if it were Visual Studio — using Roslyn's `MSBuildWorkspace` for full semantic understanding.
 
@@ -69,51 +69,71 @@ This is the same model as a Language Server Protocol (LSP) server: when Visual S
 
 ## Installation
 
-### Automatic (recommended)
+The install script builds a stable single-file Release executable, places it in
+`%USERPROFILE%\.claude\mcp-servers\VisualMCP\app\`, and registers it with Claude
+Code at the **scope you choose**. After any install/uninstall, **restart Claude
+Code** so it reloads its configuration.
 
-Run the install script from the repository root — it builds a release executable, places it in `%USERPROFILE%\.claude\mcp-servers\VisualMCP\`, and registers it in Claude Code's global config (`%USERPROFILE%\.claude.json`) so it is available in every project.
+### Choose a scope
+
+| Scope | Availability | Stored in | Use when |
+|-------|--------------|-----------|----------|
+| `user` *(default)* | Every folder on this machine — global | `%USERPROFILE%\.claude.json` | You want it everywhere |
+| `local` | Only the chosen project folder, private to you | `%USERPROFILE%\.claude.json` (keyed to that folder) | You want it for one project without affecting others or your team |
+| `project` | The chosen project, **shared** via a committed file | `.mcp.json` in the project | You want teammates to get it too |
 
 ```powershell
-# PowerShell
-.\install.ps1
+# Global (default) — available in every project
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 
-# Or Command Prompt
-install.bat
+# Just this one project, private to you (run from the project, or pass -ProjectDir)
+cd C:\REPOSITORY\MyApp
+powershell -ExecutionPolicy Bypass -File C:\REPOSITORY\VisualMCP\scripts\install.ps1 -Scope local
+
+# Shared with the team via a committed .mcp.json
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope project -ProjectDir C:\REPOSITORY\MyApp
 ```
 
-To remove it:
+`scripts\install-global.ps1` is a shortcut for `install.ps1 -Scope user`.
+
+To remove it (match the scope you installed with):
 
 ```powershell
-.\install.ps1 -Uninstall   # or: install.bat /uninstall
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope user  -Uninstall
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope local -Uninstall -ProjectDir C:\REPOSITORY\MyApp
 ```
 
-After installation, **restart Claude Code** — the server will appear automatically.
+> **`project` scope and teams:** the generated `.mcp.json` records this machine's
+> absolute path to the published `.exe`. Teammates on other machines must run the
+> script themselves (the path won't exist for them). For a fully portable team
+> setup, commit a `dotnet run`-based `.mcp.json` instead (see *Development* below).
 
 ---
 
 **Why the install script is better than `dotnet run`**
 
-There are two ways to register the server in Claude Code:
-
 | | `dotnet run --project ...` | installed exe |
 |---|---|---|
 | Startup | slow — compiles on every launch | fast — pre-built Release binary |
-| Scope | only works if the repo is at that exact path | global, works in any project |
+| Output | build text can corrupt the stdio protocol | clean |
 | After a code change | picks it up automatically | requires re-running the install script |
 
-The `.mcp.json` at the root of this repo uses `dotnet run` for development convenience (code changes are reflected immediately). The install script produces a stable Release build that is better suited for daily use.
+The `.mcp.json` at the root of this repo points at the built **Debug** DLL for
+development convenience. The install script produces a stable Release build that
+is better suited for daily use.
 
 ---
 
 ### Manual quick start
 
-If you want to run it without installing:
+If you want to run it without the script, build it:
 
 ```powershell
 dotnet build src/VisualMCP/VisualMCP.csproj
 ```
 
-Then add to your project's `.mcp.json`:
+Then add to your project's `.mcp.json` (point at the built DLL — running the
+assembly directly avoids `dotnet run`'s build output corrupting the protocol):
 
 ```json
 {
@@ -122,15 +142,15 @@ Then add to your project's `.mcp.json`:
       "type": "stdio",
       "command": "dotnet",
       "args": [
-        "run",
-        "--project",
-        "C:\\REPOSITORY\\VsSolutionPlugin\\src\\VisualMCP\\VisualMCP.csproj",
-        "--no-build"
+        "C:\\REPOSITORY\\VisualMCP\\src\\VisualMCP\\bin\\Debug\\net10.0\\VisualMCP.dll"
       ]
     }
   }
 }
 ```
+
+The solution in the working directory is **auto-discovered and loaded on demand**,
+so you can call any tool right away — no explicit `load_solution` step needed.
 
 ### Use the `/vs-load` skill
 
@@ -159,7 +179,7 @@ maxDepth   – recursion depth (default: 3)
 path       – absolute path to the .sln or .slnx file
 ```
 
-Loads the solution into memory. **Must be called before any other tool that reads solution data.** Returns project list and workspace diagnostics (MSBuild warnings/errors).
+Loads the solution into memory. **Usually unnecessary** — tools auto-discover and load the working-directory solution on first use. Call this only to target a specific `.sln`/`.slnx` by path, or if a tool reports none could be located. Returns project list and workspace diagnostics (MSBuild warnings/errors).
 
 ### `get_project_info`
 
