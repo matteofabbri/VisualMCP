@@ -1,16 +1,11 @@
 using VisualMCP.Tools.Execution;
 using VisualMCP.Workspace;
 
-namespace VisualMCP.Tools.Git;
+namespace VisualMCP.Implementation.Git;
 
-/// <summary>Shared helper for the read-only git tools.</summary>
+/// <summary>Shared helper for the git tools.</summary>
 internal static class GitCli
 {
-    /// <summary>
-    /// Resolves the git repository root to operate on: the loaded solution's
-    /// directory (if any) otherwise the server's working directory, then the
-    /// enclosing git top-level. Does not force a solution load.
-    /// </summary>
     internal static async Task<(string? repoDir, object? error)> ResolveRepoAsync()
     {
         var sln = RoslynWorkspaceService.Instance.LoadedSolutionPath;
