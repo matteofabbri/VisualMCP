@@ -2,3 +2,7 @@ bin/
 obj/
 *.user
 .vs/
+
+# Throwaway tool-verification artifacts
+_*.txt
+*.tmp.txt
