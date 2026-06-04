@@ -1,4 +1,4 @@
-using VisualMCP.Tools.Execution;
+using VisualMCP.Implementation.Execution;
 using VisualMCP.Workspace;
 
 namespace VisualMCP.Implementation.SolutionManagement;

@@ -1,6 +1,4 @@
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using VisualMCP.Tools.Execution;
+using VisualMCP.Implementation.Execution;
 
 namespace VisualMCP.Implementation.Git;
 

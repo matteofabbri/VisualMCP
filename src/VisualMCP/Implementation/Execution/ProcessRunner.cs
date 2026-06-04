@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace VisualMCP.Tools.Execution;
+namespace VisualMCP.Implementation.Execution;
 
 /// <summary>Shared helper for running external processes with a timeout.</summary>
 internal static class ProcessRunner
@@ -48,7 +48,6 @@ internal static class ProcessRunner
         }
         sw.Stop();
 
-        // Flush async buffers.
         try { proc.WaitForExit(500); } catch { /* best-effort */ }
 
         string outStr, errStr;
