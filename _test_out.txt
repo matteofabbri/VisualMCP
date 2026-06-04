@@ -1,0 +1,10 @@
+update: updated=1 done=1/3 remaining=2
+read_project_docs: fileCount=8 totalDocFiles=8 root=C:\REPOSITORY\VisualMCP
+   CLAUDE_PROJECT_RULES.md (5472b)
+   docs\resharper-codemaid-coverage.md (4131b)
+   memory\MEMORY.md (196b)
+   memory\project_missing_tools.md (1493b)
+   README.md (12093b)
+   skills\vs-init\SKILL.md (3597b)
+   skills\vs-load\SKILL.md (611b)
+   _test_checklist.md (206b)
