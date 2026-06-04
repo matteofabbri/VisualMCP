@@ -2,25 +2,16 @@ using System.Text.Json;
 using VisualMCP.Tools.Execution;
 using VisualMCP.Workspace;
 
-namespace VisualMCP.Tools.Packages;
+namespace VisualMCP.Implementation.Packages;
 
-/// <summary>
-/// Shared helper around `dotnet list package --format json` for the NuGet tools.
-/// </summary>
+/// <summary>Shared helper around `dotnet list package --format json` for the NuGet tools.</summary>
 internal static class NuGetCli
 {
     internal sealed record Package(
-        string Project,
-        string Framework,
-        string Id,
-        string? Requested,
-        string? Resolved,
-        string? Latest,
-        bool Transitive,
-        List<object> Vulnerabilities,
-        List<string> DeprecationReasons);
+        string Project, string Framework, string Id,
+        string? Requested, string? Resolved, string? Latest,
+        bool Transitive, List<object> Vulnerabilities, List<string> DeprecationReasons);
 
-    /// <summary>Resolves the .sln/.slnx (or a single .csproj) to run `dotnet list` against.</summary>
     internal static async Task<(string? target, object? error)> ResolveTargetAsync(string? projectName)
     {
         var svc = RoslynWorkspaceService.Instance;
@@ -46,7 +37,6 @@ internal static class NuGetCli
         error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx."
     };
 
-    /// <summary>Runs `dotnet list &lt;target&gt; package &lt;flags&gt; --format json` and parses the result.</summary>
     internal static async Task<(List<Package>? packages, object? error)> ListAsync(
         string target, string extraFlags, int timeoutSeconds)
     {
@@ -67,14 +57,8 @@ internal static class NuGetCli
                 output = ProcessRunner.Truncate(string.IsNullOrWhiteSpace(stderr) ? stdout : stdout + "\n" + stderr, 2000),
             });
 
-        try
-        {
-            return (Parse(stdout[jsonStart..]), null);
-        }
-        catch (Exception ex)
-        {
-            return (null, new { error = $"Failed to parse dotnet output: {ex.Message}", output = ProcessRunner.Truncate(stdout, 2000) });
-        }
+        try { return (Parse(stdout[jsonStart..]), null); }
+        catch (Exception ex) { return (null, new { error = $"Failed to parse dotnet output: {ex.Message}", output = ProcessRunner.Truncate(stdout, 2000) }); }
     }
 
     private static List<Package> Parse(string json)
