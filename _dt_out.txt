@@ -1,0 +1,5 @@
+extract: encoding=utf-16 errors=2 warnings=1
+   ERR: foo.cpp(12,5): error C2065: 'x': undeclared identifier
+   ERR: bar.obj : error LNK2019: unresolved external symbol baz
+   WARN: qux.cpp(3): warning C4100: 'p': unreferenced formal parameter
+docker: available=True client=29.5.2 server=29.5.2 reason= containers=1
