@@ -52,6 +52,11 @@ static async Task RunServerAsync(string[] args)
         "(runs 'dotnet build', works even while the app is running).\n" +
         "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
         "- Test a SignalR hub (connect, subscribe, invoke, drain events) -> signalr_connect / signalr_subscribe / signalr_invoke / signalr_events / signalr_disconnect.\n\n" +
+        "WORKFLOW:\n" +
+        "- When you START working on a solution, first call read_project_docs to read its README/Markdown/" +
+        "docs (indexed automatically when the solution opens) and understand the project before reading code.\n" +
+        "- When a task has MULTIPLE steps, call create_task_checklist at the start to write a Markdown " +
+        "Task|Done table, then update_task_checklist to tick steps off as you complete them.\n\n" +
         "SETUP: The solution in the working directory is auto-discovered and loaded on demand, so you can " +
         "call any tool directly. Only call load_solution if a tool reports that no solution could be located, " +
         "or to target a specific .sln/.slnx by path. Use list_analysis_tools for the full catalogue.";

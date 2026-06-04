@@ -122,6 +122,9 @@ public sealed class RoslynWorkspaceService : IDisposable
             CurrentSolution = await _workspace.OpenSolutionAsync(solutionPath, cancellationToken: ct);
             LoadedSolutionPath = solutionPath;
 
+            // Pre-index the solution's Markdown/documentation so it is ready to read.
+            ProjectDocsService.WarmInBackground(Path.GetDirectoryName(solutionPath));
+
             return new SolutionLoadResult(CurrentSolution, diagnostics);
         }
         finally
