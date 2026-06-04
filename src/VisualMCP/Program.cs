@@ -47,6 +47,7 @@ static async Task RunServerAsync(string[] args)
         "- Run a build/export/packaging script or any shell command — PowerShell, pwsh, cmd or bash (incl. nested shells, pipes, grep/sed, redirection, or commands too long for the normal shell) -> run_command.\n" +
         "- Free a locked build output / restart the server (e.g. a 'file in use' error when rebuilding) -> stop_server.\n" +
         "- Check the local toolchain (dotnet SDKs/runtimes, Visual Studio & MSVC cl.exe via vswhere, OS, and the size of given files/libraries) -> get_environment_info.\n" +
+        "- Manage NuGet packages: versions & version conflicts -> list_nuget_packages; available upgrades -> check_nuget_updates; known CVEs/advisories -> check_nuget_vulnerabilities.\n" +
         "- Check if the solution/project compiles and get structured errors/warnings -> build_project " +
         "(runs 'dotnet build', works even while the app is running).\n" +
         "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
