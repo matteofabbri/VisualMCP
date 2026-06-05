@@ -44,6 +44,8 @@ static async Task RunServerAsync(string[] args)
         "they update every reference; do NOT hand-edit for these).\n" +
         "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n" +
         "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
+        "- Run the configured Roslyn analyzers (StyleCop/Roslynator/.NET analyzers) and get their diagnostics -> run_code_analysis.\n" +
+        "- Run BenchmarkDotNet benchmarks and get the summary table -> run_benchmarks.\n" +
         "- Run a build/export/packaging script or any shell command — PowerShell, pwsh, cmd or bash (incl. nested shells, pipes, grep/sed, redirection, or commands too long for the normal shell) -> run_command.\n" +
         "- Free a locked build output / restart the server (e.g. a 'file in use' error when rebuilding) -> stop_server.\n" +
         "- Check the local toolchain (dotnet SDKs/runtimes, Visual Studio & MSVC cl.exe via vswhere, OS, and the size of given files/libraries) -> get_environment_info.\n" +
