@@ -270,3 +270,14 @@ dotnet watch --project src/VisualMCP build
 ```
 
 The MCP server communicates over stdio — there is no HTTP endpoint to test directly. Use Claude Code with the MCP registration above, or write an integration test that sends JSON-RPC over stdin.
+
+## License
+
+VisualMCP is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+
+- ✅ **Free for noncommercial use** — individuals, hobby and personal projects, learning, research, education, and other noncommercial organizations may use, modify and share it at no cost.
+- 💼 **Commercial / company use requires a paid license.** Any use by or for a company (or for commercial advantage or monetary compensation) needs a separate commercial license. Contact **me@matteofabbri.org**.
+
+This is **source-available**, not OSI "open source": you can read, fork and contribute, but commercial use is reserved. See [`LICENSE`](LICENSE) for the exact terms.
+
+*This summary is for convenience only and is not legal advice; the [`LICENSE`](LICENSE) file governs.*
