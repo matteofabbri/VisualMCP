@@ -65,6 +65,7 @@ static async Task RunServerAsync(string[] args)
         "- Move or rename a file/directory -> move_path (INSTEAD OF shell mv/Move-Item/git mv). To rename a C# symbol/type/namespace and update all references, use apply_rename (semantic).\n" +
         "- Persistent project memory: recall at the start of work -> memory_read; save/update notes -> memory_write / memory_append (handles the ~/.claude/projects/<slug>/memory files so you don't edit them directly).\n" +
         "- Interact with GitHub (create repo, PRs, issues, releases, runs) -> github (authenticated 'gh' CLI passthrough).\n" +
+        "- Update VisualMCP itself from GitHub Releases: see what's available -> check_for_update; install the latest -> self_update.\n" +
         "- Scaffold project metadata: a LICENSE -> add_license; CONTRIBUTING + CLA -> add_contributing; a multi-OS GitHub Actions build (workflowType 'dotnet-multi-os') or a multi-OS release that publishes binaries to a GitHub Release on a tag ('dotnet-release') -> add_ci_workflow.\n" +
         "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
         "- Test a SignalR hub (connect, subscribe, invoke, drain events) -> signalr_connect / signalr_subscribe / signalr_invoke / signalr_events / signalr_disconnect.\n\n" +

@@ -188,7 +188,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: dotnet publish "{PROJECT}" -c Release -r ${{ matrix.rid }} --self-contained true -o out/${{ matrix.rid }}
+      - run: dotnet publish "{PROJECT}" -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishReadyToRun=true -o out/${{ matrix.rid }}
       - name: Package
         shell: pwsh
         run: Compress-Archive -Path out/${{ matrix.rid }}/* -DestinationPath {APPNAME}-${{ matrix.rid }}.zip

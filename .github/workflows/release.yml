@@ -35,8 +35,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish (self-contained, ${{ matrix.rid }})
-        run: dotnet publish src/VisualMCP/VisualMCP.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o out/${{ matrix.rid }}
+      - name: Publish (self-contained + ReadyToRun, ${{ matrix.rid }})
+        run: dotnet publish src/VisualMCP/VisualMCP.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishReadyToRun=true -o out/${{ matrix.rid }}
 
       - name: Package
         shell: pwsh
