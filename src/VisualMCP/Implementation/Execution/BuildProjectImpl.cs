@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using VisualMCP.Implementation.Analysis;
+using VisualMCP.Implementation.CSharp.Analysis;
 using VisualMCP.Workspace;
 
 namespace VisualMCP.Implementation.Execution;
