@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using VisualMCP.Implementation.Analysis;
 using VisualMCP.Workspace;
 
 namespace VisualMCP.Implementation.Execution;
@@ -9,7 +10,7 @@ internal static class BuildProjectImpl
         @"^(?<file>.+?)(?:\((?<line>\d+),(?<col>\d+)\))?\s*:\s*(?<severity>error|warning)\s+(?<code>[A-Z]{1,3}\d+)\s*:\s*(?<msg>.+?)(?:\s*\[(?<proj>[^\]]+)\])?$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
-    internal static async Task<object> RunAsync(string? projectName, string configuration, bool noCopyOutput, bool restore, int timeoutSeconds)
+    internal static async Task<object> RunAsync(string? projectName, string configuration, bool noCopyOutput, bool restore, int timeoutSeconds, bool runAnalyzers = true)
     {
         string buildTarget;
         string workingDir;
@@ -76,6 +77,16 @@ internal static class BuildProjectImpl
         }
 
         var succeeded = exitCode == 0;
+
+        // Automatically run the configured Roslyn analyzers so a build also flags
+        // analyzer/code-style issues (not just compiler diagnostics).
+        object? analysis = null;
+        if (runAnalyzers)
+        {
+            try { analysis = await RunCodeAnalysisImpl.RunAsync(projectName, "Warning", 200, 120); }
+            catch (Exception ex) { analysis = new { error = $"Analyzer pass failed: {ex.Message}" }; }
+        }
+
         return new
         {
             succeeded, exitCode,
@@ -84,6 +95,7 @@ internal static class BuildProjectImpl
             durationMs = (long)elapsed.TotalMilliseconds,
             command = $"dotnet {argsStr}",
             errors, warnings,
+            analysis,
             rawOutput = errors.Count == 0 && !succeeded ? ProcessRunner.Truncate(combined) : null,
         };
     }

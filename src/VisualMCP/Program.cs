@@ -45,7 +45,7 @@ static async Task RunServerAsync(string[] args)
         "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n" +
         "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
         "- Run the configured Roslyn analyzers (StyleCop/Roslynator/.NET analyzers) and get their diagnostics -> run_code_analysis.\n" +
-        "- Run BenchmarkDotNet benchmarks and get the summary table -> run_benchmarks.\n" +
+        "- Run BenchmarkDotNet benchmarks and get the summary table -> run_benchmarks; benchmark an arbitrary snippet without writing a [Benchmark] class -> quick_benchmark.\n" +
         "- Run a build/export/packaging script or any shell command — PowerShell, pwsh, cmd or bash (incl. nested shells, pipes, grep/sed, redirection, or commands too long for the normal shell) -> run_command.\n" +
         "- Free a locked build output / restart the server (e.g. a 'file in use' error when rebuilding) -> stop_server.\n" +
         "- Check the local toolchain (dotnet SDKs/runtimes, Visual Studio & MSVC cl.exe via vswhere, OS, and the size of given files/libraries) -> get_environment_info.\n" +
@@ -66,7 +66,11 @@ static async Task RunServerAsync(string[] args)
         "- When you START working on a solution, first call read_project_docs to read its README/Markdown/" +
         "docs (indexed automatically when the solution opens) and understand the project before reading code.\n" +
         "- When a task has MULTIPLE steps, call create_task_checklist at the start to write a Markdown " +
-        "Task|Done table, then update_task_checklist to tick steps off as you complete them.\n\n" +
+        "Task|Done table, then update_task_checklist to tick steps off as you complete them.\n" +
+        "- After building, testing, or implementing/changing code, run run_code_analysis (or rely on " +
+        "build_project's automatic analyzer pass) to catch analyzer/code-style issues before moving on.\n" +
+        "- When you change performance-sensitive code, measure it with quick_benchmark (ad-hoc, no [Benchmark] " +
+        "attribute needed) or run_benchmarks for existing BenchmarkDotNet projects.\n\n" +
         "SETUP: The solution in the working directory is auto-discovered and loaded on demand, so you can " +
         "call any tool directly. Only call load_solution if a tool reports that no solution could be located, " +
         "or to target a specific .sln/.slnx by path. Use list_analysis_tools for the full catalogue.";
