@@ -84,21 +84,29 @@ internal static class ScaffoldImpl
         if (derr is not null) return derr;
 
         var type = (workflowType ?? "dotnet-multi-os").Trim().ToLowerInvariant();
-        if (type != "dotnet-multi-os")
-            return new { error = $"Unknown workflowType '{workflowType}'. Supported: dotnet-multi-os." };
+        if (type is not ("dotnet-multi-os" or "dotnet-release"))
+            return new { error = $"Unknown workflowType '{workflowType}'. Supported: dotnet-multi-os, dotnet-release." };
         if (string.IsNullOrWhiteSpace(projectPath))
             return new { error = "projectPath (path to the .csproj/.sln relative to the repo) is required." };
 
-        var safeName = string.IsNullOrWhiteSpace(name) ? "build" : name.Trim();
+        var safeName = string.IsNullOrWhiteSpace(name) ? (type == "dotnet-release" ? "release" : "build") : name.Trim();
         var wfDir = Path.Combine(dir, ".github", "workflows");
         var path = Path.Combine(wfDir, safeName + ".yml");
         if (File.Exists(path) && !overwrite) return new { error = $"Workflow already exists at {path} (set overwrite=true)." };
 
-        var yml = DotnetMultiOsWorkflow.Replace("{NAME}", safeName).Replace("{PROJECT}", projectPath.Replace('\\', '/'));
+        var appName = Path.GetFileNameWithoutExtension(projectPath);
+        var template = type == "dotnet-release" ? DotnetReleaseWorkflow : DotnetMultiOsWorkflow;
+        var yml = template.Replace("{NAME}", safeName).Replace("{PROJECT}", projectPath.Replace('\\', '/')).Replace("{APPNAME}", appName);
         try { Directory.CreateDirectory(wfDir); File.WriteAllText(path, yml); }
         catch (Exception ex) { return new { error = $"Failed to write workflow: {ex.Message}" }; }
 
-        return new { path, workflowType = type, project = projectPath, written = true, note = "Commit and push to GitHub; the workflow runs on push/PR and builds for Windows, Linux and macOS." };
+        return new
+        {
+            path, workflowType = type, project = projectPath, written = true,
+            note = type == "dotnet-release"
+                ? "Commit & push; then push a tag like 'v1.0.0' (or run it manually) to build self-contained binaries for Windows/Linux/macOS and attach them to a GitHub Release."
+                : "Commit & push; the workflow runs on push/PR and builds for Windows, Linux and macOS.",
+        };
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -144,6 +152,50 @@ jobs:
         with:
           name: build-${{ matrix.rid }}
           path: publish/${{ matrix.rid }}
+""";
+
+    private const string DotnetReleaseWorkflow = """
+name: {NAME}
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet publish "{PROJECT}" -c Release -r ${{ matrix.rid }} --self-contained true -o out/${{ matrix.rid }}
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path out/${{ matrix.rid }}/* -DestinationPath {APPNAME}-${{ matrix.rid }}.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: {APPNAME}-${{ matrix.rid }}.zip
 """;
 
     private static readonly Dictionary<string, string> Licenses = new(StringComparer.OrdinalIgnoreCase)
