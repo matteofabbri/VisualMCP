@@ -6,9 +6,9 @@ namespace VisualMCP.Implementation.Git;
 internal static class GitImpl
 {
     // ── status ───────────────────────────────────────────────────────────────
-    internal static async Task<object> StatusAsync()
+    internal static async Task<object> StatusAsync(string? repoPath)
     {
-        var (repoDir, error) = await GitCli.ResolveRepoAsync();
+        var (repoDir, error) = await GitCli.ResolveRepoAsync(repoPath);
         if (error is not null) return error;
 
         var (exitCode, timedOut, stdout, stderr, _) =
@@ -88,12 +88,12 @@ internal static class GitImpl
     private const char RecordSep = (char)0x1e;
     private const char UnitSep   = (char)0x1f;
 
-    internal static async Task<object> LogAsync(int maxCount, string? path)
+    internal static async Task<object> LogAsync(int maxCount, string? path, string? repoPath)
     {
         if (maxCount < 1) maxCount = 1;
         if (maxCount > 200) maxCount = 200;
 
-        var (repoDir, error) = await GitCli.ResolveRepoAsync();
+        var (repoDir, error) = await GitCli.ResolveRepoAsync(repoPath);
         if (error is not null) return error;
 
         const string fmt = "%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e";
@@ -116,9 +116,9 @@ internal static class GitImpl
     }
 
     // ── diff ─────────────────────────────────────────────────────────────────
-    internal static async Task<object> DiffAsync(string target, string? path, bool summaryOnly)
+    internal static async Task<object> DiffAsync(string target, string? path, bool summaryOnly, string? repoPath)
     {
-        var (repoDir, error) = await GitCli.ResolveRepoAsync();
+        var (repoDir, error) = await GitCli.ResolveRepoAsync(repoPath);
         if (error is not null) return error;
 
         var t = (target ?? "working").Trim();
@@ -143,9 +143,9 @@ internal static class GitImpl
     }
 
     // ── stage ────────────────────────────────────────────────────────────────
-    internal static async Task<object> StageAsync(string[]? paths, bool all)
+    internal static async Task<object> StageAsync(string[]? paths, bool all, string? repoPath)
     {
-        var (repoDir, error) = await GitCli.ResolveRepoAsync();
+        var (repoDir, error) = await GitCli.ResolveRepoAsync(repoPath);
         if (error is not null) return error;
 
         string addArgs;
@@ -165,11 +165,11 @@ internal static class GitImpl
     }
 
     // ── commit ───────────────────────────────────────────────────────────────
-    internal static async Task<object> CommitAsync(string message, bool stageAll, bool allowEmpty)
+    internal static async Task<object> CommitAsync(string message, bool stageAll, bool allowEmpty, string? repoPath)
     {
         if (string.IsNullOrWhiteSpace(message)) return new { error = "A commit message is required." };
 
-        var (repoDir, error) = await GitCli.ResolveRepoAsync();
+        var (repoDir, error) = await GitCli.ResolveRepoAsync(repoPath);
         if (error is not null) return error;
 
         if (stageAll)
@@ -208,11 +208,11 @@ internal static class GitImpl
     }
 
     // ── create branch ────────────────────────────────────────────────────────
-    internal static async Task<object> CreateBranchAsync(string name, bool checkout, string? startPoint)
+    internal static async Task<object> CreateBranchAsync(string name, bool checkout, string? startPoint, string? repoPath)
     {
         if (string.IsNullOrWhiteSpace(name)) return new { error = "A branch name is required." };
 
-        var (repoDir, error) = await GitCli.ResolveRepoAsync();
+        var (repoDir, error) = await GitCli.ResolveRepoAsync(repoPath);
         if (error is not null) return error;
 
         var sp = string.IsNullOrWhiteSpace(startPoint) ? "" : $" \"{startPoint}\"";

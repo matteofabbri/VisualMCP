@@ -6,10 +6,20 @@ namespace VisualMCP.Implementation.Git;
 /// <summary>Shared helper for the git tools.</summary>
 internal static class GitCli
 {
-    internal static async Task<(string? repoDir, object? error)> ResolveRepoAsync()
+    internal static async Task<(string? repoDir, object? error)> ResolveRepoAsync(string? repoPath = null)
     {
-        var sln = RoslynWorkspaceService.Instance.LoadedSolutionPath;
-        var startDir = sln is not null ? Path.GetDirectoryName(sln)! : Directory.GetCurrentDirectory();
+        string startDir;
+        if (!string.IsNullOrWhiteSpace(repoPath))
+        {
+            if (!Directory.Exists(repoPath))
+                return (null, new { error = $"Repository path not found: {repoPath}" });
+            startDir = Path.GetFullPath(repoPath);
+        }
+        else
+        {
+            var sln = RoslynWorkspaceService.Instance.LoadedSolutionPath;
+            startDir = sln is not null ? Path.GetDirectoryName(sln)! : Directory.GetCurrentDirectory();
+        }
 
         var (exitCode, timedOut, stdout, stderr, _) =
             await ProcessRunner.RunAsync("git", $"-C \"{startDir}\" rev-parse --show-toplevel", startDir, 20);
