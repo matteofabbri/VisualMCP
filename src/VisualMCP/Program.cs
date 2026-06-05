@@ -60,6 +60,8 @@ static async Task RunServerAsync(string[] args)
         "- Extract errors from a native/C++ or MSBuild log file (handles UTF-16) -> extract_build_log_errors.\n" +
         "- Check Docker engine availability and running containers -> docker_status.\n" +
         "- List a folder's contents/sizes (build output, repo root, a library dir) -> list_directory (read-only; filter by glob/name, optional recurse).\n" +
+        "- Regex-search text across files (C/C++ headers, configs, logs — any language) -> search_text (use INSTEAD OF 'cd … && grep'; for C# symbols prefer find_symbol/find_references).\n" +
+        "- Download a file from an http/https URL (dataset, asset, artifact) -> download_file (INSTEAD OF Invoke-WebRequest/curl).\n" +
         "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
         "- Test a SignalR hub (connect, subscribe, invoke, drain events) -> signalr_connect / signalr_subscribe / signalr_invoke / signalr_events / signalr_disconnect.\n\n" +
         "WORKFLOW:\n" +
