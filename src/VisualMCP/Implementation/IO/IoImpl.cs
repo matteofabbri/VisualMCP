@@ -220,4 +220,41 @@ internal static class IoImpl
     }
 
     private static double Mb(long bytes) => Math.Round(bytes / 1024d / 1024d, 2);
+
+    // ── move_path (move/rename a file or directory) ───────────────────────────
+    internal static object MovePath(string source, string destination, bool overwrite)
+    {
+        if (string.IsNullOrWhiteSpace(source)) return new { error = "A source path is required." };
+        if (string.IsNullOrWhiteSpace(destination)) return new { error = "A destination path is required." };
+
+        var src = Path.GetFullPath(source);
+        var dst = Path.GetFullPath(destination);
+
+        var isFile = File.Exists(src);
+        var isDir = Directory.Exists(src);
+        if (!isFile && !isDir) return new { error = $"Source not found: {src}" };
+
+        try
+        {
+            var destParent = Path.GetDirectoryName(dst);
+            if (!string.IsNullOrEmpty(destParent)) Directory.CreateDirectory(destParent);
+
+            if (isFile)
+            {
+                if (File.Exists(dst) && !overwrite) return new { error = $"Destination file already exists: {dst} (set overwrite=true)." };
+                File.Move(src, dst, overwrite);
+            }
+            else
+            {
+                if (Directory.Exists(dst) || File.Exists(dst)) return new { error = $"Destination already exists: {dst} (directory move does not overwrite)." };
+                Directory.Move(src, dst);
+            }
+
+            return new { moved = true, type = isFile ? "file" : "directory", source = src, destination = dst };
+        }
+        catch (Exception ex)
+        {
+            return new { error = $"Move failed: {ex.Message}", source = src, destination = dst };
+        }
+    }
 }
