@@ -177,7 +177,7 @@ set up the client registration yourself.
 
 **How many tools are there?**
 
-312 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
+314 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
 (everything, with schemas), or the [tool catalogue](tools.md).
 
 **How do I update?**

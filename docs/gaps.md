@@ -16,8 +16,8 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-30 (third revision: five more refactorings, the product surface —
-`solution_map`, `capability_report`, packaging, exploration — and 19 new tools, 290 → 309). The
+Last updated: 2026-10-30 (fourth revision: `fix_diagnostics` closes the compiler-diagnostic family that
+had no automatic fix, `git_churn_hotspots` closes the churn × complexity row, 309 → 314). The
 style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -32,7 +32,7 @@ style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ⚠️ | Medium | Severity in `.editorconfig` and compiler-gated suppressions exist; `.DotSettings`, custom inspections and a background daemon do not |
 | [Test workflow](#4-test-workflow) | ⚠️ | Medium | One test, re-run the failures, which tests reach a symbol, a scaffold class and branch coverage exist; debugging a test, continuous testing, mutation and impact analysis do not |
 | [Decompiled code as a workspace](#5-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
-| [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 18 action ids now (braces, region, foreach→for, concat→interpolation, index guard); the long tail is still the long tail |
+| [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 20 action ids now (guards, wrap, braces, region, foreach↔for, if→switch, concat→interpolation, index guard); the long tail is still the long tail |
 | [Refactoring gaps](#7-refactoring-gaps) | ⚠️ | Low | 41 of Rider's main set are there (`remove_params` and bidirectional call hierarchy arrived); the remaining names are listed |
 | [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ❌ | Low | Text/graph export exists; visual exploration does not |
 | [Version control and collaboration](#9-version-control-and-collaboration) | ⚠️ | Low | Git and GitHub are covered; the rest of the VCS ecosystem is not |
@@ -337,12 +337,13 @@ has:
 - **87 C# style ids** (`simplify_code`, with 39 refused and a reason) and **15 VB ids**;
 - **~800 inspection ids**; a fix exists only where the analyzer ships a `CodeFixProvider`
   (`apply_code_fix`);
-- **18 context-action ids** through `context_action` (19 ReSharper rows): `import_type`, the argument guards
+- **20 context-action ids** through `context_action` (21 ReSharper rows): `import_type`, the argument guards
   (`check_param_null`, `check_all_params_null`, `check_string_not_null_or_empty`,
   `check_collection_not_empty`, `check_variable_null`), the wrap actions (`wrap_in_try_catch`,
   `wrap_in_try_finally`, `wrap_in_if`, `wrap_in_using`, `wrap_in_region`), the string re-encodings
   (`string_to_raw`, `string_to_verbatim`, `string_to_regular`) and the family added on 2026-10-30
-  (`add_braces`, `foreach_to_for`, `concat_to_interpolated`, `check_index_range`);
+  (`add_braces`, `foreach_to_for`, `for_to_foreach`, `if_to_switch`, `concat_to_interpolated`,
+  `check_index_range`);
 - generators: `implement_members`, `create_from_usage`, `generate_docs`, `generate_members`,
   `implement_inpc`, `generate_tests`.
 
@@ -362,8 +363,12 @@ What that does not cover:
 | Regex and injections | regex completion/validation, and language injections (SQL/HTML/CSS/JSON embedded in a C# string is just text) |
 
 The split matters when comparing numbers with ReSharper: **87 style ids ≠ 87 context actions**, and
-**~800 inspection ids ≠ 800 fixes**. Three families exist (style rewrites, analyzer code fixes, the 13
-hand-written context-action ids), and compiler diagnostics (`CS####`) have **zero** automatic fixes here.
+**~800 inspection ids ≠ 800 fixes**. Four families exist (style rewrites, analyzer code fixes, the
+hand-written context-action ids, and the eight mechanical compiler fixes in `fix_diagnostics`). The
+compiler family is the one that had **no** automatic fix until 2026-10-30; it now covers the shapes that
+need no judgement — CS0168/CS0219 unused local, CS0169 unused field, CS0067 unused event, CS0105
+duplicated using, CS0108/CS0114 hidden member, CS0109 redundant `new` — each accepted only when the
+project compiles no worse, and every other `CS####` still has no fix here.
 
 ---
 
@@ -487,10 +492,14 @@ they are repeated here because they are also "what is missing" for a .NET team:
 | Gap | What it would need |
 |---|---|
 | Taint analysis (SQL injection/XSS across the data flow) | A data-flow engine; `find_security_issues` is pattern-based |
-| Git-aware code churn hotspots | History + complexity correlation (CodeScene's core) |
 | Mutation testing | A mutation runner (Stryker) and a score |
 | Quality trend between commits | Storing findings per revision and diffing them; `inspection_baseline` only freezes one state |
 | Database profiling, async/event-source viewers, instrumentation profiling | The four Visual Studio profiling tools not covered (see [profiling.md](profiling.md)) |
+
+The **Git-aware churn hotspot** row closed on 2026-10-30: `git_churn_hotspots` joins
+`git log --numstat` over a bounded window with the Roslyn complexity ranking and scores each file as
+commits × the cyclomatic complexity of its worst method. It is static (static model + history), not a
+runtime measurement.
 
 ---
 

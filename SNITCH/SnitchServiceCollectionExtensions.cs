@@ -84,6 +84,11 @@ public static class SnitchServiceCollectionExtensions
 
         // C# analysis services (logic moved from the MCP tool layer).
         services.AddSingleton<Languages.CSharp.Analysis.IGetDiagnosticsService, Languages.CSharp.Analysis.GetDiagnosticsService>();
+        // The compiler's own diagnostics, rewritten instead of reported: apply_code_fix runs a pack's
+        // CodeFixProvider, and compiler diagnostics (CS####) ship none — this is that family.
+        services.AddSingleton<Languages.CSharp.Analysis.IFixDiagnosticsService, Languages.CSharp.Analysis.FixDiagnosticsService>();
+        // "Where does a refactoring pay first?" — git churn joined with the complexity ranking.
+        services.AddSingleton<Languages.CSharp.Analysis.IGitChurnHotspotsService, Languages.CSharp.Analysis.GitChurnHotspotsService>();
         services.AddSingleton<Languages.CSharp.Analysis.IFindUnusedSymbolsService, Languages.CSharp.Analysis.FindUnusedSymbolsService>();
         services.AddSingleton<Languages.CSharp.Analysis.IAnalyzeNamespaceCouplingService, Languages.CSharp.Analysis.AnalyzeNamespaceCouplingService>();
         services.AddSingleton<Languages.CSharp.Analysis.IAnalyzeDependenciesService, Languages.CSharp.Analysis.AnalyzeDependenciesService>();

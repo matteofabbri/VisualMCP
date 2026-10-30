@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **312 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **314 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -31,10 +31,11 @@ EventPipe traces, and Razor pages are analysed as markup with CWE-tagged securit
 
 - **Navigation and understanding** — symbols, references, callers, implementations, inheritance, type
   outlines, declaration source, project docs.
-- **Analysis** — whole-solution audit, compiler diagnostics, inspections with code fixes, cyclomatic and
-  cognitive complexity, Big-O estimates, dead code, duplicates, security, dependency injection,
-  namespace coupling, async anti-patterns.
-- **Refactoring** — 50+ semantic refactorings, from rename and extract method to extract class, change
+- **Analysis** — whole-solution audit, compiler diagnostics **and the mechanical ones fixed**
+  (`fix_diagnostics`), inspections with code fixes, cyclomatic and cognitive complexity, Big-O estimates,
+  churn × complexity hotspots, dead code, duplicates, security, dependency injection, namespace coupling,
+  async anti-patterns.
+- **Refactoring** — 60+ semantic refactorings, from rename and extract method to extract class, change
   signature and move type, most of them compiler-gated.
 - **Code style** — `simplify_code` applies 87 of the 126 Microsoft code-style rule ids, with a
   per-document compiler gate and a recorded, revertible edit history; `simplify_vb_code` covers 15 Visual
@@ -73,7 +74,7 @@ walkthrough: [Getting started](getting-started.md).
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
 | [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 312 tools, grouped by area, with a one-line description of each |
+| [Tool catalogue](tools.md) | All 314 tools, grouped by area, with a one-line description of each |
 | [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |

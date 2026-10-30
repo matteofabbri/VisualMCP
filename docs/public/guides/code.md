@@ -62,6 +62,7 @@ misses the interface dispatch.
 |---|---|
 | Does the solution compile, and what are the errors? | `build_project` |
 | What does the compiler think right now? | `get_diagnostics` |
+| Fix the mechanical compiler diagnostics | `fix_diagnostics` |
 | What do the configured analyzers say? | `run_code_analysis` |
 | What do the built-in inspection packs say? | `inspect_code` |
 | Pull errors out of a native/MSBuild log | `extract_build_log_errors` |
@@ -71,10 +72,17 @@ default it runs the configured analyzers too, and it compiles without copying ou
 does not lock the DLL. `get_diagnostics` is the Roslyn view of the solution and does not require a
 build.
 
+`fix_diagnostics` is the write side of that pair: it rewrites eight mechanical `CS####` shapes — an
+unused local (`CS0168`/`CS0219`), an unused private field (`CS0169`), an unused event (`CS0067`), a
+duplicated `using` (`CS0105`), a member that hides an inherited one (`CS0108`/`CS0114`) and a `new` that
+hides nothing (`CS0109`). Every fix is accepted only when the project compiles no worse, the run is
+refused if the fixes together would add an error, and anything outside that set comes back as skipped
+with the reason. Preview by default; written edits are in the edit history.
+
 A useful loop after any change:
 
 ```
-build_project → get_diagnostics → run_code_analysis → run_tests
+build_project → get_diagnostics → fix_diagnostics → run_code_analysis → run_tests
 ```
 
 ## Choose the right analysis
@@ -94,6 +102,7 @@ When you need to go deeper:
 | How does this scale with *n*? | `analyze_complexity` | Static Big-O estimate: loop nesting, LINQ chains, recursion shape, allocation sites, callee propagation |
 | This method is too complex — lower it | `reduce_complexity` | Plans and applies extract-block, name-boolean and guard-clause moves, re-measures, rolls back if a step breaks compilation |
 | Make the whole codebase simpler | `fix_complexity` | Ranks the solution, lowers the worst methods with the same moves, and reports before/after in one call |
+| Where does a refactoring pay first? | `git_churn_hotspots` | Joins git history (how often a file changes) with the complexity ranking (its worst method); read-only, and a file that only *looks* big is not a hotspot |
 | Is this code reachable? | `find_dead_code` | Control-flow graph, not heuristics over text |
 | Is this symbol used anywhere? | `find_unused_symbols` | Roslyn reference search across the solution |
 | Is this code duplicated? | `find_duplicate_code` | Structural clones, normalised over names and literals |

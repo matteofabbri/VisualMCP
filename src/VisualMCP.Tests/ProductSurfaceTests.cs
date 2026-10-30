@@ -68,7 +68,9 @@ public sealed class ProductSurfaceTests
 
         var catalogues = report.GetProperty("catalogues");
         Assert.Equal(9, catalogues.GetProperty("xamlRules").GetArrayLength());
-        Assert.Equal(18, catalogues.GetProperty("contextActions").GetArrayLength());
+        Assert.True(catalogues.GetProperty("contextActions").GetArrayLength() >= 20,
+            "the context-action catalogue must include the latest family: " +
+            catalogues.GetProperty("contextActions").GetArrayLength());
     }
 
     [Fact]

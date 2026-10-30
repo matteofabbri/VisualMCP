@@ -321,7 +321,8 @@ public sealed class StructuralSearchService : IStructuralSearchService
                 IsExpressionWildcard: false, IsStatementWildcard: false);
 
         error = $"'{text}' is not a valid C# expression, statement or member declaration. " +
-                "Write a hole as $name$ (for example: Console.WriteLine($argument$)).";
+                "Write a hole as $name$ (for example: Console.WriteLine($argument$)); a hole in statement " +
+                "position carries its own semicolon (for example: if ($condition$) $body$;).";
         return null;
     }
 

@@ -202,7 +202,9 @@ enabled (they arrive as `WEAK_WARNING`). Filter with `projectName`, `filePath`, 
 `apply_code_fix` re-runs the same packs and executes the analyzer's **own** `CodeFixProvider`.
 `dryRun=true` is the default; `fixAllScope=document|project|solution` repairs every occurrence of that
 id, and a change touching more than `maxChangedFiles` (default 5) files is refused. Rules that ship no
-fix — most compiler and CA diagnostics — are refused with that message rather than a guessed edit.
+fix are refused with that message rather than a guessed edit — most CA diagnostics, and every compiler
+diagnostic outside the eight mechanical `CS####` shapes `fix_diagnostics` rewrites (unused
+local/field/event, duplicated using, hidden member, redundant `new`).
 
 ## What "safe" does not mean
 

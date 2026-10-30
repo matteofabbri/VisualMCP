@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **312 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **314 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -87,6 +87,7 @@ Conventions:
 | Tool | What it does |
 |---|---|
 | `get_diagnostics` | Compiler errors and warnings (the IDE Error List), whole solution or one project |
+| `fix_diagnostics` | ✎ preview Fix the mechanical compiler diagnostics instead of reporting them: CS0168/CS0219 unused local, CS0169 unused field, CS0067 unused event, CS0105 duplicated using, CS0108/CS0114 hidden member (`new`), CS0109 redundant `new`. Compiler-gated, recorded and revertible |
 | `run_code_analysis` | Run the project's configured Roslyn analyzers (StyleCop, Roslynator, .NET analyzers) |
 | `solution_audit` | One-call health report: inspections by id, compiler diagnostics, complexity hotspots, largest files, project graph and cycles, first moves; cached per unchanged solution |
 | `inspect_code` | Built-in Rider-style inspection packs over every project, plus the VisualMCP house rules (`VMC0001`: one type per file); filter by pack, id, severity, file |
@@ -96,6 +97,7 @@ Conventions:
 | `configure_formatting` | ✎ Set any other `.editorconfig` option (`csharp_*`, `dotnet_*`, `indent_*`, `end_of_line`, `charset`, `file_header_template`, …) at the same scopes, same upsert |
 | `suppress_finding` | ✎ preview Silence one finding where it takes effect: a `#pragma` around the member or a `SuppressMessage` attribute on it; compiler-gated |
 | `complexity_report` | McCabe cyclomatic, Sonar cognitive, Halstead and maintainability index — with the lines that own the score |
+| `git_churn_hotspots` | Where a refactoring pays first: git history (how often a file changes) joined with Roslyn complexity (its worst method), scored as commits × worst cyclomatic; read-only, bounded window |
 | `get_complexity_hotspots` | The most complex methods in the solution, ranked |
 | `get_metrics` | Per-method complexity, lines of code, nesting depth and parameter count |
 | `analyze_complexity` | Static Big-O estimate of time and space per callable, with loops, recursion shape, allocation sites and evidence |

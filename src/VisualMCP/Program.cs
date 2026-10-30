@@ -80,7 +80,12 @@ static async Task RunServerAsync(string[] args)
         "default, refused when the edit would add a compiler error).\n" +
         "- Apply Visual Basic style suggestions (15 rule ids, compiler-gated, preview by default) -> simplify_vb_code " +
         "(simplify_code rewrites C# only).\n" +
-        "- Compiler errors/warnings for the whole solution -> get_diagnostics.\n" +
+        "- Compiler errors/warnings for the whole solution -> get_diagnostics; to FIX the mechanical ones " +
+        "(unused local/field/event, duplicated using, a member hiding an inherited one, a 'new' that hides " +
+        "nothing) with a compiler gate and a revertible write -> fix_diagnostics.\n" +
+        "- Where does a refactoring pay first? git history (how often a file changes) joined with Roslyn " +
+        "complexity (how hard its worst method is to read) -> git_churn_hotspots (read-only; since/path/minCommits " +
+        "narrow the window).\n" +
         "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
         "- Debug a running program — a REAL debugger (DAP), not logging: install the adapter once -> debug_install " +
         "(debug_status says whether it is there; a few MB from the Samsung release); start a built .dll or a " +

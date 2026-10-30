@@ -1,46 +1,126 @@
 # VisualMCP
 
-An MCP (Model Context Protocol) server that gives an AI coding client — Claude Code, ZCode, or any
-MCP-capable tool — IDE-grade access to a .NET solution: semantic navigation, analysis, refactoring,
-debugging, profiling and **312 tools in one local process**, built on Roslyn's `MSBuildWorkspace`
-and the real project graph. `capability_report` prints the live tool count.
+An MCP server that gives an AI coding client — Claude Code, ZCode, or any MCP-capable tool — a .NET
+solution the way an IDE sees it: the compiler's semantic model, the real project graph, real EventPipe
+traces, and a compiler gate on every edit it makes. **314 tools in one local process.**
+`capability_report` prints the live count, by area, from the running build.
 
 > **User documentation:** [docs/public/README.md](docs/public/README.md) — install, concepts, the
 > complete tool catalogue, task guides and limits.
-> **This page is the map.** Every folder has its own README, linked below; long reference material
-> lives in the page that owns it instead of here.
+> **This page is the map.** Every folder has its own README, linked below.
 
-## What it is for
+## What it looks like
 
-An agent working on a .NET solution without a compiler hits the same four walls:
+Not a tool list. One call, on this repository:
+
+```text
+> Audit this solution and tell me where to start.
+
+solution_audit  (excerpt)
+
+Solution: VisualMCP.sln — 5 project(s), 715 file(s), 123,786 line(s)
+Compiler: 0 error(s), 11 warning(s)
+     3x CS8602  warning at StyleRewriteService.cs:492
+     2x CS8600  warning at PackageInspectionService.cs:73
+     …
+
+Most complex methods (cyclomatic complexity, method length):
+   62 complexity  268 lines  MoveInstanceMethod(7 args)     (MoveInstanceMethodService.cs:34)
+   61 complexity  210 lines  PropertyToFunction(7 args)     (PropertyToFunctionService.cs:34)
+   56 complexity  226 lines  MoveStaticMembers(6 args)      (MoveStaticMembersService.cs:33)
+   55 complexity  235 lines  ExtractSuperclass(6 args)      (ExtractSuperclassService.cs:34)
+   …
+
+Project graph:
+  Snitch            → (leaf)
+  Snitch.Metacode   → Snitch
+  Snitch.Profiling  → Snitch
+  VisualMCP         → Snitch, Snitch.Metacode, Snitch.Profiling
+  VisualMCP.Tests   → Snitch, Snitch.Metacode, Snitch.Profiling, VisualMCP
+
+Suggested first moves:
+  1. Extract from 'MoveInstanceMethod(7 args)' (complexity 62) — extract_method on its worst block.
+```
+
+The next call, on the same solution, ranks **1,426 methods** above the complexity floor and names the
+decision points that own each score (`complexity_report`), or joins git history with that ranking to say
+which file a refactoring pays on first (`git_churn_hotspots` — commits touching a file × the cyclomatic
+complexity of its worst method).
+
+## It fixes the build, not only reports it
+
+`get_diagnostics` is the Error List. `fix_diagnostics` is the part an IDE does for you: it rewrites the
+mechanical compiler diagnostics and refuses the rest by name.
+
+| Id | What is fixed |
+|---|---|
+| CS0168, CS0219 | a local nothing reads — removed, or kept as a discard when the initializer has a side effect |
+| CS0169 | a private field nothing uses |
+| CS0067 | an event nothing raises |
+| CS0105 | a `using` that appears twice |
+| CS0108, CS0114 | a member that hides an inherited one — marked `new` |
+| CS0109 | a `new` that hides nothing — removed |
+
+Every fix is spliced on the syntax tree, then accepted only when the project compiles **no worse**; the
+whole run is refused if the fixes together would add an error. Written edits go into the solution's edit
+history and `revert_edit` undoes them one by one. `dryRun` is the default.
+
+## Why it is not a wrapper around grep
 
 | The question | Text search gives you | VisualMCP gives you |
 |---|---|---|
 | Where is this method used? | every line that contains the name, including comments, strings and unrelated types | every real reference, resolved through overloads, overrides, generics and interface dispatch |
 | Show me this class | a guess about the file, then the whole file | the declaration's source with line numbers, in one call |
-| Why doesn't it compile? | the tail of a build log | structured errors and warnings with file, line and severity |
+| Why doesn't it compile? | the tail of a build log | structured errors and warnings with file, line and severity — and the mechanical ones fixed |
 | Rename this safely | a find/replace that misses call sites and renames unrelated text | a semantic rename that updates every reference in the solution |
 
-The same idea runs through the rest of the product: analysis tools build control-flow graphs,
+The same idea runs through the rest of the product: analysis tools build control-flow graphs, 60+
 refactorings rewrite call sites, the style engine applies IDE quick fixes under a compiler gate,
-profiling tools read real EventPipe traces, and Razor pages are analysed as markup with
-CWE-tagged security rules.
+profiling tools read real EventPipe traces, and Razor pages are analysed as markup with CWE-tagged
+security rules.
+
+Four properties hold across the whole surface, and they are what make it safe to let an agent act:
+
+- **Semantic, not textual.** Overloads, overrides, generics, partial types and interface dispatch are
+  resolved by Roslyn; a same-named unrelated identifier is never touched.
+- **Compiler-gated writes.** Anything that renames, moves, extracts, generates or cleans up is previewed
+  by default and refused when the change would add a compiler error.
+- **Recorded, revertible edits.** Every file this server writes is in the solution store with its before
+  and after hash, and `revert_edit` restores it — including the history of the revert itself.
+- **Read-only where it says so.** Analysis and profiling tools never modify the solution; the mutating
+  ones are marked ✎ in the catalogue, and most default to a dry run.
 
 ## What is in the box
 
 | Area | What it covers |
 |---|---|
-| Navigation and understanding | symbols, references, callers, implementations, inheritance, type outlines, declaration source, project docs |
-| Analysis | whole-solution audit, compiler diagnostics, inspections with code fixes, cyclomatic/cognitive complexity, Big-O, dead code, duplicates, security, dependency injection, namespace coupling, async anti-patterns |
-| Refactoring | 50+ semantic refactorings, from rename and extract method to extract class, change signature and move type, most compiler-gated |
-| Code style | `simplify_code` applies 87 of the 126 Microsoft code-style ids with a per-document compiler gate and a recorded, revertible edit history; `simplify_vb_code` covers 15 Visual Basic ids |
+| Navigation and understanding | symbols, references, callers, call hierarchy, implementations, inheritance, type outlines, declaration source, project docs |
+| Analysis | whole-solution audit, compiler diagnostics **and their mechanical fixes**, inspections with code fixes, baselines for CI, cyclomatic/cognitive complexity, Big-O, dead code, duplicates, security, dependency injection, namespace coupling, async and allocation anti-patterns |
+| Refactoring | 60+ semantic refactorings, from rename and extract method to extract class, change signature and move type, most compiler-gated |
+| Code style | `simplify_code` applies 87 of the 126 Microsoft code-style ids with a per-document compiler gate; `simplify_vb_code` covers 15 Visual Basic ids |
 | Razor, Blazor and XAML | page/component inventory, 28 Razor markup/accessibility/security rules, verified edits, and a XAML layer with the code-behind resolved through Roslyn |
 | Runtime work | build, debug through a real DAP debugger, run, test with coverage, benchmark, profile a live process (CPU, GC, allocations, I/O, locks, dumps) and get a plain-language verdict |
 | The wider loop | NuGet facts and vulnerability fixes, .NET modernization, EF Core migrations, Git, GitHub, Docker, scaffolding, a solution-scoped kanban board, and `run_plan` for a whole dependency graph in one round trip |
-| Metacode | one canonical pseudocode model for C#, Razor, decompiled assemblies (ILSpy) and native binaries (Ghidra) |
+| Metacode | one canonical pseudocode model for C#, Razor, decompiled assemblies (ILSpy) and native binaries (Ghidra), persisted per declaration |
 
-The full catalogue, one line per tool, is [docs/public/tools.md](docs/public/tools.md); the
-arguments that are easy to get wrong are in
+A note on the headline number, because it is the easiest thing to inflate: of the 314 tools, **222 are
+.NET code intelligence** (the Roslyn surface, the debugger, the profiler, Razor/XAML, metacode) and **92
+are integrations and plumbing** — Git, GitHub, Docker, the board, build/run wrappers, file and process
+handling. Both halves are real; the count is not the reason to install it. These are:
+
+- **715 files and 123,786 lines** audited in one call, with a project graph, complexity and the first
+  move named.
+- **87 / 126** Microsoft code-style ids rewritten, each verified against the compiler; the other 39 are
+  refused with a written reason instead of being ignored.
+- **~800 inspection ids** from five analyzer packs, each with its own code fix where the analyzer ships
+  one.
+- **60+ refactorings** that update every call site, not only the declaration.
+- **28 Razor rules** and **9 XAML rules**, with file:line and a fix.
+- A debugger (16 tools over DAP), a profiler (22 tools over EventPipe/ClrMD) and a decompiler
+  (ILSpy + Ghidra) that need no external tool on the PATH.
+
+The full catalogue, one line per tool, is [docs/public/tools.md](docs/public/tools.md); the arguments
+that are easy to get wrong are in
 [docs/public/reference/tool-arguments.md](docs/public/reference/tool-arguments.md).
 
 ## Quick start
@@ -63,6 +143,23 @@ The solution is discovered and loaded on demand — no `load_solution` step is n
 verification, upgrade and uninstall: [Getting started](docs/public/getting-started.md). What the
 scripts do and which files they touch: [scripts/README.md](scripts/README.md).
 
+## What it does not do
+
+Stated here rather than discovered late. The full inventory is
+[Limits](docs/public/reference/limits.md) and [docs/gaps.md](docs/gaps.md).
+
+- **C# is the only language with a complete surface.** Visual Basic has a style layer (15 ids) and the
+  build/test tools. Razor and XAML are markup scanners, not compilers: bindings and tag helpers are not
+  validated. F#, JavaScript, SQL and YAML are text — searchable and indexed, not understood.
+- **Static analysis and process instrumentation, nothing more.** Reflection-only code can look dead,
+  source generators are outside the model, dynamic dispatch is not followed. No tool proves a change
+  preserves behaviour, and none replaces your test suite.
+- **No daemon.** Every call analyses on demand; there is no background pass that squiggles between
+  calls. A whole-solution audit is cached per unchanged solution, which is what keeps the second call
+  fast.
+- **Local by construction.** Tools resolve paths on the local filesystem; the stdio transport is
+  intentionally local-only.
+
 ## Documentation, by what you need
 
 | If you want to… | Read |
@@ -81,8 +178,8 @@ scripts do and which files they touch: [scripts/README.md](scripts/README.md).
 | troubleshoot | [Help and FAQ](docs/public/help.md) |
 | contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-The engineering notes behind these pages — engine state, gaps, metacode model, profiling
-internals, dashboard API, adding a language — are indexed in [docs/README.md](docs/README.md).
+The engineering notes behind these pages — engine state, gaps, metacode model, profiling internals,
+dashboard API, adding a language — are indexed in [docs/README.md](docs/README.md).
 
 ## Repository, folder by folder
 
@@ -137,9 +234,6 @@ receives is part of that conversation. This is true of any MCP tool and is contr
 client, not by VisualMCP. The full model is in
 [How it works → Privacy](docs/public/how-it-works.md#privacy).
 
-> **Running it remotely would break it.** Tools resolve paths on the local filesystem; on another
-> machine those paths would not exist. The stdio transport is intentionally local-only.
-
 ## Development
 
 ```powershell
@@ -162,15 +256,8 @@ Visual Studio build also refreshes the installed copies through a post-build tar
 
 - **Platform:** Windows is the primary, fully supported platform. CI also builds self-contained
   binaries for Linux x64 and macOS arm64.
-- **Languages:** C# is the main surface. Visual Basic has a style layer (15 ids) plus the
-  language-neutral build/test/diagnostic tools; Razor and Blazor markup are analysed by a dedicated
-  scanner; XAML has its own markup layer with the code-behind resolved through Roslyn; EF Core
-  migrations run through `ef_migrations`. A runnable Visual Basic sample lives in
-  [`samples/VbDemo`](samples/VbDemo/README.md). Everything else is text at most — see
-  [Limits](docs/public/reference/limits.md#language-and-platform-coverage).
-- **Scope:** everything is static analysis or process instrumentation. No tool proves that a change
-  preserves behaviour in general, and no tool replaces your test suite. See
-  [Limits](docs/public/reference/limits.md).
+- **Scope:** everything is static analysis or process instrumentation. See
+  [Limits](docs/public/reference/limits.md) for the per-language and per-feature boundary.
 
 ## License
 

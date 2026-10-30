@@ -194,7 +194,36 @@ internal sealed class FakeWorkspace : IRoslynWorkspace
     public void Dispose()
     {
         _workspace.Dispose();
-        try { Directory.Delete(_directory, recursive: true); } catch (IOException) { /* best effort */ }
+        DeleteBestEffort(_directory);
+    }
+
+    /// <summary>
+    /// A temp folder left behind is not a test failure, and git writes its object files read-only on
+    /// Windows: a plain recursive delete throws UnauthorizedAccessException on them.
+    /// </summary>
+    private static void DeleteBestEffort(string directory)
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // fall through to the attribute-clearing retry
+        }
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+
+            Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The folder stays; the test result is what matters.
+        }
     }
 
     private static List<MetadataReference> TrustedPlatformReferences()

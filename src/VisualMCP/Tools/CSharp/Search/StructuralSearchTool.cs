@@ -10,7 +10,8 @@ public static class StructuralSearchTool
     [McpServerTool(Name = "structural_search"), Description(
         "ReSharper's Structural Search and Replace. The pattern is ordinary C# with $name$ holes, matched " +
         "against the syntax tree (not the text): 'Console.WriteLine($argument$)' finds every call, " +
-        "'if ($condition$) $body$' finds every guard, '$x$ == null' every null test. With replacement the " +
+        "'if ($condition$) $body$;' finds every guard (a hole in statement position carries its semicolon), " +
+        "'$x$ == null' every null test. With replacement the " +
         "matches are rewritten in place — the compiler gate refuses an edit that would add errors — and " +
         "without it the call returns where the pattern matches and what each hole bound. Use it INSTEAD OF " +
         "regex search when the intent is a code shape; regex still wins for text that is not code.")]
