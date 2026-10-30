@@ -103,27 +103,47 @@ public sealed class IoService : IIoService
             return new CheckSolutionResult
             {
                 IsLoaded = false,
-                Message = "No .NET C# solution is currently loaded. Load one first, or stop here if the current workspace is not a .NET C# project — there is nothing useful to offer outside of a .NET C# solution.",
+                Message = "No .NET solution is currently loaded. Load one first, or stop here if the current workspace is not a .NET C# or Visual Basic project — there is nothing useful to offer outside of a .NET solution.",
             };
         }
 
-        if (!solution.Projects.Any(p => p.Language == LanguageNames.CSharp))
+        var projects = solution.Projects.ToList();
+        var csharpProjects = projects.Count(project => project.Language == LanguageNames.CSharp);
+        var visualBasicProjects = projects.Count(project => project.Language == LanguageNames.VisualBasic);
+
+        if (csharpProjects == 0 && visualBasicProjects == 0)
         {
             return new CheckSolutionResult
             {
                 IsLoaded = false,
                 SolutionPath = solutionPath,
-                Message = "The loaded solution contains no C# projects. Only .NET C# solutions are supported — do not query it further for this workspace.",
+                Message = "The loaded solution contains no C# or Visual Basic projects. Only .NET C# and Visual Basic solutions are supported.",
             };
         }
 
-        var projectCount = solution.Projects.Count();
+        // A Visual Basic solution is a supported workspace: the language-neutral tools and the VB
+        // style engine work on it, and only the C#-only analyses have nothing to read.
+        if (csharpProjects == 0)
+        {
+            return new CheckSolutionResult
+            {
+                IsLoaded = true,
+                SolutionPath = solutionPath,
+                CSharpProjectCount = 0,
+                VisualBasicProjectCount = visualBasicProjects,
+                Message = $"A Visual Basic solution is loaded with {visualBasicProjects} project(s). Language-neutral tools (find_symbol, read_symbol, text_index, build_project, run_tests, run_project) work, and simplify_vb_code applies the Visual Basic style rules; C#-only analyses (simplify_code, reference_index, inspect_code, complexity_report) have no C# documents to read.",
+            };
+        }
+
         return new CheckSolutionResult
         {
             IsLoaded = true,
             SolutionPath = solutionPath,
-            CSharpProjectCount = projectCount,
-            Message = $"A .NET C# solution is loaded with {projectCount} project(s). You can proceed with other tools.",
+            CSharpProjectCount = csharpProjects,
+            VisualBasicProjectCount = visualBasicProjects,
+            Message = visualBasicProjects == 0
+                ? $"A .NET C# solution is loaded with {csharpProjects} project(s). You can proceed with other tools."
+                : $"A .NET solution is loaded with {csharpProjects} C# and {visualBasicProjects} Visual Basic project(s). C#-only tools read the C# projects; simplify_vb_code reads the Visual Basic ones.",
         };
     }
 

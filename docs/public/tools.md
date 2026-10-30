@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **309 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **312 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 

@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **309 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **312 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -73,7 +73,8 @@ walkthrough: [Getting started](getting-started.md).
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
 | [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 309 tools, grouped by area, with a one-line description of each |
+| [Tool catalogue](tools.md) | All 312 tools, grouped by area, with a one-line description of each |
+| [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |
 | [Razor, metacode and decompilation](guides/razor-metacode.md) | Page analysis and edits, canonical pseudocode, ILSpy and Ghidra |
@@ -105,6 +106,8 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   language-neutral build/test/diagnostic tools; Razor and Blazor markup are analysed by a dedicated
   scanner, and XAML has its own markup layer (inventory, `XAML0001`–`XAML0009` diagnostics, navigation)
   with the code-behind resolved through Roslyn. EF Core migrations run through `ef_migrations`.
+  A runnable Visual Basic sample lives in [`samples/VbDemo`](../../samples/VbDemo/README.md), with the
+  measured tool-by-tool results in [`DEMO.md`](../../samples/VbDemo/DEMO.md).
   **Everything else is text at most**: JS/TS/HTML/CSS, SQL as a language, Kubernetes and F# have no
   semantic support. See [Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage).
 - **Scope:** everything is static analysis or process instrumentation. No tool proves that a change

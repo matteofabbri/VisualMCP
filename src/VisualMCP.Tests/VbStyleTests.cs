@@ -550,6 +550,62 @@ public sealed class VbStyleTests
     }
 
     /// <summary>
+    /// With every rule enabled, IDE0001 and IDE0049 both match System.Int32. The service must apply
+    /// one of them to the node instead of failing on a duplicate key in the replacement map.
+    /// </summary>
+    [Fact]
+    public async Task VbSimplify_WithEveryRuleEnabled_AppliesOneRewritePerNode()
+    {
+        const string source = """
+            Imports System
+
+            Friend Class C
+                Public Function F() As System.Int32
+                    Return 1
+                End Function
+            End Class
+            """;
+
+        using var workspace = VisualBasicWorkspace.Create("C.vb", source);
+        var service = new VbSimplifyCodeService(workspace);
+
+        var result = await service.SimplifyAsync("document", workspace.PathOf("C.vb"), null, rules: null, dryRun: false);
+
+        ResultAssert.Succeeded(result);
+        Assert.Equal(1, ResultAssert.Json(result).GetProperty("totalEdits").GetInt32());
+
+        // IDE0001 comes first in the catalogue, so it owns the node (System.Int32 → Int32);
+        // IDE0049 is shadowed rather than applied a second time to the same span.
+        var text = workspace.Read("C.vb");
+        Assert.DoesNotContain("System.Int32", text);
+        Assert.Contains("As Int32", text);
+    }
+
+    /// <summary>
+    /// IDE0031 writes s?.Trim(), and the inner member access of a conditional access has no receiver.
+    /// The next pass visits it: every rule must survive the syntax the previous pass produced.
+    /// </summary>
+    [Fact]
+    public async Task VbSimplify_WithEveryRuleEnabled_SurvivesTheConditionalAccessItCreates()
+    {
+        const string source = """
+            Friend Class C
+                Public Function F(s As String) As String
+                    Return If(s IsNot Nothing, s.Trim(), Nothing)
+                End Function
+            End Class
+            """;
+
+        using var workspace = VisualBasicWorkspace.Create("C.vb", source);
+        var service = new VbSimplifyCodeService(workspace);
+
+        var result = await service.SimplifyAsync("document", workspace.PathOf("C.vb"), null, rules: null, dryRun: false);
+
+        ResultAssert.Succeeded(result);
+        Assert.Contains("s?.Trim()", workspace.Read("C.vb"));
+    }
+
+    /// <summary>
     /// A VB project in an <see cref="AdhocWorkspace"/>, with real files in a temp folder so the service
     /// writes through its normal path and the test reads the result from disk. It implements the same
     /// mutation contract as the server's workspace, and the metacode tests use it too: it is the only

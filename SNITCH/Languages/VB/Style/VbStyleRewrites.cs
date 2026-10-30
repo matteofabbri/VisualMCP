@@ -46,6 +46,12 @@ public sealed class SimplifyMemberAccessRewrite : VbStyleRewrite
     {
         if (node is not MemberAccessExpressionSyntax memberAccess) return null;
         if (!memberAccess.IsKind(SyntaxKind.SimpleMemberAccessExpression)) return null;
+
+        // In a conditional access (x?.M) the inner M is a member access with no receiver of its own:
+        // the receiver is the conditional access. There is no "Type.Member" to shorten there, and
+        // asking the semantic model about a null node throws.
+        if (memberAccess.Expression is null) return null;
+
         if (model.GetSymbolInfo(memberAccess.Expression, cancellationToken).Symbol is not INamedTypeSymbol) return null;
 
         var symbol = model.GetSymbolInfo(memberAccess, cancellationToken).Symbol;
@@ -159,6 +165,9 @@ public sealed class IsNothingRewrite : VbStyleRewrite
         if (other is not (IdentifierNameSyntax or MemberAccessExpressionSyntax or InvocationExpressionSyntax
             or MeExpressionSyntax)) return null;
 
+        // The inner member access of a conditional access has no receiver: there is nothing to compare.
+        if (other is MemberAccessExpressionSyntax { Expression: null }) return null;
+
         // "=" is a value comparison for a value type and a string comparison for String: "Is Nothing" is
         // only equivalent for a reference type that does not redefine equality.
         if (!IsReferenceWithoutValueEquality(model.GetTypeInfo(other, cancellationToken).Type)) return null;
@@ -205,6 +214,10 @@ public sealed class CoalesceRewrite : VbStyleRewrite
         if (conditional.Condition is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "HasValue" } hasValue)
         {
             var checkedExpression = hasValue.Expression;
+
+            // The inner member access of a conditional access has no receiver of its own.
+            if (checkedExpression is null) return null;
+
             if (conditional.WhenTrue.ToString() != checkedExpression.ToString()) return null;
             if (!IsSideEffectFree(checkedExpression)) return null;
 
@@ -247,10 +260,11 @@ public sealed class NullPropagationRewrite : VbStyleRewrite
 
         string? text = access switch
         {
-            MemberAccessExpressionSyntax member when member.Expression.ToString() == receiver.ToString()
+            MemberAccessExpressionSyntax member
+                when member.Expression is not null && member.Expression.ToString() == receiver.ToString()
                 => $"{receiver}?.{member.Name}",
             InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax member } invocation
-                when member.Expression.ToString() == receiver.ToString()
+                when member.Expression is not null && member.Expression.ToString() == receiver.ToString()
                 => $"{receiver}?.{member.Name}({string.Join(", ", invocation.ArgumentList.Arguments)})",
             _ => null,
         };

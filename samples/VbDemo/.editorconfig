@@ -1,0 +1,3 @@
+# The one option the Visual Basic style engine needs for IDE0084 to have a direction.
+[*.vb]
+visual_basic_style_prefer_isnot_expression = true

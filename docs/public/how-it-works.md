@@ -34,7 +34,7 @@ is detected and skips the load entirely.
   `load_solution`.
 - `list_solutions` scans a folder tree for `.sln`/`.slnx` files.
 - `load_solution` targets a specific solution by absolute path, or reloads one.
-- `check_solution` reports what is loaded right now: path, project count, whether it contains C#.
+- `check_solution` reports what is loaded right now: path, project count, and the C# / Visual Basic breakdown.
 
 Loading uses Roslyn's `MSBuildWorkspace`, with `MSBuildLocator` registering the installed .NET SDK. That
 means the server sees the solution as the compiler sees it: project references, target frameworks,

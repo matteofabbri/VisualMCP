@@ -1,0 +1,12 @@
+<Project>
+
+  <!-- The demo is meant to be read: every project compiles with Visual Basic's strictest
+       everyday settings. StyleGallery.vb opts out per file, because the legacy `x = Nothing`
+       shape it demonstrates is a compiler error under Option Strict On. -->
+  <PropertyGroup>
+    <OptionStrict>On</OptionStrict>
+    <OptionExplicit>On</OptionExplicit>
+    <OptionInfer>On</OptionInfer>
+  </PropertyGroup>
+
+</Project>

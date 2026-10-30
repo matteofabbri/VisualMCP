@@ -449,9 +449,18 @@ public class StyleRewriteService
             // or more statements of an enclosing block, so that block's statement list is rebuilt —
             // the shape's statements come out, the replacement's statements go in. A removal is the
             // same move with nothing to put back.
-            var removals = outer.Where(match => match.Removes && !_language.IsStatement(match.Node)).ToList();
-            var expressionMatches = outer
-                .Where(match => !match.Removes && !_language.IsStatement(match.Node)).ToList();
+            //
+            // Two rules can match the same node (IDE0001 and IDE0049 both want to rewrite System.Int32):
+            // one node gets one replacement, the first in catalogue order owning it, so the choice is
+            // deterministic and the replacement map never sees the same key twice.
+            var nonStatementMatches = outer
+                .Where(match => !_language.IsStatement(match.Node))
+                .GroupBy(match => match.Node)
+                .Select(group => group.First())
+                .ToList();
+
+            var removals = nonStatementMatches.Where(match => match.Removes).ToList();
+            var expressionMatches = nonStatementMatches.Where(match => !match.Removes).ToList();
             var statementMatches = outer.Where(match => _language.IsStatement(match.Node)).ToList();
 
             if (expressionMatches.Count > 0 || removals.Count > 0)

@@ -90,15 +90,19 @@ public sealed record ReadFileResult : IoResult
 /// <summary>What <see cref="IIoService.CheckSolution"/> reports about the workspace.</summary>
 public sealed record CheckSolutionResult : IoResult
 {
-    /// <summary>Whether a solution with at least one C# project is loaded.</summary>
+    /// <summary>Whether a solution with at least one C# or Visual Basic project is loaded.</summary>
     public bool IsLoaded { get; init; }
 
     /// <summary>Absolute path of the loaded solution, when there is one.</summary>
     public string? SolutionPath { get; init; }
 
-    /// <summary>Number of C# projects, when a C# solution is loaded.</summary>
+    /// <summary>Number of C# projects in the loaded solution.</summary>
     [JsonPropertyName("csharpProjectCount")]
     public int? CSharpProjectCount { get; init; }
+
+    /// <summary>Number of Visual Basic projects in the loaded solution.</summary>
+    [JsonPropertyName("visualBasicProjectCount")]
+    public int? VisualBasicProjectCount { get; init; }
 
     /// <summary>A sentence the model can act on.</summary>
     public string? Message { get; init; }
