@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Snitch.Profiling</RootNamespace>
+    <AssemblyName>Snitch.Profiling</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- EventPipe sessions against a live process (dotnet-trace / dotnet-counters). -->
+    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.750501" />
+    <!-- Parsing of .nettrace files: CPU samples, GC, exceptions, contention, JIT. -->
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
+    <!-- Managed state of a live process or a dump (dotnet-stack / gcdump / dump). -->
+    <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="4.2.751201" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Snitch.csproj" />
+  </ItemGroup>
+
+</Project>

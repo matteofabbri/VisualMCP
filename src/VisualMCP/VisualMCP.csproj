@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>VisualMCP</AssemblyName>
+    <RootNamespace>VisualMCP</RootNamespace>
+    <!-- PublishSingleFile must stay OFF: Roslyn's MSBuildWorkspace locates its
+         out-of-process BuildHost via the assembly location, which is empty in a
+         single-file bundle and throws ArgumentNullException (Path.Combine) on
+         the first solution load. A normal folder publish keeps the BuildHost
+         discoverable next to the exe. -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <!-- NU1510: referencing Microsoft.AspNetCore.App also puts Microsoft.Extensions.Hosting and
+         System.Security.Cryptography.Xml on the shared framework. They stay explicit so the MCP
+         host's own dependencies are pinned by this project and not by whichever ASP.NET Core
+         runtime happens to be installed. -->
+    <NoWarn>$(NoWarn);NU1510</NoWarn>
+  </PropertyGroup>
+
+  <!-- The web dashboard (Dashboard/) is a small ASP.NET Core app hosted inside this
+       process on a loopback port. It uses the shared framework instead of NuGet
+       packages, so the framework-dependent publish adds no files and the self-contained
+       release bundles it. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Tasks.Core" Version="18.11.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.NET.StringTools" Version="18.11.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="NuGet.Frameworks" Version="7.9.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="ModelContextProtocol" Version="2.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.9.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
+    <PackageReference Include="System.Management" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\SNITCH\Libraries\Snitch.Metacode\Snitch.Metacode.csproj" />
+    <ProjectReference Include="..\..\SNITCH\Libraries\Snitch.Profiling\Snitch.Profiling.csproj" />
+    <ProjectReference Include="..\..\SNITCH\Snitch.csproj" />
+  </ItemGroup>
+
+  <!-- Refresh the installed MCP server after a build started from Visual Studio:
+       scripts\install.ps1 publishes Release to %USERPROFILE%\.zcode / .claude and
+       re-registers the server. -StopRunning frees the locked exe; the env var and
+       BuildingInsideVisualStudio keep the script's own 'dotnet publish' from
+       re-entering this target. Set VisualMCPInstallOnBuild=false to opt out. -->
+  <PropertyGroup>
+    <VisualMCPInstallOnBuild Condition="'$(VisualMCPInstallOnBuild)' == ''">true</VisualMCPInstallOnBuild>
+    <VisualMCPInstallScript Condition="'$(VisualMCPInstallScript)' == ''">$(MSBuildThisFileDirectory)..\..\scripts\install.ps1</VisualMCPInstallScript>
+  </PropertyGroup>
+
+  <Target Name="VisualMCPInstallAfterVisualStudioBuild" AfterTargets="Build" Condition="'$(VisualMCPInstallOnBuild)' == 'true' and '$(BuildingInsideVisualStudio)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(VISUALMCP_SKIP_INSTALL_ON_BUILD)' != '1'">
+    <Message Importance="high" Text="VisualMCP: refreshing the installed MCP server (scripts\install.ps1 -Scope all -StopRunning)..." />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(VisualMCPInstallScript)&quot; -Scope all -StopRunning" EnvironmentVariables="VISUALMCP_SKIP_INSTALL_ON_BUILD=1" ContinueOnError="WarnAndContinue" />
+  </Target>
+
+</Project>

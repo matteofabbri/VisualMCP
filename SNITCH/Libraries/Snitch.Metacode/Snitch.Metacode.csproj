@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Snitch.Metacode</RootNamespace>
+    <AssemblyName>Snitch.Metacode</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The frontends read Roslyn's syntax, never a compilation, so the translator itself needs no
+         workspace and no semantic model. The symbol index (Symbols/) does need both, and the persisted
+         index needs SQLite: those are the only members of this library that do. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <!-- The ILSpy engine, at the version the Snitch assembly already used before the decompiler
+         moved here: decompilation is a producer of metacode, not a separate capability. -->
+    <PackageReference Include="ICSharpCode.Decompiler" Version="11.1.0.9782" />
+    <!-- AddSnitchMetacode() lives in this library, next to the services it registers. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Snitch.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,175 @@
+[Docs home](../README.md) › **Limits**
+
+# Limits
+
+A tool is only trustworthy if it is clear about what it cannot do. This page is the honest list.
+
+## Platform
+
+- **Windows is the supported platform.** It is what the installer, the documentation and the routing
+  hook target. CI also produces self-contained builds for Linux x64 and macOS arm64, but they are not the
+  documented, tested path for every feature.
+- **The .NET 10 SDK is required.** The server targets `net10.0` and loads solutions through
+  `MSBuildWorkspace`.
+- **A solution must evaluate and restore.** If MSBuild cannot load a project — a missing SDK, a broken
+  `Directory.Build.props`, a package feed that is unreachable — the semantic model degrades to MSBuild
+  diagnostics. It does not silently fall back to text search.
+- **Visual Studio is not required**, but some environment tools (`get_environment_info`) report only what
+  is actually installed.
+
+## Analysis
+
+- Everything is **static**. The compiler gate proves that a change compiles; it does not prove that the
+  change preserves behaviour. There is no general behavioural-equivalence proof; the style rules that
+  claim equivalence are compared operation-by-operation (see below), and everything else is reviewed by
+  reading the diff.
+- Several rules are **heuristics** with a stated confidence: `analyze_complexity` (Big-O), Razor rules,
+  security scanning. A clean result is not a proof of correctness or safety.
+- **Reflection, source generators and framework conventions** are outside the call graph. Code that is
+  only invoked dynamically can look dead to `find_dead_code` or `find_unused_symbols`.
+- **Generated code** may appear as ordinary source, or be absent, depending on how the project emits it.
+- **Cross-solution analysis** is out of scope: the server analyses the loaded solution. An assembly that
+  is only referenced is metadata, not a project whose internals are analysed.
+
+## The style engine (`simplify_code`)
+
+- **87 of the 126 rule ids** in Microsoft's code-style table are rewritten. The other 39 are returned in
+  `notRewritten` with a written reason — none is silently ignored, and three of them (`IDE0005`,
+  `IDE0032`, `IDE0290`) are accepted by `simplify_code` and delegated to their own tools.
+- Visual Basic: **15 rewritten ids**, 34 with a reason. The VB layer is separate; `simplify_code` does
+  not touch `.vb` files.
+- **A rule rewrites one region and may edit several documents.** A suggestion whose edits name other files
+  is planned against the whole solution and applied all-or-nothing: if any file it touches is refused by
+  the compiler gate, none of it is written.
+- **Rules that claim equivalence are proved, not assumed.** They are compared operation-by-operation
+  against the code they replace; a difference refuses the file. The result reports it under `semantics`.
+- **The gate is per document, not per edit.** A document whose change would add errors is refused as a
+  whole; other documents in the same run still apply.
+- **For rules that do not claim equivalence, the gate is compilation, not equivalence.** Such a rewrite
+  can compile and still change meaning. Review the diff, which every dry run returns.
+- **Only a small set of `.editorconfig` keys is read** (five for C#, three for VB). Preferences outside
+  that set — most importantly the `csharp_style_var_*` family and naming rules — are not applied.
+- **`IDE0055` (formatting) is opt-in.** It is not part of `rules=all`, because formatting a whole
+  project is a deliberate act.
+- **Naming rules are not rewrites.** `IDE1006` and similar require a rename, which is a different
+  operation.
+
+## Refactoring
+
+- Refactorings **refuse rather than approximate**. Common refusals: a method group or `nameof` use that a
+  rename would change, an object initializer that a factory cannot express, a member selection that is
+  not self-contained, an interface implementation whose signature must stay identical.
+- Some operations are deliberately **syntax-level** (for example `convert_to_primary_constructor` when
+  the constructor is a pure set of assignments). Anything more complex is refused, not guessed.
+- **Undo is the edit history and Git**, not an in-editor undo stack. `revert_edit` refuses if the file
+  changed after the edit.
+- **Not every operation has a dry run.** The tool schema says whether `dryRun` exists and its default;
+  the write-through family (`apply_rename`, `change_signature`, `safe_delete`, `generate_members`,
+  `optimize_usings`, `reorder_members`, …) changes files immediately.
+- **Parallel edits must be separated by path.** `run_plan` honours `paths`; two tools called concurrently
+  by hand do not.
+
+## Razor and Blazor
+
+- The scanner is **heuristic and per file**. It does not follow values across partials, view models or
+  JavaScript.
+- **Markup inside `@{ … }` and `@code { … }` is not analysed** — that is C#.
+- Anti-forgery tokens and duplicate ids are checked **per file**; a token in a partial rendered inside
+  the form can still be reported.
+- **Dynamic values are not guessed.** A rule whose answer depends on a runtime value stays silent.
+- Files over **2 MB** and unreadable folders are reported as skipped, not analysed.
+- `.cshtml`/`.razor` are not Roslyn documents. Tools that require the semantic model do not see them;
+  `razor_*` reads them from disk instead.
+
+## Metacode and decompilation
+
+- The model covers the languages it has frontends for: **C#, Razor, Ghidra snapshots and canonical
+  pseudocode**. Python and C++ AST readers exist in the library, but the product does not produce those
+  dumps, so the tools do not accept `.py`/`.cpp` source.
+- **Unsupported constructs stay visible** as `RAW[lang] … // reason` plus a diagnostic. A translation can
+  therefore be incomplete; the diagnostics say where.
+- **Ghidra is an external dependency** with a real runtime cost. `analyze_native_binary` can take tens of
+  seconds, is bounded by a timeout, and needs a JDK 21+. Ghidra is downloaded once when no installation
+  is found (a few hundred MB); set `GHIDRA_INSTALL_DIR` to use a copy that is already there.
+- **Decompiled output is text.** Rename, navigation and semantic analysis apply to source documents, not
+  to decompiled assemblies.
+- ILSpy reconstructs C# from IL. Names can be compiler-generated, and modern language features may render
+  as lower-level constructs.
+
+## Profiling
+
+- The target must expose a **diagnostics IPC endpoint**. A process with diagnostics disabled cannot be
+  profiled.
+- Sampling is statistical. Short captures are noisy; the verdict tools refuse windows they cannot judge
+  (`profile_review_change` rejects windows under 500 ms, `profile_threadpool` can answer
+  `inconclusive`).
+- **Allocation sites need stack walks.** Use `profile=gc` or `diagnose`; a CPU-only trace cannot attribute
+  allocations to lines.
+- **`file:line` needs PDBs.** Without them you get method and module names. `profile_symbols` can fetch
+  them from a symbol server.
+- **ClrMD cannot attach to the server's own process.** Profile the application, not VisualMCP.
+- Inlining, async state machines and framework frames can hide the user code; the hot-path and I/O tools
+  exist to surface it, but they are still reading a sampled stack.
+
+## Automation and safety
+
+- **`run_command` is not sandboxed.** It runs with the privileges of the server process.
+- **`run_plan` can call any tool and any shell command.** Its validation prevents broken plans, not
+  dangerous ones.
+- **`confirm=true` is a guardrail, not authorization.** It prevents accidental destructive calls; it does
+  not add a permission system.
+- **The edit history is per solution and per file.** It records what this server wrote, not what an IDE or
+  a script wrote.
+- **The store is a cache.** Indexes are snapshots keyed on content hashes; after large external changes,
+  rebuild them or reload the solution.
+
+## Language and platform coverage
+
+The semantic engine is Roslyn over C#. Everything else is a dedicated scanner (Razor/Blazor), a style
+layer (Visual Basic) or text indexing. This is the whole map:
+
+| Language / platform | Coverage |
+|---|---|
+| **C#** | The full surface: navigation, references, refactorings, style, inspections, complexity, profiling, decompilation |
+| **Visual Basic** | `simplify_vb_code` (15 ids, 34 refused with a reason), plus `build_project`, `run_tests`, `get_diagnostics`, the project's own analyzers via `run_code_analysis`, and text search. No VB refactorings, built-in inspection packs, formatter, symbol index or metacode frontend. A solution with **no C# project** is reported by `check_solution` as unsupported |
+| **Razor / Blazor** | A heuristic markup scanner (28 rules) and verified edits. It is not a Razor compiler: `@model` members, tag helpers, component parameters, cascading values, `@bind` types and CSS isolation are not type-checked |
+| **F#** | `.fs`/`.fsproj` are full-text indexed and can be built/tested with `dotnet`; there is no semantic model, so no symbols, references, refactorings or inspections |
+| **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | A heuristic markup layer: inventory, nine rules (`x:Name`/`x:Key` duplicates, `x:Class`, event handlers, resource keys, `DataTemplate`, name collisions, XML) and navigation (`x:Name` ↔ field, key ↔ uses, `BasedOn` chain). The XAML is not compiled, so bindings, tag helpers and styles are not type-checked; no designer, no XAML refactorings. The C# code-behind is fully analysed |
+| **JavaScript / TypeScript / HTML / CSS** | Text only. No parser, type checker, module graph, linting or npm integration |
+| **SQL** | Text only. No dialect parser, schema model, query validation, execution or query plans |
+| **EF Core** | The `DbContext` and entities are C# and fully analysed; migrations run through `ef_migrations` (`dotnet ef`). There is still no model-snapshot diff and no generated-SQL inspection |
+| **Kubernetes / Helm** | Nothing. Docker covers local containers and compose only; manifests are text |
+| **Python / C++ / Java / Go / Rust** | Library-level metacode readers for Python and C++ only, and no tool produces their AST dumps; the other languages have labels in the model, not frontends |
+
+Full inventory, with the exact workaround for each gap: [docs/gaps.md](../../../docs/gaps.md).
+
+Beyond languages, the same page records what is absent from the .NET workflow itself: the debugger is
+engine-level only (16 `debug_*` tools; edit-and-continue, hot reload and debugging a unit test are
+missing), **no live/postfix/file templates**, inspection severity and suppression are written per rule
+but there is **no background analysis daemon** (`inspection_baseline` is the CI substitute), **no test
+debugging, continuous testing or mutation testing** (single-test runs, re-running the failures and test
+scaffolding exist), and decompiled code is now a **navigable Roslyn workspace** (`assembly_workspace`)
+with no IL view, no rename and no debugging inside it.
+
+## Scope of the product
+
+VisualMCP is not:
+
+- an IDE replacement — it has no editor and no project designer; it does have a debugger engine
+  (`debug_*`), but the breakpoint list, call-stack and watch windows are the client's to draw;
+- a test framework — it runs your tests, it does not replace them;
+- a security certification — `find_security_issues` and the Razor rules find patterns, not proofs;
+- a remote service — there is no hosted component, and running the stdio server on another machine would
+  break its paths;
+- a guarantee of API compatibility after an upgrade — `update_solution` proves the build, not the
+  behaviour. Run the tests.
+
+## Licensing
+
+The source is available under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use is free;
+commercial or company use requires a separate paid license. See [LICENSE](../../../LICENSE) and
+[CONTRIBUTING.md](../../../CONTRIBUTING.md).
+
+---
+
+Next: [Help and FAQ](../help.md)

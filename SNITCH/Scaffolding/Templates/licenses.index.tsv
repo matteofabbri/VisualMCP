@@ -1,0 +1,23 @@
+# License catalogue: id, display name, SPDX identifier, family, OSI-approved, explicit patent grant.
+# The id selects license.<id>.txt next to this file; keep the two in sync (a test enforces it).
+id	name	spdx	family	osi	patent
+0bsd	BSD Zero Clause License	0BSD	permissive	yes	no
+agpl-3.0-only	GNU Affero General Public License v3.0 only	AGPL-3.0-only	network-copyleft	yes	yes
+apache-2.0	Apache License 2.0	Apache-2.0	permissive	yes	yes
+boost-1.0	Boost Software License 1.0	BSL-1.0	permissive	yes	no
+bsd-2-clause	BSD 2-Clause "Simplified" License	BSD-2-Clause	permissive	yes	no
+bsd-3-clause	BSD 3-Clause "New" or "Revised" License	BSD-3-Clause	permissive	yes	no
+cc0-1.0	Creative Commons Zero v1.0 Universal	CC0-1.0	public-domain	no	no
+epl-2.0	Eclipse Public License 2.0	EPL-2.0	weak-copyleft	yes	yes
+gpl-2.0-only	GNU General Public License v2.0 only	GPL-2.0-only	strong-copyleft	yes	no
+gpl-3.0-only	GNU General Public License v3.0 only	GPL-3.0-only	strong-copyleft	yes	yes
+isc	ISC License	ISC	permissive	yes	no
+lgpl-2.1-only	GNU Lesser General Public License v2.1 only	LGPL-2.1-only	weak-copyleft	yes	no
+lgpl-3.0-only	GNU Lesser General Public License v3.0 only	LGPL-3.0-only	weak-copyleft	yes	yes
+mit	MIT License	MIT	permissive	yes	no
+mpl-2.0	Mozilla Public License 2.0	MPL-2.0	weak-copyleft	yes	yes
+ms-pl	Microsoft Public License	MS-PL	permissive	yes	yes
+polyform-noncommercial-1.0.0	PolyForm Noncommercial License 1.0.0	PolyForm-Noncommercial-1.0.0	source-available	no	yes
+polyform-small-business-1.0.0	PolyForm Small Business License 1.0.0	PolyForm-Small-Business-1.0.0	source-available	no	yes
+unlicense	The Unlicense	Unlicense	public-domain	yes	no
+zlib	zlib License	Zlib	permissive	yes	no

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "VisualMCP": {
+      "type": "stdio",
+      "command": "C:\\Users\\qaswa\\.claude\\mcp-servers\\VisualMCP\\app\\VisualMCP.exe",
+      "args": []
+    }
+  }
+}

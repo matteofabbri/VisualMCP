@@ -1,0 +1,24 @@
+bin/
+obj/
+*.user
+.vs/
+
+# Local agent, editor and CI folders (not part of the published tree)
+.claude/
+.claude-plugin/
+.github/
+.idea/
+.visualMCP/
+.zcode/
+
+# Test artifacts written by `dotnet test --artifacts-path`
+.artifacts-test/
+
+# Python bytecode from the audit scripts
+__pycache__/
+*.pyc
+
+# Throwaway tool-verification artifacts
+_*.txt
+*.tmp.txt
+/.artifacts-zcode/publish
