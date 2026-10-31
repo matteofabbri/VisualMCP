@@ -193,12 +193,7 @@ public sealed partial class ReduceComplexityService : IReduceComplexityService
             var suggestion = ComplexityPlanner.Suggest(currentUnit, currentModel, cancellationToken)
                 .FirstOrDefault(candidate => candidate.AutoApplicable && !rejected.ContainsKey(Key(candidate)));
 
-            if (suggestion is null)
-            {
-                File.AppendAllText(@"D:\REPOSITORY\vmcp-tmp\reduce-trace.txt",
-                    $"step={step} metrics={metrics.Cyclomatic}/{metrics.Cognitive} noSuggestion len={currentUnit.Span.Length}" + Environment.NewLine);
-                break;
-            }
+            if (suggestion is null) break;
 
             var attempt = currentUnit.SyntaxTree.Options.Language == LanguageNames.VisualBasic
                 ? suggestion.Kind switch
@@ -219,8 +214,6 @@ public sealed partial class ReduceComplexityService : IReduceComplexityService
 
             if (attempt.Root is null)
             {
-                File.AppendAllText(@"D:\REPOSITORY\vmcp-tmp\reduce-trace.txt",
-                    $"suggestion={suggestion.Kind}@{suggestion.Line} REFUSED: {attempt.Error}" + Environment.NewLine);
                 rejected[Key(suggestion)] = attempt.Error ?? "the move was refused";
                 continue;
             }
@@ -235,9 +228,6 @@ public sealed partial class ReduceComplexityService : IReduceComplexityService
             if (nextRoot is null || nextModel is null) break;
 
             var nextUnit = FindUnit(nextRoot, name, UnitOrdinal(root, unit));
-            File.AppendAllText(@"D:\REPOSITORY\vmcp-tmp\reduce-trace.txt",
-                $"suggestion={suggestion.Kind}@{suggestion.Line} rootNull={attempt.Root is null} err={attempt.Error} " +
-                $"nextUnit={nextUnit?.GetType().Name ?? "null"} name={name} ordinal={UnitOrdinal(root, unit)}" + Environment.NewLine);
             if (nextUnit is null) break;
 
             var nextMetrics = ComplexityAnalyzer.Analyze(nextUnit, nextModel, document.FilePath);

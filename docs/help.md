@@ -165,16 +165,19 @@ be reverted while the file is unchanged. Use a branch and a clean working tree f
 
 C# is the main surface, and Visual Basic is a supported language: the symbol index, metacode,
 `structural_search`, `format_code`/`optimize_usings`/`code_cleanup`, the inspection packs that ship VB
-analyzers, the analysis tools (dead code, code smells, async/performance, complexity), the refactorings
-that are not C#-idiom-specific (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`),
-`simplify_vb_code` (15 ids) and the language-neutral build/test/diagnostic tools all read `.vb`. What
-stays C#-only is named in [Limits → Language coverage](reference/limits.md#language-and-platform-coverage).
+analyzers and `apply_code_fix` (their VB fixers), the analysis tools (dead code, code smells,
+async/performance, complexity, metrics, clones, Big-O), the refactorings that are not C#-idiom-specific
+(`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`), `context_action` (33 of its 41 ids
+have a VB spelling; the C#-only ones are refused with the reason), `simplify_vb_code` (15 ids) and the
+language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only is named in
+[Limits → Language coverage](reference/limits.md#language-and-platform-coverage).
 Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
 Core migrations run through `ef_migrations`. SQL has a scanned layer (`sql_files`, `analyze_sql` with
-SQL0001–SQL0010), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0016 — masked
-source, no module graph), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
-(`yaml_files`, `analyze_yaml`, which also reads a Kubernetes manifest's identity) and F# another
+SQL0001–SQL0010), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0017 — masked
+source, relative imports resolved, no module graph), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
+(`yaml_files`, `analyze_yaml`, which also reads a Kubernetes manifest's identity and applies
+YAML0009–YAML0012 to it) and F# another
 (`fsharp_files`, `analyze_fsharp`, the declaration index F# has no symbol tool for; the compiler's own
 diagnostics still come through `build_project`). The JavaScript/TypeScript toolchain also runs through
 the project's own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and

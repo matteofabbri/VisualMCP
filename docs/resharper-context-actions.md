@@ -34,6 +34,19 @@ actions, the statement and declaration shapes, nullable migration, the string co
 directions, StringBuilder, pattern merging and the C# 14 extension block. The census rows carry a status
 only where the row maps one-to-one onto an id; a family that several ids cover is marked on its cluster.
 
+**Visual Basic** (closed 2026-10-31): `context_action` routes a `.vb` document to
+`VbContextActionService`, which implements **33 of the 41 ids** — every one that has a VB spelling. The
+engine is a set of text edits over VB syntax under the same compiler gate, preview and edit history:
+the argument guards (`If x Is Nothing Then Throw New ArgumentNullException(NameOf(x))`, `String.IsNullOrEmpty`,
+`Count = 0`, `ContainsKey`, `[Enum].IsDefined`, the index bound), `Try`/`Catch`/`Finally`, `If`, `Using`
+and `#Region` wrapping, `Imports` for `import_type`, `&`↔`$"…"`, digit separators, `name:=value` →
+positional, `Dim x As Integer` ↔ `Dim x`, `Await x.ConfigureAwait(False)`, one `Dim` per declarator,
+`&=` → `StringBuilder.Append`, nested `If` ↔ `AndAlso`, `If x IsNot Nothing Then x.M()` → `x?.M()`,
+`If`/`ElseIf` → `Select Case`, `From … Select` ↔ `Where(Function(x) …)`, `For Each` ↔ indexed `For`, and
+the descending `For`. The 8 ids that are C# syntax with no VB counterpart — raw/verbatim strings, braces,
+`#nullable`, pattern combinators, the C# 14 extension block — are answered with that sentence instead of
+being reported as unknown.
+
 ## The families not implemented
 
 The 307 rows below are the census, not a to-do list: many are already reached by `simplify_code`, a

@@ -29,6 +29,8 @@ behaviour. The analyses that are C#-only return nothing (or an explicit reason) 
 | `preview_rename LibraryService → BookService` | 3 files, 7 changes: the Roslyn renamer resolves VB symbols |
 | `text_index` | 17 documents / 683 lines indexed; `LibraryService` found in all five files, `StyleGallery.Witness` at line 36 |
 | `simplify_vb_code` (all rules, document) | 18 edits, 14 ids, 0 refused; `.editorconfig` read (`preferIsNot: "PreferIsNot"`) |
+| `context_action` on a `.vb` file | routed to `VbContextActionService`: `check_param_null` writes `If value Is Nothing Then Throw New ArgumentNullException(NameOf(value))`, `if_to_switch` writes a `Select Case`, `for_to_foreach` drops the item local — preview first, compiler-gated |
+| `apply_code_fix CA1822` on a `.vb` file | the .NET analyzers' Visual Basic fixer runs (`BasicMarkMembersAsStaticFixer`), so the member gains `Shared`; a C#-only id answers “for Visual Basic” |
 | `inspect_code VbDemo.Core` | 10 CA findings: CA1510 ×3, CA1307 ×2, CA1002 ×2, CA1062 ×2, CA2211 ×1; 57 analyzer crash reports (AD0001) ignored |
 | `find_unused_symbols VbDemo.Core` | correct names (`Repository.All`, `Repository.Count`, `PlainThing`), each reported twice |
 | `solution_map` | 3 VB projects; `types: 0`, `areas: []`, `entryPoints: []`, 19 documents skipped |

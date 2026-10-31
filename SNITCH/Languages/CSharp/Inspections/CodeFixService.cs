@@ -75,18 +75,31 @@ public sealed class CodeFixService : ICodeFixService
             return new { error = "No inspection packs are loaded: " + string.Join(" ", library.Warnings) };
 
         var id = request.DiagnosticId;
+        var language = document.Project.Language;
+        var languageName = language == LanguageNames.VisualBasic ? "Visual Basic" : "C#";
+
+        // Language first: a VB project must be inspected by the analyzers that read VB, and its fix must
+        // come from a VB fixer. A pack's C# analyzers over a VB compilation is a mismatch, not "no findings".
         var packs = library.Packs
-            .Where(pack => pack.Analyzers.Any(analyzer => analyzer.SupportedDiagnostics
+            .Where(pack => pack.AnalyzersFor(language).Any(analyzer => analyzer.SupportedDiagnostics
                 .Any(descriptor => string.Equals(descriptor.Id, id, StringComparison.OrdinalIgnoreCase))))
             .ToList();
         if (packs.Count == 0)
-            return new { error = $"No loaded inspection pack reports '{id}'.", packs = library.Packs.Select(p => p.Pack.Id).ToList() };
+            return new
+            {
+                error = $"No loaded inspection pack reports '{id}' for {languageName}.",
+                language = languageName,
+                packs = library.Packs
+                    .Where(pack => pack.AnalyzersFor(language).Length > 0)
+                    .Select(pack => pack.Pack.Id)
+                    .ToList(),
+            };
 
         var compilation = await document.Project.GetCompilationAsync(cancellationToken);
         if (compilation is null)
             return new { error = $"Project '{document.Project.Name}' produced no compilation." };
 
-        var analyzers = packs.SelectMany(pack => pack.Analyzers).ToImmutableArray();
+        var analyzers = packs.SelectMany(pack => pack.AnalyzersFor(language)).ToImmutableArray();
 
         // The packs keep most of their rules off by default (Roslynator disables almost all of them),
         // so the diagnostic the caller saw from inspect_code is reported only once they are enabled —
@@ -122,23 +135,61 @@ public sealed class CodeFixService : ICodeFixService
             ? candidates[0]
             : candidates.FirstOrDefault(c => c.Location.GetLineSpan().StartLinePosition.Character + 1 == request.Column) ?? candidates[0];
 
-        var fixers = packs.SelectMany(pack => pack.Fixers).ToList();
-        var fixer = fixers.FirstOrDefault(f => f.FixableDiagnosticIds
-            .Any(fixableId => string.Equals(fixableId, id, StringComparison.OrdinalIgnoreCase)));
-        if (fixer is null)
+        // The pack's fixers for the document's language; a shared assembly can still carry both
+        // languages' providers, so every fixer that declares the id is a candidate and the first one
+        // that actually registers a fix at this location wins.
+        var fixers = packs.SelectMany(pack => pack.FixersFor(language)).ToList();
+        if (fixers.Count == 0)
+            fixers = packs.SelectMany(pack => pack.Fixers).ToList();
+
+        var fixerCandidates = fixers
+            .Where(f => f.FixableDiagnosticIds.Any(fixableId => string.Equals(fixableId, id, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        if (fixerCandidates.Count == 0)
             return new
             {
-                error = $"No code fix provider in the loaded packs can fix '{id}'.",
+                error = $"No code fix provider in the loaded packs can fix '{id}' for {languageName}.",
+                language = languageName,
                 availableFixerIds = fixers.SelectMany(f => f.FixableDiagnosticIds).Distinct().Take(30).ToList(),
             };
 
         var actions = ImmutableArray.CreateBuilder<CodeAction>();
-        var context = new CodeFixContext(
-            document, diagnostic, (action, _) => actions.Add(action), cancellationToken);
-        await fixer.RegisterCodeFixesAsync(context);
+        CodeFixProvider? fixer = null;
+        var attempts = new List<string>();
+        foreach (var candidate in fixerCandidates)
+        {
+            var offered = ImmutableArray.CreateBuilder<CodeAction>();
+            try
+            {
+                var probe = new CodeFixContext(
+                    document, diagnostic, (action, _) => offered.Add(action), cancellationToken);
+                await candidate.RegisterCodeFixesAsync(probe);
+            }
+            catch (Exception ex)
+            {
+                attempts.Add($"{candidate.GetType().Name}: {ex.GetType().Name}");
+                continue;
+            }
 
-        if (actions.Count == 0)
-            return new { error = $"The provider for '{id}' offered no fix at that location.", diagnostic = Describe(diagnostic) };
+            if (offered.Count == 0)
+            {
+                attempts.Add($"{candidate.GetType().Name}: no fix at that location");
+                continue;
+            }
+
+            fixer = candidate;
+            actions.AddRange(offered);
+            break;
+        }
+
+        if (fixer is null)
+            return new
+            {
+                error = $"The {fixerCandidates.Count} provider(s) for '{id}' offered no fix at that location for {languageName}.",
+                language = languageName,
+                diagnostic = Describe(diagnostic),
+                attempts,
+            };
 
         var chosen = request.FixTitle is null
             ? actions[0]
@@ -216,6 +267,7 @@ public sealed class CodeFixService : ICodeFixService
         return new
         {
             diagnosticId = id,
+            language = languageName,
             file = path,
             line = request.Line,
             fix = fixAll ? $"{chosen.Title} (FixAll: {scope})" : chosen.Title,

@@ -74,8 +74,10 @@ public sealed partial class ReduceComplexityService
             $"{indentation}End Function");
 
         // The helper goes after the host's End Sub/End Function, so the condition's offsets stay valid.
+        // It is closed with its own line break: the next line is End Class/End Module, and without the
+        // break the two would be spliced into `End FunctionEnd Class`.
         var insertAt = EndOfLine(source, host.Span.End);
-        var withHelper = source[..insertAt] + newline + helper + source[insertAt..];
+        var withHelper = source[..insertAt] + newline + helper + newline + source[insertAt..];
         var rewritten = withHelper[..condition.SpanStart] + call + withHelper[condition.Span.End..];
 
         var newRoot = ParseVisualBasic(rewritten, root.SyntaxTree.Options, out var parseError);

@@ -193,7 +193,7 @@ analysis, and `find_implementations`/`reference_index` use rises above zero.
 |---|---|---|---|---|
 | C# | style | 97 ids, 29 explained by category | `StyleRewriteCatalog` | guides/refactoring.md |
 | Visual Basic | style | 15 ids, 34 with a reason | `VbStyleRewriteCatalog` | reference/limits.md |
-| Visual Basic | the rest of the language | symbol index, structural search, format/usings/cleanup, VB-capable inspection packs, dead code / smells / async / performance / complexity, rename + encapsulate_field + ParamArray | `VisualBasicSymbolIndexFrontend`, `*.VisualBasic.cs` | gaps.md §1.2 |
+| Visual Basic | the rest of the language | symbol index, structural search, format/usings/cleanup, VB-capable inspection packs and their fixers, dead code / smells / async / performance / complexity / metrics / clones / Big-O, rename + encapsulate_field + ParamArray, the 33 context actions with a VB spelling | `VisualBasicSymbolIndexFrontend`, `*.VisualBasic.cs`, `VbContextActionService` | gaps.md §1.2 |
 | Razor | markup analysis | 28 rules | `RazorRuleCatalog` | razor.md |
 | … | … | … | … | … |
 
@@ -279,6 +279,6 @@ what the agent actually did, not what the tool descriptions intend.
   [The chains, measured](#the-chains-measured) does not belong on this page.
 - When an item ships, move its row to ✅, add the tool to
   [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), and delete the corresponding workaround row in
-  [gaps.md § 13](gaps.md#13-what-to-do-today) if it exists.
+  [gaps.md § 12](gaps.md#12-what-to-do-today) if it exists.
 - Re-measure with a fresh snapshot when a batch closes; the counts drift with the way we work, and
   a stale number is worse than no number.

@@ -26,17 +26,29 @@ internal sealed record LoadedInspectionPack(
     InspectionPack Pack,
     ImmutableArray<DiagnosticAnalyzer> CSharpAnalyzers,
     ImmutableArray<DiagnosticAnalyzer> VisualBasicAnalyzers,
-    ImmutableArray<CodeFixProvider> Fixers)
+    ImmutableArray<CodeFixProvider> CSharpFixers,
+    ImmutableArray<CodeFixProvider> VisualBasicFixers)
 {
     /// <summary>Every analyzer in the pack, whichever language it reads.</summary>
     public ImmutableArray<DiagnosticAnalyzer> Analyzers =>
         CSharpAnalyzers.AddRange(VisualBasicAnalyzers);
+
+    /// <summary>Every code fix in the pack, whichever language it edits.</summary>
+    public ImmutableArray<CodeFixProvider> Fixers =>
+        CSharpFixers.AddRange(VisualBasicFixers);
 
     /// <summary>The analyzers that read a project's language; empty when the pack has none for it.</summary>
     public ImmutableArray<DiagnosticAnalyzer> AnalyzersFor(string language) => language switch
     {
         LanguageNames.VisualBasic => VisualBasicAnalyzers,
         _ => CSharpAnalyzers,
+    };
+
+    /// <summary>The code fixes that edit a project's language; empty when the pack ships none for it.</summary>
+    public ImmutableArray<CodeFixProvider> FixersFor(string language) => language switch
+    {
+        LanguageNames.VisualBasic => VisualBasicFixers,
+        _ => CSharpFixers,
     };
 
     /// <summary>The languages this pack actually inspects.</summary>
@@ -189,7 +201,8 @@ internal static class InspectionPackCatalog
                        ImmutableArray<DiagnosticAnalyzer>.Empty);
 
                 packs.Add(new LoadedInspectionPack(
-                    definition, packCsharp, packVisualBasic, ImmutableArray<CodeFixProvider>.Empty));
+                    definition, packCsharp, packVisualBasic,
+                    ImmutableArray<CodeFixProvider>.Empty, ImmutableArray<CodeFixProvider>.Empty));
                 continue;
             }
 
@@ -203,7 +216,8 @@ internal static class InspectionPackCatalog
 
             var csharpAnalyzers = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
             var visualBasicAnalyzers = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
-            var fixers = ImmutableArray.CreateBuilder<CodeFixProvider>();
+            var csharpFixers = ImmutableArray.CreateBuilder<CodeFixProvider>();
+            var visualBasicFixers = ImmutableArray.CreateBuilder<CodeFixProvider>();
             var loader = new AnalyzerAssemblyLoader();
 
             foreach (var (language, assembly) in assemblies)
@@ -224,8 +238,12 @@ internal static class InspectionPackCatalog
 
                 // Fixers ship in separate assemblies inside the same package (…CodeFixes.dll /
                 // …CodeFixers.dll). Roslyn 5.x exposes no fixer enumeration on AnalyzerFileReference,
-                // so the concrete CodeFixProvider types are created reflectively.
-                fixers.AddRange(LoadFixers(assembly, loader, definition.Id, warnings));
+                // so the concrete CodeFixProvider types are created reflectively. They are tagged with
+                // the folder they came from: the .NET analyzers ship their VB fixers in the vb assembly
+                // (Basic…Fixer), and a C# fixer offered for a VB document does nothing.
+                var foundFixers = LoadFixers(assembly, loader, definition.Id, warnings);
+                if (language == LanguageNames.VisualBasic) visualBasicFixers.AddRange(foundFixers);
+                else csharpFixers.AddRange(foundFixers);
             }
 
             var csharp = Distinct(csharpAnalyzers);
@@ -236,7 +254,8 @@ internal static class InspectionPackCatalog
                 continue;
             }
 
-            packs.Add(new LoadedInspectionPack(definition, csharp, visualBasic, Distinct(fixers)));
+            packs.Add(new LoadedInspectionPack(
+                definition, csharp, visualBasic, Distinct(csharpFixers), Distinct(visualBasicFixers)));
         }
 
         return new InspectionPackLibrary(packs, warnings);
