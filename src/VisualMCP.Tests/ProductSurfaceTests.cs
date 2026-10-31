@@ -67,7 +67,7 @@ public sealed class ProductSurfaceTests
         Assert.True(byArea.TryGetProperty("Debugging", out _), "the debugger area must be present");
 
         var catalogues = report.GetProperty("catalogues");
-        Assert.Equal(9, catalogues.GetProperty("xamlRules").GetArrayLength());
+        Assert.Equal(15, catalogues.GetProperty("xamlRules").GetArrayLength());
         Assert.True(catalogues.GetProperty("contextActions").GetArrayLength() >= 20,
             "the context-action catalogue must include the latest family: " +
             catalogues.GetProperty("contextActions").GetArrayLength());

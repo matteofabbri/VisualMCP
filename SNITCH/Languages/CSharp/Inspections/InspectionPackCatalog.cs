@@ -186,9 +186,10 @@ internal static class InspectionPackCatalog
             // every other pack is an external analyzer package discovered on disk or in the NuGet cache.
             if (definition.Id is "house" or "rider")
             {
-                var (packCsharp, packVisualBasic) = definition.Id == "house"
+                var (packCsharp, packVisualBasic, packFixers) = definition.Id == "house"
                     ? (ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer()),
-                       ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileVisualBasicAnalyzer()))
+                       ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileVisualBasicAnalyzer()),
+                       ImmutableArray<CodeFixProvider>.Empty)
                     : (ImmutableArray.Create<DiagnosticAnalyzer>(
                            new Rider.ConvertToConstantLocalAnalyzer(),
                            new Rider.LoopVariableChangedAnalyzer(),
@@ -197,12 +198,18 @@ internal static class InspectionPackCatalog
                            new Rider.EmptyConstructorAnalyzer(),
                            new Rider.RedundantIfElseAnalyzer(),
                            new Rider.ConstantConditionAnalyzer(),
-                           new Rider.RedundantBaseConstructorCallAnalyzer()),
-                       ImmutableArray<DiagnosticAnalyzer>.Empty);
+                           new Rider.RedundantBaseConstructorCallAnalyzer(),
+                           new Rider.ConvertToCompoundAssignmentAnalyzer(),
+                           new Rider.RedundantLambdaSignatureParenthesesAnalyzer(),
+                           new Rider.UseNameofExpressionAnalyzer(),
+                           new Rider.StringLiteralAsInterpolationArgumentAnalyzer(),
+                           new Rider.RedundantCheckBeforeAssignmentAnalyzer()),
+                       ImmutableArray<DiagnosticAnalyzer>.Empty,
+                       ImmutableArray.Create<CodeFixProvider>(new Rider.RiderCodeFixProvider()));
 
                 packs.Add(new LoadedInspectionPack(
                     definition, packCsharp, packVisualBasic,
-                    ImmutableArray<CodeFixProvider>.Empty, ImmutableArray<CodeFixProvider>.Empty));
+                    packFixers, ImmutableArray<CodeFixProvider>.Empty));
                 continue;
             }
 

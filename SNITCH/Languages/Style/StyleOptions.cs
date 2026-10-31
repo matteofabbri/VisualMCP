@@ -54,6 +54,36 @@ public enum AccessibilityPreference
     OmitIfDefault,
 }
 
+/// <summary>
+/// What <c>dotnet_style_qualification_for_*</c> asks for one member kind: <c>Me.</c> in Visual Basic,
+/// <c>this.</c> in C#. IDE0009 writes the qualifier where the option is <c>true</c>; the opposite
+/// preference is what IDE0003 already does unconditionally.
+/// </summary>
+public enum QualificationPreference
+{
+    /// <summary>Not configured: the engine leaves the qualification alone.</summary>
+    None,
+    /// <summary>Prefer the qualified form (<c>Me.X</c>, <c>this.X</c>).</summary>
+    PreferQualified,
+    /// <summary>Prefer the unqualified form.</summary>
+    PreferUnqualified,
+}
+
+/// <summary>The four <c>dotnet_style_qualification_for_*</c> categories.</summary>
+public sealed record QualificationStyle
+{
+    public QualificationPreference Field { get; init; } = QualificationPreference.None;
+
+    public QualificationPreference Property { get; init; } = QualificationPreference.None;
+
+    public QualificationPreference Method { get; init; } = QualificationPreference.None;
+
+    public QualificationPreference Event { get; init; } = QualificationPreference.None;
+
+    public bool Any => Field != QualificationPreference.None || Property != QualificationPreference.None ||
+                       Method != QualificationPreference.None || Event != QualificationPreference.None;
+}
+
 /// <summary>What <c>csharp_style_var_*</c> asks for in one declaration category.</summary>
 public enum VarPreference
 {
@@ -114,6 +144,9 @@ public sealed record StyleOptions
     /// <summary>The <c>IsNot</c> preference of a Visual Basic repository.</summary>
     public IsNotPreference PreferIsNot { get; init; } = IsNotPreference.None;
 
+    /// <summary>The <c>dotnet_style_qualification_for_*</c> preferences (IDE0009).</summary>
+    public QualificationStyle Qualification { get; init; } = new();
+
     /// <summary>The <c>csharp_style_var_*</c> preferences (IDE0007/IDE0008).</summary>
     public VarStyle Var { get; init; } = new();
 
@@ -150,6 +183,7 @@ public sealed record StyleOptions
         Braces != BracePreference.None || ModifierOrder.Count > 0 || Namespaces != NamespacePreference.None ||
         ForeachExplicitCast != ForeachCastPreference.None || Accessibility != AccessibilityPreference.None ||
         PreferIsNot != IsNotPreference.None || !string.IsNullOrWhiteSpace(FileHeader) ||
+        Qualification.Any ||
         Var.ForBuiltInTypes != VarPreference.None || Var.WhenTypeIsApparent != VarPreference.None ||
         Var.Elsewhere != VarPreference.None || Parentheses.Any ||
         AllowMultipleBlankLines is not null || AllowEmbeddedStatementsOnSameLine is not null ||
@@ -157,6 +191,26 @@ public sealed record StyleOptions
         AllowBlankLineAfterColonInConstructorInitializer is not null ||
         AllowBlankLineAfterTokenInConditionalExpression is not null ||
         AllowBlankLineAfterTokenInArrowExpressionClause is not null;
+
+    /// <summary>
+    /// The header template with its placeholders filled in: <c>\n</c> separates the lines (that is how
+    /// the option is written in an <c>.editorconfig</c>), and the tokens the IDE documents are
+    /// substituted. A token this engine does not know is left as written, so a template is never silently
+    /// altered. Shared by every language: the template is the repository's, not a syntax.
+    /// </summary>
+    public static string? ResolveHeader(string? template, string? fileName, string? projectName)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return null;
+
+        var text = template.Replace("\\n", "\n").Replace("\r\n", "\n");
+        text = text
+            .Replace("{fileName}", fileName ?? string.Empty)
+            .Replace("{fileNameOrFilePath}", fileName ?? string.Empty)
+            .Replace("{projectName}", projectName ?? string.Empty)
+            .Replace("{copyrightText}", string.Empty);
+
+        return string.IsNullOrWhiteSpace(text) ? null : text.TrimEnd('\n');
+    }
 }
 
 /// <summary>

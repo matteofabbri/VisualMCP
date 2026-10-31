@@ -62,13 +62,23 @@ public sealed class SimplifyMemberAccessRewrite : VbStyleRewrite
     }
 }
 
-/// <summary>IDE0003: <c>Me.Member</c> → <c>Member</c> when nothing shadows it.</summary>
+/// <summary>
+/// IDE0003: <c>Me.Member</c> → <c>Member</c> when nothing shadows it, unless the repository asked for the
+/// qualified form of that member kind (IDE0009) — the two directions never run on the same member.
+/// </summary>
 public sealed class RemoveMeQualificationRewrite : VbStyleRewrite
 {
     public override StyleRule Rule { get; } = new(
         "IDE0003", "Name can be simplified", "Me.Member → Member when the unqualified name binds");
 
-    public override StyleMatch? TryMatch(SyntaxNode node, SemanticModel model, CancellationToken cancellationToken)
+    public override StyleMatch? TryMatch(SyntaxNode node, SemanticModel model, CancellationToken cancellationToken) =>
+        TryMatch(node, model, null, cancellationToken);
+
+    public override StyleMatch? TryMatch(SyntaxNode node, StyleContext context) =>
+        TryMatch(node, context.Model, context.Options.Qualification, context.CancellationToken);
+
+    private StyleMatch? TryMatch(
+        SyntaxNode node, SemanticModel model, QualificationStyle? qualification, CancellationToken cancellationToken)
     {
         if (node is not MemberAccessExpressionSyntax memberAccess) return null;
         if (!memberAccess.IsKind(SyntaxKind.SimpleMemberAccessExpression)) return null;
@@ -76,6 +86,18 @@ public sealed class RemoveMeQualificationRewrite : VbStyleRewrite
 
         var symbol = model.GetSymbolInfo(memberAccess, cancellationToken).Symbol;
         if (symbol is not (IFieldSymbol or IPropertySymbol or IMethodSymbol or IEventSymbol)) return null;
+
+        // The option wins over the default: a repository that asks for "Me." on this kind keeps it.
+        var preference = symbol switch
+        {
+            IFieldSymbol => qualification?.Field,
+            IPropertySymbol => qualification?.Property,
+            IMethodSymbol => qualification?.Method,
+            IEventSymbol => qualification?.Event,
+            _ => null,
+        };
+        if (preference == QualificationPreference.PreferQualified) return null;
+
         if (!BindsTo(model, memberAccess, memberAccess.Name.ToString(), symbol, asType: false)) return null;
 
         return Match(node, memberAccess.Name.WithTriviaFrom(memberAccess));

@@ -9,7 +9,7 @@ namespace Snitch.Languages.CSharp.Inspections.Rider;
 /// <summary>
 /// The ReSharper-shaped inspections this engine implements natively, under ReSharper's own ids. They are a
 /// curated set — the parts of the proprietary catalogue that add a detection Roslyn's packs and the style
-/// engine do not already make — not a port of the ~2500 closed-source inspections.
+/// engine do not already make — not a port of the closed-source catalogue.
 /// </summary>
 /// <remarks>
 /// A Roslyn diagnostic id must be a C# identifier, so ReSharper's dotted ids are spelled with an
@@ -431,5 +431,302 @@ public sealed class RedundantBaseConstructorCallAnalyzer : DiagnosticAnalyzer
         if (initializer.ArgumentList.Arguments.Count > 0) return;
 
         context.ReportDiagnostic(Diagnostic.Create(Rule, initializer.GetLocation()));
+    }
+}
+
+/// <summary>ConvertToCompoundAssignment: x = x + y can be written x += y.</summary>
+public sealed class ConvertToCompoundAssignmentAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "ConvertToCompoundAssignment", "Convert to compound assignment",
+        "The assignment can be written as a compound assignment",
+        DiagnosticSeverity.Info);
+
+    /// <summary>The binary operator and the compound assignment it maps to.</summary>
+    internal static readonly Dictionary<SyntaxKind, SyntaxKind> CompoundOperators = new()
+    {
+        [SyntaxKind.AddExpression] = SyntaxKind.AddAssignmentExpression,
+        [SyntaxKind.SubtractExpression] = SyntaxKind.SubtractAssignmentExpression,
+        [SyntaxKind.MultiplyExpression] = SyntaxKind.MultiplyAssignmentExpression,
+        [SyntaxKind.DivideExpression] = SyntaxKind.DivideAssignmentExpression,
+        [SyntaxKind.ModuloExpression] = SyntaxKind.ModuloAssignmentExpression,
+        [SyntaxKind.BitwiseAndExpression] = SyntaxKind.AndAssignmentExpression,
+        [SyntaxKind.BitwiseOrExpression] = SyntaxKind.OrAssignmentExpression,
+        [SyntaxKind.ExclusiveOrExpression] = SyntaxKind.ExclusiveOrAssignmentExpression,
+        [SyntaxKind.LeftShiftExpression] = SyntaxKind.LeftShiftAssignmentExpression,
+        [SyntaxKind.RightShiftExpression] = SyntaxKind.RightShiftAssignmentExpression,
+    };
+
+    /// <summary>The token that spells each compound assignment (<c>+=</c>, …), which the fix writes.</summary>
+    internal static readonly Dictionary<SyntaxKind, SyntaxKind> CompoundTokens = new()
+    {
+        [SyntaxKind.AddExpression] = SyntaxKind.PlusEqualsToken,
+        [SyntaxKind.SubtractExpression] = SyntaxKind.MinusEqualsToken,
+        [SyntaxKind.MultiplyExpression] = SyntaxKind.AsteriskEqualsToken,
+        [SyntaxKind.DivideExpression] = SyntaxKind.SlashEqualsToken,
+        [SyntaxKind.ModuloExpression] = SyntaxKind.PercentEqualsToken,
+        [SyntaxKind.BitwiseAndExpression] = SyntaxKind.AmpersandEqualsToken,
+        [SyntaxKind.BitwiseOrExpression] = SyntaxKind.BarEqualsToken,
+        [SyntaxKind.ExclusiveOrExpression] = SyntaxKind.CaretEqualsToken,
+        [SyntaxKind.LeftShiftExpression] = SyntaxKind.LessThanLessThanEqualsToken,
+        [SyntaxKind.RightShiftExpression] = SyntaxKind.GreaterThanGreaterThanEqualsToken,
+    };
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.SimpleAssignmentExpression);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var assignment = (AssignmentExpressionSyntax)context.Node;
+        if (!IsSimpleTarget(assignment.Left)) return;
+        if (assignment.Right is not BinaryExpressionSyntax binary) return;
+        if (!CompoundOperators.ContainsKey(binary.Kind())) return;
+        if (!SyntaxFactory.AreEquivalent(assignment.Left, binary.Left)) return;
+
+        var type = context.SemanticModel.GetTypeInfo(assignment.Left, context.CancellationToken).Type;
+        if (type is null || !IsCompoundable(type)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, assignment.GetLocation()));
+    }
+
+    /// <summary>A target whose evaluation has no side effect: a name, or a member access over one.</summary>
+    internal static bool IsSimpleTarget(ExpressionSyntax expression) => expression switch
+    {
+        IdentifierNameSyntax => true,
+        MemberAccessExpressionSyntax member => IsSimpleTarget(member.Expression),
+        ThisExpressionSyntax or BaseExpressionSyntax => true,
+        _ => false,
+    };
+
+    /// <summary>A type the built-in compound operators are defined for.</summary>
+    internal static bool IsCompoundable(ITypeSymbol type) => type.TypeKind == TypeKind.Enum || type.SpecialType is
+        SpecialType.System_String or SpecialType.System_Char or SpecialType.System_Boolean or
+        SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Int32 or
+        SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64 or
+        SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal or
+        SpecialType.System_Byte or SpecialType.System_SByte;
+}
+
+/// <summary>RedundantLambdaSignatureParentheses: (x) =&gt; … needs no parentheses around one untyped parameter.</summary>
+public sealed class RedundantLambdaSignatureParenthesesAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "RedundantLambdaSignatureParentheses", "Redundant lambda signature parentheses",
+        "The parentheses around the single lambda parameter are redundant",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.ParenthesizedLambdaExpression);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var lambda = (ParenthesizedLambdaExpressionSyntax)context.Node;
+        if (lambda.ParameterList.Parameters.Count != 1) return;
+
+        var parameter = lambda.ParameterList.Parameters[0];
+        if (parameter.Type is not null) return;
+        if (parameter.Modifiers.Count > 0) return;
+        if (parameter.Default is not null) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, lambda.ParameterList.GetLocation()));
+    }
+}
+
+/// <summary>
+/// UseNameofExpression: a string literal that repeats the name of a parameter, in the places where the
+/// name is a reference (the ArgumentException family, and any argument bound to a paramName parameter).
+/// </summary>
+public sealed class UseNameofExpressionAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "UseNameofExpression", "Use nameof expression",
+        "The string literal '{0}' can be replaced with nameof({0})",
+        DiagnosticSeverity.Info);
+
+    private static readonly HashSet<string> ArgumentExceptionTypes = new(StringComparer.Ordinal)
+    {
+        "ArgumentNullException", "ArgumentException", "ArgumentOutOfRangeException",
+    };
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(AnalyzeCreation, SyntaxKind.ObjectCreationExpression);
+        context.RegisterSyntaxNodeAction(AnalyzeInvocation, SyntaxKind.InvocationExpression);
+    }
+
+    private static void AnalyzeCreation(SyntaxNodeAnalysisContext context)
+    {
+        var creation = (ObjectCreationExpressionSyntax)context.Node;
+        if (creation.ArgumentList is null) return;
+        if (context.SemanticModel.GetSymbolInfo(creation, context.CancellationToken).Symbol is not IMethodSymbol constructor)
+            return;
+        if (!ArgumentExceptionTypes.Contains(constructor.ContainingType.Name)) return;
+
+        foreach (var argument in creation.ArgumentList.Arguments)
+        {
+            if (IsParameterNameLiteral(context, argument.Expression))
+                context.ReportDiagnostic(Diagnostic.Create(Rule, argument.Expression.GetLocation(),
+                    ((LiteralExpressionSyntax)argument.Expression).Token.ValueText));
+        }
+    }
+
+    private static void AnalyzeInvocation(SyntaxNodeAnalysisContext context)
+    {
+        var invocation = (InvocationExpressionSyntax)context.Node;
+        if (context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken).Symbol is not IMethodSymbol method)
+            return;
+
+        for (var index = 0; index < invocation.ArgumentList.Arguments.Count && index < method.Parameters.Length; index++)
+        {
+            var parameter = method.Parameters[index];
+            if (!parameter.Name.Contains("paramName", StringComparison.OrdinalIgnoreCase) &&
+                !parameter.Name.Contains("parameterName", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var expression = invocation.ArgumentList.Arguments[index].Expression;
+            if (IsParameterNameLiteral(context, expression))
+                context.ReportDiagnostic(Diagnostic.Create(Rule, expression.GetLocation(),
+                    ((LiteralExpressionSyntax)expression).Token.ValueText));
+        }
+    }
+
+    /// <summary>The expression is a string literal that names a parameter of the enclosing member.</summary>
+    private static bool IsParameterNameLiteral(SyntaxNodeAnalysisContext context, ExpressionSyntax expression)
+    {
+        if (expression is not LiteralExpressionSyntax literal) return false;
+        if (!literal.IsKind(SyntaxKind.StringLiteralExpression)) return false;
+
+        var name = literal.Token.ValueText;
+        if (name.Length == 0) return false;
+
+        for (var current = expression.Parent; current is not null; current = current.Parent)
+        {
+            if (current is not (MethodDeclarationSyntax or ConstructorDeclarationSyntax or LocalFunctionStatementSyntax or
+                AccessorDeclarationSyntax or OperatorDeclarationSyntax or IndexerDeclarationSyntax))
+                continue;
+
+            var declared = context.SemanticModel.GetDeclaredSymbol(current, context.CancellationToken);
+            if (declared is null) return false;
+
+            var parameters = declared switch
+            {
+                IMethodSymbol method => method.Parameters,
+                IPropertySymbol property => property.Parameters,
+                _ => default,
+            };
+
+            foreach (var parameter in parameters)
+                if (string.Equals(parameter.Name, name, StringComparison.Ordinal))
+                    return true;
+
+            return false;
+        }
+
+        return false;
+    }
+}
+
+/// <summary>StringLiteralAsInterpolationArgument: a literal inside an interpolation is plain text.</summary>
+public sealed class StringLiteralAsInterpolationArgumentAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "StringLiteralAsInterpolationArgument", "Merge string literal with containing interpolation",
+        "The string literal can be merged into the interpolated string as text",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.Interpolation);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var interpolation = (InterpolationSyntax)context.Node;
+        if (interpolation.AlignmentClause is not null || interpolation.FormatClause is not null) return;
+        if (interpolation.Expression is not LiteralExpressionSyntax literal) return;
+        if (!literal.IsKind(SyntaxKind.StringLiteralExpression)) return;
+        if (!literal.Token.Text.StartsWith("\"", StringComparison.Ordinal)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, interpolation.GetLocation()));
+    }
+}
+
+/// <summary>RedundantCheckBeforeAssignment: if (a != b) a = b; assigns in both cases.</summary>
+public sealed class RedundantCheckBeforeAssignmentAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "RedundantCheckBeforeAssignment", "Redundant check before assignment",
+        "The guard repeats the assignment: the value is written either way",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.IfStatement);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var statement = (IfStatementSyntax)context.Node;
+        if (statement.Else is not null) return;
+        if (statement.Condition is not BinaryExpressionSyntax condition) return;
+        if (!condition.IsKind(SyntaxKind.NotEqualsExpression)) return;
+
+        var body = statement.Statement switch
+        {
+            ExpressionStatementSyntax single => single.Expression,
+            BlockSyntax { Statements: [ExpressionStatementSyntax only] } => only.Expression,
+            _ => null,
+        };
+        if (body is not AssignmentExpressionSyntax assignment) return;
+        if (!assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)) return;
+
+        if (!SyntaxFactory.AreEquivalent(assignment.Left, condition.Left)) return;
+        if (!SyntaxFactory.AreEquivalent(assignment.Right, condition.Right)) return;
+
+        // The rewrite drops one evaluation of each side, so both must be side-effect free.
+        if (!IsSideEffectFree(context, assignment.Left)) return;
+        if (!IsSideEffectFree(context, assignment.Right)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, statement.IfKeyword.GetLocation()));
+    }
+
+    private static bool IsSideEffectFree(SyntaxNodeAnalysisContext context, ExpressionSyntax expression)
+    {
+        switch (expression)
+        {
+            case LiteralExpressionSyntax:
+                return true;
+            case IdentifierNameSyntax:
+                var symbol = context.SemanticModel.GetSymbolInfo(expression, context.CancellationToken).Symbol;
+                return symbol is ILocalSymbol or IParameterSymbol or IFieldSymbol;
+            case MemberAccessExpressionSyntax member:
+                return IsSideEffectFree(context, member.Expression);
+            default:
+                return false;
+        }
     }
 }

@@ -187,7 +187,7 @@ listener serving every page).
 | Function ↔ indexer | ✅ | `function_to_indexer` / `indexer_to_function` — `T Get(int i)` ↔ `T this[int i]`, call sites rewritten; the call sites must be in the same file |
 | Introduce part of string | ✅ | `introduce_part_of_string` — a substring of a literal becomes a `private const` and a concatenation remains (gate: compiler) |
 | Style simplifications | ✅ | `simplify_code` — 87 IDE ids rewritten and 39 listed with their reason (table below), document/project/solution scope, preview, gate: compiler |
-| Visual Basic style simplifications | ✅ | `simplify_vb_code` — 15 ids of the VB column (14 rewrites: IDE0001, IDE0002, IDE0003, IDE0004, IDE0049, IDE0041, IDE0029/IDE0030, IDE0031, IDE0047, IDE0054, IDE0100, IDE0075, IDE0084, IDE0081), 34 VB ids not rewritten with their reason; document/project/solution scope, preview, gate: compiler, id `IDE0084` driven by `visual_basic_style_prefer_isnot_expression` |
+| Visual Basic style simplifications | ✅ | `simplify_vb_code` — 41 ids of the VB column (simplification, null handling, casts, conditionals, the `Me.` qualifier, the `If`/`Else` folds, a completed `Select Case`, object initializers, tuple names, `NameOf`, interpolation, both LINQ chains, `HashCode.Combine`, modifier order, accessibility, `ReadOnly`, an unused member, an unread field, unreachable code, a dead store, an unused parameter, an auto-property and the layout rules), 8 VB ids not rewritten with a reason each; document/project/solution scope, preview, gate: compiler |
 | Convert class to record | ✅ | `convert_to_record` — keyword change, or the positional form (`record Point(int X, int Y)`) when a constructor assigns every parameter to an auto-property of the same name (gate: compiler) |
 | Convert abstract class ↔ interface | ✅ | `convert_type_kind` — both directions in one tool: the declaration and every derived type/implementer are rewritten together (`override` removed or added); instance state, structs, records and default interface methods are refused with the reason (gate: compiler over every project touched) |
 | Flatten conditional / Remove nesting | ❌ | 🎯 |
@@ -526,7 +526,8 @@ instead of letting ILSpy fail inside the metadata.
 | Dump collect/analyze (dotnet-dump) | ✅ | `profile_dump` — `WriteDump` + ClrMD analysis (heap, stacks, sync blocks) |
 | Diagnostics toolchain installer | ✅ | `profile_tools` — status/install/update of the 7 tools, with native vs delegated coverage |
 | Symbols (dotnet-symbol) | ✅ | `profile_symbols` — CodeView, download from the symbol server, cache for `file:line` resolution |
-| dotnet-monitor (HTTP sidecar) | ✅ | `profile_monitor` — start/stop/probe on loopback (`--no-auth`) |
+| dotnet-monitor (HTTP sidecar) | ✅ | `profile_monitor` — native in-process sidecar on loopback: `/info`, `/processes`, `/metrics` (JSON or Prometheus), `/trace`, `/dump`, `/heap`, `/stacks`, `/fileio` |
+| File I/O (Visual Studio) | ✅ | `profile_file_io` — Windows kernel ETW: per-process/per-file read/write bytes and operation counts, with findings (Windows only, elevated) |
 
 > Profiling was introduced on 2026-10-29 in the separate library `SNITCH/Libraries/Snitch.Profiling`
 > (EventPipe + ClrMD + TraceEvent); documentation in `docs/profiling.md`. On the same day the advanced layer
@@ -700,9 +701,9 @@ tail, data flow and the ⚠️ security query. **387 → 397 tools.**
 | F# | ✅ | `fsharp_files` (modules, types, functions, opens) and `analyze_fsharp` (FS0001–FS0010); no semantic model — the scanner resolves nothing |
 
 What stays a boundary rather than a row: a scanner proves the shape of a line, never a binding, a type
-or a schema; ReSharper's proprietary ~2500-id inspection catalogue is a closed-source reimplementation,
-not a tool; and the data-flow walk does not follow a value through a field of another object, a database
-or a queue.
+or a schema; ReSharper's closed-source inspection catalogue (1,560 ids in Rider 2026.2.1, read by
+`resharper_inspection_map`) is a reimplementation, not a tool; and the data-flow walk does not follow a
+value through a field of another object, a database or a queue.
 
 ---
 
@@ -810,7 +811,7 @@ and formatting, the "create" family, the inspection baseline, seven analyses), t
 `launch_settings`, `publish_profile`, `nuget_sources`), the **10 of section 19** (`trace_data_flow`,
 `find_throw_sites`, `js_files`, `analyze_js`, `markup_files`, `analyze_markup`, `yaml_files`,
 `analyze_yaml`, `fsharp_files`, `analyze_fsharp`) or `commit_lint` (section 20), nor `disk_usage`
-(section 21), nor the board pair of section 22. The live count is `capability_report`: **404 tools**.
+(section 21), nor the board pair of section 22. The live count is `capability_report`: **411 tools**.
 
 ---
 
@@ -828,7 +829,7 @@ What remains, in order of impact:
 | ReSharper / Rider feature | Priority | State |
 |---------------------------|:---:|-------|
 | Interactive debugger (breakpoints, stepping, watch, evaluate, debugging a test) | 🔴 High | ✅ closed on 2026-10-30: 16 `debug_*` tools on netcoredbg (DAP), `debug_test` included; edit-and-continue and breakpoints by exception type remain outside |
-| Language/platform scope: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Medium | ⚠️ closed on 2026-10-31 for XAML (inventory + XAML0001–0009 + navigation), Razor, SQL (SQL0001–SQL0010 scanner), EF migrations (`ef_migrations`), Kubernetes/Helm (`k8s_*`) and the Node toolchain (npm/pnpm/yarn, tsc, eslint). **JS/TS** (toolchain only) and **F#** (build/test only: it is not a Roslyn language) remain without a semantic model |
+| Language/platform scope: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Medium | ⚠️ closed on 2026-10-31 for XAML (dialect detection, inventory, XAML0001–0015 with the binding paths validated against their data type, the binding inspector, the element tree, navigation and four verified edits), Razor, SQL (SQL0001–SQL0010 scanner), EF migrations (`ef_migrations`), Kubernetes/Helm (`k8s_*`) and the Node toolchain (npm/pnpm/yarn, tsc, eslint). **JS/TS** (toolchain only) and **F#** (build/test only: it is not a Roslyn language) remain without a semantic model |
 | Test flow: debugging a test, continuous testing, "which tests cover this symbol", scaffolding, mutation testing | 🟡 Medium | ✅ closed: `run_test`, `rerun_failed`, `debug_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `run_affected_tests`, `find_flaky_tests` |
 | Decompiled code as a workspace (go-to-definition, find usages) and IL view | 🟡 Medium | ✅ closed for navigation: `assembly_workspace` (search/source/references/outline over a Roslyn workspace per MVID) + `disassemble` for IL; rename and debugging in decompiled code remain impossible (there is no source to write) |
 | Diagrams and exploration: interactive type/project graph, sequence diagram, structure view, code vision, TODO explorer | 🟢 Low | ⚠️ `export_dependency_graph` (projects/namespaces/types), `call_graph`, `sequence_diagram`, `control_flow_graph`, `track_value`, `find_todos`, `find_endpoints`, `solution_map` and `find_file` exist; rendering is the client's job |

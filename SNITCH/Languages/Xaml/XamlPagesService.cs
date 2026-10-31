@@ -26,15 +26,18 @@ public sealed class XamlPagesService : IXamlPagesService
         var pages = new List<object>();
         var kinds = new List<string>();
         var projects = new List<string>();
+        var dialects = new List<string>();
 
         foreach (var file in collection.Files)
         {
             var document = XamlAnalysis.TryRead(file, collection, []);
             if (document is null) continue;
 
+            var facts = collection.FactsFor(file);
             var kind = Kind(document.RootName);
             kinds.Add(kind);
             projects.Add(file.Project ?? "(unassigned)");
+            dialects.Add(facts.DialectName);
 
             var codeBehind = document.ClassName is null
                 ? null
@@ -46,6 +49,7 @@ public sealed class XamlPagesService : IXamlPagesService
                 file = file.FilePath,
                 relativePath = file.RelativePath,
                 project = file.Project,
+                dialect = facts.DialectName,
                 kind,
                 rootElement = document.RootName,
                 className = document.ClassName,
@@ -68,6 +72,8 @@ public sealed class XamlPagesService : IXamlPagesService
                     styles = document.Styles.Count,
                     templatesWithoutDataType = document.TemplatesWithoutDataType.Count,
                     nameReferences = document.NameReferences.Count,
+                    bindings = document.Bindings.Count,
+                    setters = document.Setters.Count,
                 },
             });
         }
@@ -83,11 +89,17 @@ public sealed class XamlPagesService : IXamlPagesService
                 .OrderByDescending(group => group.Count())
                 .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase),
+            byDialect = dialects
+                .GroupBy(dialect => dialect, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase),
             byProject = projects
                 .GroupBy(project => project, StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(group => group.Count())
                 .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase),
+            projects = collection.Projects.Select(facts => facts.ToJson()).ToList(),
             truncated = collection.Truncated,
             skipped = collection.Skipped.Count > 0 ? collection.Skipped : null,
             unreadable = collection.Unreadable.Count > 0 ? collection.Unreadable : null,

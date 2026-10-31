@@ -121,7 +121,7 @@ static async Task RunServerAsync(string[] args)
         "StringBuilder -> context_action (action id + line; `text` carries the parameter, the condition or the resource; " +
         "preview by default, refused when the edit would add a compiler error). A .vb file routes to the Visual Basic " +
         "engine, which implements the 33 ids that have a VB spelling and refuses the C#-only ones with the reason.\n" +
-        "- Apply Visual Basic style suggestions (15 rule ids, compiler-gated, preview by default) -> simplify_vb_code " +
+        "- Apply Visual Basic style suggestions (41 rule ids, compiler-gated, preview by default) -> simplify_vb_code " +
         "(simplify_code rewrites C# only).\n" +
         "- Fix an inspection's finding -> apply_code_fix (the analyzer's own CodeFixProvider, preview by default, FixAll by " +
         "scope); on a .vb file it uses the .NET analyzers' Visual Basic fixers.\n" +
@@ -170,8 +170,11 @@ static async Task RunServerAsync(string[] args)
         "live EventCounters -> profile_counters; managed stacks of every thread + contended locks -> profile_stacks; " +
         "heap types, LOH, finalizable objects and duplicate strings -> profile_heap; who keeps a type alive " +
         "(root chains with the holding fields, plus the referrer types) -> profile_retention; collect or analyse a dump -> profile_dump; " +
-        "download PDBs so frames resolve to file:line -> profile_symbols; check/install the external diagnostics tools -> profile_tools; " +
-        "start/probe dotnet-monitor -> profile_monitor.\n" +
+        "download PDBs so frames resolve to file:line -> profile_symbols; check/install the external diagnostics tools -> profile_tools " +
+        "(no profiler above needs them); who READS/WRITES which file, with per-process and per-file bytes/operation counts " +
+        "(Visual Studio's File I/O tool over the Windows kernel ETW provider; Windows + elevated) -> profile_file_io; " +
+        "start/probe the native in-process diagnostics sidecar (HTTP on loopback: /info, /processes, /metrics, /trace, /dump, " +
+        "/heap, /stacks, /fileio) -> profile_monitor.\n" +
         "- Why is the process slow? A ranked verdict (cpu/gc/io-wait/sync-over-async/lock-wait/blocked-native, " +
         "each as the share of the window it explains) instead of a table -> profile_slowdown.\n" +
         "- Why is memory growing? growth/shrink/stable/single-snapshot, with the type correlated to its allocation " +
@@ -221,11 +224,17 @@ static async Task RunServerAsync(string[] args)
         "- Read a Razor page in the canonical pseudocode (a page becomes a class: @model/@inject are properties, " +
         "@code members are lowered as C#, the markup is the body of a Render method) -> metacode_translate on a " +
         ".cshtml/.razor path.\n" +
-        "- XAML (.xaml/.axaml: WPF, WinUI, MAUI, Avalonia): what exists and how it is wired -> xaml_pages; markup " +
-        "problems with rule ids and file:line (duplicate x:Name/x:Key, missing or unresolvable x:Class, an event " +
-        "handler with no method, a resource key nothing defines, a DataTemplate without DataType, a name colliding " +
-        "with a member, invalid XML) -> analyze_xaml; follow an x:Name, a resource key, a style (BasedOn chain) or " +
-        "an event handler to everything attached to it -> xaml_navigate. Markup-only: bindings are not compiled.\n" +
+        "- XAML (.xaml/.axaml: WPF, WinUI 3, MAUI, Avalonia, UWP): what exists, which DIALECT each project writes " +
+        "(with the signals) and how it is wired -> xaml_pages; problems with rule ids and file:line (names, keys, " +
+        "x:Class, handlers, resources, templates, and the binding rules XAML0010-XAML0015: a binding path that does " +
+        "not exist on its data type, a Setter without Property or with a property the TargetType lacks, x:Bind in a " +
+        "dialect that does not compile it, an ElementName that names no element, an unresolvable TargetType) -> " +
+        "analyze_xaml; every binding with the type its path is checked against and a per-segment status -> " +
+        "xaml_bindings; the element tree one file declares -> xaml_tree; follow an x:Name, a resource key, a style " +
+        "(BasedOn chain) or an event handler to everything attached to it -> xaml_navigate. Edits, previewed and " +
+        "verified (the file must still parse as XML) -> xaml_rename (an x:Name across markup and the generated field, " +
+        "a resource key across the project), xaml_extract_style, xaml_promote_resource, format_xaml. It does not " +
+        "compile the XAML: a binding whose data type the markup does not name is 'not-checked', never guessed.\n" +
         "- EF Core migrations through the project's own tool (list/add/script/remove/update/info) with a structured " +
         "result -> ef_migrations.\n" +
         "- Kubernetes through the ecosystem's client: status/context/get (rows parsed from -o json)/describe/logs -> " +
@@ -251,9 +260,10 @@ static async Task RunServerAsync(string[] args)
         "likely typos (one edit from a word the solution or the dictionary uses) -> find_spelling_issues; the " +
         ".editorconfig naming policy, list or rename the violations -> naming_rules; and the warm loop that re-runs the " +
         "packs when the solution changes, with cached findings to poll -> background_analysis / analysis_findings.\n" +
-        "- ReSharper's proprietary inspection ids (~2500, closed-source PSI analyzers): what each maps to here and what " +
-        "is absent -> resharper_inspection_map; 8 of them are implemented natively under ReSharper's ids in the opt-in " +
-        "'rider' inspection pack (inspect_code packs=rider).\n" +
+        "- ReSharper's inspection ids (1,560 in Rider 2026.2.1, closed-source PSI analyzers): the real catalogue read " +
+        "from the installation's metadata — id, language group, producing analyzer, description — and what each maps to " +
+        "here -> resharper_inspection_map; 13 of them are implemented natively under ReSharper's ids in the opt-in " +
+        "'rider' inspection pack, 11 with a code fix (inspect_code packs=rider, then apply_code_fix).\n" +
         "- Test workflow: run ONE test or class without hand-building --filter, with a TRX result and the failures " +
         "recorded -> run_test; re-run exactly those failures -> rerun_failed; which test methods reference this symbol " +
         "-> tests_covering_symbol; scaffold an xUnit class for a type (one [Fact] per public method, compiler-gated) -> " +
@@ -399,14 +409,22 @@ static async Task RunServerAsync(string[] args)
             // tools), with breakpoints, stepping, stacks, variables and expression evaluation.
             services.AddSnitchDebugging();
 
-            // The XAML layer (.xaml/.axaml): inventory, markup diagnostics with Roslyn-resolved
-            // code-behind, and navigation from a name/key/handler to everything attached to it.
+            // The XAML layer (.xaml/.axaml): inventory with the project's dialect and target frameworks,
+            // markup diagnostics plus binding validation resolved through Roslyn, navigation from a
+            // name/key/handler to everything attached to it, the binding inspector and the element tree,
+            // and the verified edits (rename, extract a style, promote a literal, reformat).
             services.AddSingleton<Snitch.Languages.Xaml.IXamlPagesService,
                                   Snitch.Languages.Xaml.XamlPagesService>();
             services.AddSingleton<Snitch.Languages.Xaml.IAnalyzeXamlService,
                                   Snitch.Languages.Xaml.AnalyzeXamlService>();
             services.AddSingleton<Snitch.Languages.Xaml.IXamlNavigationService,
                                   Snitch.Languages.Xaml.XamlNavigationService>();
+            services.AddSingleton<Snitch.Languages.Xaml.IXamlBindingsService,
+                                  Snitch.Languages.Xaml.XamlBindingsService>();
+            services.AddSingleton<Snitch.Languages.Xaml.IXamlTreeService,
+                                  Snitch.Languages.Xaml.XamlTreeService>();
+            services.AddSingleton<Snitch.Languages.Xaml.IXamlEditService,
+                                  Snitch.Languages.Xaml.XamlEditService>();
 
             // The EF Core migration workflow ('dotnet ef' with a structured result).
             services.AddSingleton<Snitch.Execution.IEfMigrationsService, Snitch.Execution.EfMigrationsService>();

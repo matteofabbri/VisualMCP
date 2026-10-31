@@ -40,6 +40,84 @@ public static class ProfilingReportWriter
         return Path.GetFullPath(path);
     }
 
+    public static async Task<string> WriteFileIoReportAsync(
+        FileIoReport report, string path, CancellationToken cancellationToken = default)
+    {
+        var markdown = BuildFileIoMarkdown(report);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        await File.WriteAllTextAsync(path, markdown, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken)
+            .ConfigureAwait(false);
+        return Path.GetFullPath(path);
+    }
+
+    public static string BuildFileIoMarkdown(FileIoReport report)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# File I/O report");
+        sb.AppendLine();
+        sb.AppendLine($"- Target: {report.Target}");
+        sb.AppendLine(FormattableString.Invariant($"- Window: {report.DurationMs / 1000.0:0.0} s ({report.EventCount:N0} events)"));
+        sb.AppendLine(FormattableString.Invariant($"- Read: {FormatIoBytes(report.TotalReadBytes)} in {report.TotalReadOps:N0} operations ({report.ReadMegabytesPerSecond:0.##} MB/s)"));
+        sb.AppendLine(FormattableString.Invariant($"- Write: {FormatIoBytes(report.TotalWriteBytes)} in {report.TotalWriteOps:N0} operations ({report.WriteMegabytesPerSecond:0.##} MB/s)"));
+        sb.AppendLine($"- Files: {report.DistinctFiles}, processes: {report.DistinctProcesses}");
+        if (report.Truncated)
+            sb.AppendLine("- Truncated: yes — the event budget was reached, the report is a prefix of the window");
+        sb.AppendLine();
+
+        sb.AppendLine("## Findings");
+        sb.AppendLine();
+        if (report.Findings.Count == 0)
+        {
+            sb.AppendLine("No rule fired on the collected data.");
+        }
+        else
+        {
+            foreach (var finding in report.Findings)
+            {
+                sb.AppendLine($"- **[{finding.Severity}] {finding.Title}** — {finding.Evidence}");
+                sb.AppendLine($"  {finding.Recommendation}");
+                if (finding.SuggestedAction is not null)
+                    sb.AppendLine($"  Next: {finding.SuggestedAction}");
+            }
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("## Processes");
+        sb.AppendLine();
+        sb.AppendLine("| Process | PID | Write | Read | Write ops | Read ops | Files | Write share |");
+        sb.AppendLine("|---|---:|---:|---:|---:|---:|---:|---:|");
+        foreach (var process in report.Processes)
+            sb.AppendLine(FormattableString.Invariant($"| {process.ProcessName} | {process.ProcessId} | {FormatIoBytes(process.WriteBytes)} | {FormatIoBytes(process.ReadBytes)} | {process.WriteOps:N0} | {process.ReadOps:N0} | {process.Files} | {process.WriteShare:0.0}% |"));
+        sb.AppendLine();
+
+        sb.AppendLine("## Files");
+        sb.AppendLine();
+        sb.AppendLine("| File | Process | Write | Read | Write ops | Read ops | Opens | Closes | Avg write | Write share |");
+        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+        foreach (var file in report.Files)
+            sb.AppendLine(FormattableString.Invariant($"| `{file.Path}` | {file.ProcessName} ({file.ProcessId}) | {FormatIoBytes(file.WriteBytes)} | {FormatIoBytes(file.ReadBytes)} | {file.WriteOps:N0} | {file.ReadOps:N0} | {file.Opens:N0} | {file.Closes:N0} | {FormatIoBytes((long)file.AverageWriteBytes)} | {file.WriteShare:0.0}% |"));
+        sb.AppendLine();
+
+        if (report.Warnings.Count > 0)
+        {
+            sb.AppendLine("## Warnings");
+            sb.AppendLine();
+            foreach (var warning in report.Warnings)
+                sb.AppendLine($"- {warning}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private static string FormatIoBytes(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => FormattableString.Invariant($"{bytes / 1024.0 / 1024 / 1024:0.0} GB"),
+        >= 1024L * 1024 => FormattableString.Invariant($"{bytes / 1024.0 / 1024:0.0} MB"),
+        >= 1024 => FormattableString.Invariant($"{bytes / 1024.0:0.0} KB"),
+        _ => $"{bytes} B",
+    };
+
     public static async Task<string> WriteDiagnosisReportAsync(
         DiagnosisReport report, string path, CancellationToken cancellationToken = default)
     {

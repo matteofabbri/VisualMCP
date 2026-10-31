@@ -19,7 +19,7 @@ without leaving the conversation:
 - Which database statements ran, and is one shape running per item of a list?
 - How many times did this method run, exactly? (instrumented, not sampled)
 
-## The seven tools, native vs delegated
+## What is native, what is still delegated
 
 | Tool | VisualMCP does itself | Still delegated |
 |---|---|---|
@@ -28,12 +28,13 @@ without leaving the conversation:
 | **dotnet-gcdump** | `profile_heap` attaches with ClrMD and computes counts/sizes per type, LOH, pinned, free, finalizable, largest objects and duplicated strings. | The `.gcdump` file format (for Visual Studio / `dotnet-gcdump report`). |
 | **dotnet-dump** | `profile_dump` collects through `DiagnosticsClient.WriteDump` and analyses an existing dump with ClrMD (heap + stacks + sync blocks). | Ad-hoc SOS commands (`clrstack`, `dumpheap -stat`, `syncblk`, …). |
 | **dotnet-stack** | `profile_stacks` captures every managed stack with ClrMD, resolves frames to source, and reports contended monitors with the holding thread. | The `report` graphviz output. |
-| **dotnet-monitor** | `profile_monitor` starts a loopback instance (`--no-auth`), generates its settings file, probes HTTP endpoints, stops it. | The service itself is not reimplemented: one-shot profiling stays native. |
+| **dotnet-monitor** | `profile_monitor` hosts the sidecar **in-process** on loopback: `/info`, `/processes`, `/metrics` (JSON or Prometheus), `/trace`, `/dump`, `/heap`, `/stacks` and `/fileio` are answered by the services above. No binary, no child process, no settings file. | The dotnet-monitor configuration schema, authentication and the continuous `/live` and `/logs` streams: the native monitor answers bounded requests and points `/logs` at `profile_events`. |
 | **dotnet-symbol** | `profile_symbols` reads the PE CodeView record and downloads/caches the PDB with the symbol-server protocol. | Bulk rescue of every module inside a dump. |
+| **Visual Studio File I/O** | `profile_file_io` opens a real-time ETW session with the Windows kernel file provider (`Microsoft-Windows-Kernel-File`) and reports per-process and per-file read/write bytes and operation counts, plus findings. | Linux (needs eBPF/perf) and per-operation managed stacks: the kernel event names the process, not the managed caller. |
 
 `profile_tools` reports this table per tool, including whether the command is installed and which
 version would actually run (local tool manifest > global tool > `PATH`). It can install or update a
-tool when you decide you need the external artifact.
+tool when you decide you need the external artifact; no profiling operation needs one.
 
 ## Workflows
 
@@ -125,6 +126,42 @@ already asynchronous, and it is usually a pool thread → `thread-pool-blocking`
 `thread-blocking` (sleep/lock wait dominant), `io-category` (one I/O family dominates) and
 `io-pressure` (threads spend a large part of the trace waiting). Use `profile_stacks` when you want
 to see the blocked threads of a live process right now.
+
+### Who writes where, and how?
+
+```text
+profile_file_io(processName="MyApp", durationSeconds=15)
+profile_file_io(processName="MyApp", durationSeconds=15, pathFilter="logs", writeReport=true)
+```
+
+`profile_io` answers *where the thread was parked*; `profile_file_io` answers *what was actually
+written*, which is a different source. It is the Visual Studio **File I/O** tool, reimplemented on the
+Windows kernel ETW provider:
+
+1. A real-time `TraceEventSession` enables `KernelTraceEventParser.Keywords.FileIO | FileIOInit`.
+   `FileIO` turns on read/write/create/close/delete/rename/dir-enum; `FileIOInit` is what maps the file
+   key carried by a read/write event to its path (TraceEvent keeps that map in the parser state).
+2. The events are aggregated — never stored — into per-file and per-process sums: read/write bytes,
+   read/write operations, opens, closes, deletes, renames, average write size, first/last seen.
+3. The report ranks processes (the writer) and files (the target) and fills `Findings`.
+
+A kernel session cannot be filtered by process id, so the capture is system-wide and `processId` /
+`processName` / `pathFilter` are applied to the events as they arrive; a filtered event costs no
+memory. The event budget is 5,000,000 operations (`Truncated` when it is hit, with a warning).
+
+Findings:
+
+| Id | Fires when | Usual fix |
+|---|---|---|
+| `file-write-hotspot` | one file owns ≥ 40 % of the written bytes and ≥ 10 MB | rate-limit/batch the writer |
+| `small-write-storm` | ≥ 1,000 writes averaging under 4 KB | buffer the stream, flush per batch |
+| `handle-churn` | ≥ 1,000 opens of one file | keep one handle for the component's life |
+| `write-volume` | ≥ 100 MB written in the window | confirm it is expected; sample logs/caches |
+| `temp-writes` | ≥ 25 % of writes under `%TEMP%` / `/tmp` | keep the bytes in memory or write the final file |
+| `unresolved-paths` | ≥ 50 % of operations have no file name (opened before the capture) | start the capture first |
+| `no-file-io` | no event matched the filters | run the workload inside the window |
+
+The report is also a route of the native monitor: `GET /fileio?pid=1234&durationSeconds=10`.
 
 ### Where does this allocation come from?
 
@@ -506,12 +543,13 @@ dump-<process>-<pid>-<yyyyMMdd-HHmmss>.dmp
 <trace-stem>-analysis.md          ← written by profile_analyze when writeReport=true
 heap-<pid>-<timestamp>.md         ← profile_heap writeReport=true
 stacks-<pid>-<timestamp>.md       ← profile_stacks writeReport=true
+fileio-<pidN|system>-<yyyyMMdd-HHmmss>.md ← profile_file_io writeReport=true
 symbols/                          ← downloaded PDBs
-monitor-settings.json             ← generated dotnet-monitor configuration
 ```
 
 `profile_collect action="start"` returns a session id; `action="stop"` ends it and reports the file.
-Sessions are capped by `ProfilingOptions.MaxDurationSeconds` (300 s) for the bounded form.
+Sessions are capped by `ProfilingOptions.MaxDurationSeconds` (300 s) for the bounded form. The native
+monitor writes no configuration file: it is started from its arguments and stops with the process.
 
 ## Limits and troubleshooting
 
@@ -527,8 +565,13 @@ Sessions are capped by `ProfilingOptions.MaxDurationSeconds` (300 s) for the bou
   memory copy (`profile_heap`). That is a few milliseconds to a few hundred for a large heap, not a
   process pause for the whole analysis.
 - **Linux needs ptrace permission** for live attach; containers usually need `--cap-add=SYS_PTRACE`.
-- **dotnet-monitor listens on loopback with `--no-auth`.** Do not expose that URL; set a real
-  configuration (`configPath`) when you need authentication.
+- **`profile_file_io` is Windows-only and needs elevation.** The kernel file provider is a privileged
+  ETW session (administrator, or the Performance Log Users group); on Linux the equivalent requires
+  eBPF/perf, so the tool says so instead of pretending. The kernel event carries the process that
+  performed the operation, not the managed call stack — use `profile_allocations`/`profile_root_cause`
+  for the code, and `profile_io` for where a thread *blocked* on a file.
+- **The native monitor is loopback-only and unauthenticated.** Do not expose its port. It answers
+  bounded requests (`durationSeconds`), not the continuous `/live` or `/logs` streams of dotnet-monitor.
 - **The `.gcdump` artifact is not produced.** `profile_heap` returns the numbers a gcdump is read
   for; use dotnet-gcdump when a tool (Visual Studio, `dotnet-gcdump report`) needs the file.
 - **The gc preset is Verbose and writes more data.** Allocation ticks with stacks are numerous

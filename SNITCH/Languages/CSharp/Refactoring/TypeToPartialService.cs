@@ -50,6 +50,10 @@ public sealed class TypeToPartialService : ITypeToPartialService
         if (!documentsByPath.TryGetValue(path, out var document))
             return new { error = $"{path} is not a document of the loaded solution." };
 
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringSupport.TypeToPartialAsync(
+                _workspace, document, typeName, containingType, dryRun, cancellationToken);
+
         // See PropertyToAutoService: a write leaves the in-memory solution stale, and rewriting from
         // stale text would undo whatever another refactoring just wrote.
         var diskText = await File.ReadAllTextAsync(path, cancellationToken);

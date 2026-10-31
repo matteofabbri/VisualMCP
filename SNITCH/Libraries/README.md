@@ -41,13 +41,13 @@ spawned. The external tools are only inspected or installed by `profile_tools`.
 
 | Folder | What it owns |
 |---|---|
-| `Runtime/` | process discovery, EventPipe trace sessions and their presets (`async`, `database` and `instrumentation` add non-CLR providers), EventCounter polling, managed stack walks |
+| `Runtime/` | process discovery, EventPipe trace sessions and their presets (`async`, `database` and `instrumentation` add non-CLR providers), EventCounter polling, managed stack walks, the Windows kernel file-I/O collector (`profile_file_io`) |
 | `Snapshots/` | ClrMD: heap snapshots, retention/root chains, dump collection and analysis |
 | `Analysis/` | trace parsing (ETLX conversion for CPU stacks), allocation attribution, I/O attribution, hot paths and lines, source mapping through portable PDBs; the events-only reader plus the Events Viewer, async (TplEventSource) and database (EF Core/SqlClient/…) analyses; `RootCauseService`, the join of a measurement with the metacode AST through `ICodeStructureIndex` |
 | `Instrumentation/` | the IL instrumenter (Mono.Cecil + the probe) and the exact enter/exit analyzer behind `profile_instrumentation` |
 | `Verdicts/` | the tools that answer a question instead of printing a table: `profile_slowdown`, `profile_memory_growth`, `profile_threadpool`, `profile_review_change` |
 | `Tooling/` | the seven-tool catalogue, detection and installation |
-| `Symbols/`, `Monitor/` | dotnet-symbol and dotnet-monitor equivalents |
+| `Symbols/`, `Monitor/` | dotnet-symbol equivalent and the native in-process diagnostics sidecar (dotnet-monitor routes, no external process) |
 | `Model/`, `Internal/` | shared records and helpers |
 
 Artifacts land in `<solution>/.visualMCP/profiling/` (traces, dumps, reports, symbols), which is

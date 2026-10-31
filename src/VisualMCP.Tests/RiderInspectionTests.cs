@@ -256,16 +256,17 @@ public sealed class RiderInspectionTests
     }
 
     [Fact]
-    public async Task The_map_maps_the_eight_native_ids_and_names_the_absent_ones()
+    public async Task The_map_maps_the_native_ids_and_names_the_absent_ones()
     {
         var result = ResultAssert.Json(await new ResharperInspectionMapService().ReportAsync(includeInstall: false));
 
         Assert.True(result.GetProperty("curatedCount").GetInt32() >= 40);
-        Assert.Equal(8, result.GetProperty("byKind").GetProperty("rider").GetInt32());
+        Assert.Equal(13, result.GetProperty("byKind").GetProperty("rider").GetInt32());
         Assert.True(result.GetProperty("byKind").GetProperty("none").GetInt32() > 0);
 
         var uncovered = result.GetProperty("uncovered").EnumerateArray().Select(entry => entry.GetString()).ToList();
-        Assert.Contains("UseNameofExpression", uncovered);
+        Assert.DoesNotContain("UseNameofExpression", uncovered);
+        Assert.Contains("MemberCanBePrivate.Global", uncovered);
 
         var riderEntries = result.GetProperty("entries").EnumerateArray()
             .Where(entry => entry.GetProperty("kind").GetString() == "rider")
@@ -273,6 +274,11 @@ public sealed class RiderInspectionTests
             .ToList();
         Assert.Contains("ConvertToConstant.Local", riderEntries);
         Assert.Contains("LoopVariableIsNeverChangedInsideLoop", riderEntries);
+        Assert.Contains("UseNameofExpression", riderEntries);
+        Assert.Contains("ConvertToCompoundAssignment", riderEntries);
+        Assert.Contains("RedundantLambdaSignatureParentheses", riderEntries);
+        Assert.Contains("StringLiteralAsInterpolationArgument", riderEntries);
+        Assert.Contains("RedundantCheckBeforeAssignment", riderEntries);
     }
 
     [Fact]

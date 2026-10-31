@@ -73,6 +73,10 @@ public sealed class SafeDeleteService : ISafeDeleteService
         if (declLocation is null)
             return new { error = "Could not locate source declaration." };
 
+        if (symbol.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringSupport.DeleteAsync(
+                _workspace, solution, symbol, declLocation, dryRun, default);
+
         var tree = declLocation.SourceTree;
         var docWithTree = solution.Projects
             .SelectMany(p => p.Documents)

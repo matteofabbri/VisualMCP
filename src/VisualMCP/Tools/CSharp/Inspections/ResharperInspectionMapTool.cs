@@ -8,15 +8,17 @@ namespace VisualMCP.Tools.CSharp.Inspections;
 public static class ResharperInspectionMapTool
 {
     [McpServerTool(Name = "resharper_inspection_map"), Description(
-        "Where ReSharper's inspection ids stand here. The ~2500 ReSharper C# inspections are closed-source " +
-        "analyzers over JetBrains' PSI; this tool returns the curated map — each id with the capability that " +
+        "Where ReSharper's inspection ids stand here, in two layers. The CATALOGUE is read from the local Rider " +
+        "installation's metadata: every ConfigurableSeverityHighlighting id, its language group, the " +
+        "ElementProblemAnalyzer that produces it and the description its tooltip resource carries — the real " +
+        "count, not an estimate. The COVERAGE is the curated table on top: each id with the capability here that " +
         "answers it (the opt-in 'rider' inspection pack, a simplify_code IDE id, a Roslyn pack id, a dedicated " +
-        "tool, a context action) or 'none' — plus, when a Rider installation is present, the number of " +
-        "Inspection/Inspector types it ships, as evidence of the scale. Use it before claiming an id is covered.")]
+        "tool, a context action) or 'none'. It also reports the mapped ids this Rider version no longer declares " +
+        "and the catalogue ids with no capability here. Use it before claiming an id is covered.")]
     public static Task<object> ResharperInspectionMap(
         IResharperInspectionMapService map,
         [Description("Optional: a Rider installation directory. Default: RIDER_HOME, or the newest one under Program Files/JetBrains.")] string? riderPath = null,
-        [Description("Count the inspection types in the local Rider installation (default true).")] bool includeInstall = true,
+        [Description("Read the inspection catalogue out of the local Rider installation (default true).")] bool includeInstall = true,
         [Description("Maximum uncovered ids to list (default 100, max 1000).")] int maxUncovered = 100)
         => map.ReportAsync(riderPath, includeInstall, maxUncovered);
 }

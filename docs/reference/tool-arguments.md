@@ -165,6 +165,13 @@ profile_io(tracePath, top=15, minPercent=1, resolveSource=true)
                 → I/O blocking sites by category/call site with blocked ms,
                   share, threads, stack and recommendation
 
+profile_file_io(processId? | processName?, durationSeconds=10, pathFilter?,
+                top=25, writeReport=false, outputPath?)
+                → who reads/writes which file: per-process and per-file bytes and
+                  operation counts, read/write MB/s, and findings (write hotspot,
+                  small-write storm, handle churn, temp churn). Windows kernel ETW:
+                  Windows only, elevated server (or Performance Log Users)
+
 profile_compare(leftPath, rightPath, kind=auto|trace|heap, top=25)
                 → metric/per-method/per-type deltas + regression findings
 
@@ -209,8 +216,8 @@ profile_review_change(baselinePath, currentPath, kind=auto|trace|heap, top=25)
 
 profile_symbols(action=list|download, modulePaths[], outputDirectory?, symbolServer?)
 
-profile_monitor(action=status|start|stop|probe, url?, configPath?,
-                path=/info|/processes|/metrics|/dump?…)
+profile_monitor(action=status|start|stop|probe, url?, path=/info|/processes|/metrics|/trace|/dump|/heap|/stacks|/fileio|/artifact?…)
+                → the native in-process sidecar on loopback; start with port 0 for a free port
 ```
 
 Artifacts land in `<solution>/.visualMCP/profiling/` (traces, dumps, reports, symbols); that
@@ -534,6 +541,77 @@ A memory topic is a slug (`sqlite-ef-linq`), not a sentence: it is the identity 
 write an update instead of a duplicate. The importer writes the file stores of both clients as
 `imported-<type>-<name>` — kind from the frontmatter (nested under `metadata:` in this client's
 notes), body from the note — and leaves the files where they are.
+
+## XAML
+
+```text
+xaml_pages(projectName?, path?, maxFiles=200)
+                → per file: kind (window/page/userControl/maui/resourceDictionary/
+                  application), the x:Class code-behind resolved through Roslyn,
+                  the DIALECT of its project and the signals the dialect was
+                  decided on, the target frameworks a MAUI project declares;
+                  plus byDialect and the projects' dialect/targetFrameworks
+
+analyze_xaml(projectName?, path?, category?, rule?, minSeverity=Low,
+             maxFindings=200)
+                → XAML0001-XAML0015. category is Markup, Binding or
+                  Maintainability. The binding rules run only when the data type
+                  resolves: XAML0010 (a path segment missing on the data type),
+                  XAML0012 (a Setter property the TargetType does not declare),
+                  XAML0013 (x:Bind in WPF/MAUI/Avalonia), XAML0015 (a prefixed or
+                  dotted TargetType/DataType that does not resolve). An unknown
+                  type or project is "checked nothing", never an error.
+
+xaml_bindings(projectName?, path?, validate=true, maxBindings=500)
+                → every Binding/x:Bind/CompiledBinding/TemplateBinding with its
+                  element, property, path, mode, source, dataType and
+                  dataTypeSource (x:DataType, DataTemplate.DataType, a DataContext
+                  the code-behind assigns, the page type for x:Bind, a
+                  ControlTemplate TargetType for TemplateBinding), the path walked
+                  member by member, and status valid|missing-member|not-checked
+                  with the reason. validate=false lists without type-checking.
+
+xaml_tree(path, projectName?, maxDepth=12)
+                → the element tree of ONE file: element, x:Name, line,
+                  namespacePrefix, attributes (xmlns omitted), children, and the
+                  same tree as indented text. The lines it reports are what the
+                  two extract tools take.
+
+xaml_navigate(action=name|resource|style|handler, name, projectName?, path?,
+              maxResults=200)
+
+xaml_rename(path, oldName, newName, kind=auto, projectName?, dryRun=true)
+                → kind=auto renames an x:Name when one is declared, otherwise an
+                  x:Key. An x:Name is file-scoped: the declaration, the
+                  ElementName/x:Reference/Storyboard.TargetName uses, and the
+                  identifiers the code-behind uses for the generated field (one
+                  that resolves to a real symbol is skipped and reported). A key
+                  is renamed across the project's XAML files and the code-behind's
+                  string literals. Refused when the result would not parse.
+
+xaml_extract_style(path, line, key, targetType?, dryRun=true)
+                → line is the element's start-tag line (xaml_tree reports it).
+                  x:*, Name, Style and event handlers stay on the element; the
+                  Style goes into the nearest <X.Resources>, created after the
+                  root's start tag when the file has none.
+
+xaml_promote_resource(path, line, attribute, key, kind=auto,
+                      resourceKind=static, dryRun=true)
+                → kind=auto infers from the attribute name (Width/Height/
+                  FontSize/Opacity are numbers, Foreground/Background/Fill/Stroke
+                  brushes, Text/Content/Title strings); otherwise pass
+                  double|string|color|brush. WPF gets sys:Double/sys:String with
+                  the xmlns:sys declaration added when missing; the other dialects
+                  get x:Double/x:String.
+
+format_xaml(path, indent=auto, dryRun=true)
+                → indent=auto uses the file's own unit; 2/4/tab/a number of
+                  spaces force one. Tag lines go to their element's depth,
+                  attribute continuation lines are aligned under the first
+                  attribute, trailing whitespace is removed — the element and
+                  attribute signature must be identical afterwards or nothing is
+                  written.
+```
 
 ## Kubernetes, Node and the scanned languages
 

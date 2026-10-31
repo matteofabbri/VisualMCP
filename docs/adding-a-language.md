@@ -49,8 +49,9 @@ emits is that language's syntax. There is nothing to abstract there, and it must
 ## Current state
 
 - **C#**: 87 ids, 39 not rewritten with a reason, `Snitch/Languages/CSharp/Style/`.
-- **Visual Basic**: 15 ids, `Snitch/Languages/VB/Style/` (`VbStyleLanguage`, `VbStyleRuleSet`,
-  `VbStyleRewrites.cs`, `VbSimplifyCodeService`). The tests are `src/VisualMCP.Tests/VbStyleTests.cs`, over
+- **Visual Basic**: 41 ids, `Snitch/Languages/VB/Style/` (`VbStyleLanguage`, `VbStyleRuleSet`,
+  `VbStyleRewrites*.cs`, `VbStyleFacts.cs`, `VbSimplifyCodeService`). The tests are
+  `src/VisualMCP.Tests/VbStyleTests.cs`, over
   an `AdhocWorkspace` with a real VB project: for every supported id, one case that is rewritten and one
   that must stay untouched. The service is registered by `AddSnitchVisualBasic()`
   (`Snitch/Languages/VB/VbServiceCollectionExtensions.cs`) and is not wired into `AddSnitch`: a host that
@@ -112,5 +113,5 @@ emits is that language's syntax. There is nothing to abstract there, and it must
   `PackageReference` in the `.csproj` that makes it available: without that package the VB document parses
   but formatting cannot find the service.
 - **None of the C# "syntax" rules come along.** No braces, no expression bodies, no property patterns, no
-  `??=`: the corresponding ids are not "unimplemented", they are ids VB does not have. The VB table is
-  deliberately short (15 ids) and every id that is not rewritten has its reason.
+  `??=`: the corresponding ids are not "unimplemented", they are ids VB does not have. The VB table lists
+  41 ids and every id that is not rewritten has its reason.

@@ -3,10 +3,10 @@
 # Profiling
 
 VisualMCP profiles a **running** .NET process with the runtime's own diagnostics channel: EventPipe for
-traces and counters, ClrMD for heap snapshots and dumps. The 27 profiling tools are native — none of them
-spawns `dotnet-trace`, `dotnet-counters`, `dotnet-gcdump`, `dotnet-dump` or `dotnet-stack`. The external
-toolchain is optional and exists only for formats the server does not produce itself (for example the
-`.gcdump` file format).
+traces and counters, ClrMD for heap snapshots and dumps, and the Windows kernel ETW provider for file I/O.
+The 28 profiling tools are native — none of them spawns `dotnet-trace`, `dotnet-counters`, `dotnet-gcdump`,
+`dotnet-dump`, `dotnet-stack` or `dotnet-monitor`. The external toolchain is optional and exists only for
+formats the server does not produce itself (for example the `.gcdump` file format).
 
 ## The shape of a session
 
@@ -43,10 +43,11 @@ table.
 | `profile_calltree` | CPU call tree with inclusive and exclusive time per node; optional folded-stacks export for FlameGraph/speedscope |
 | `profile_hotpaths` | The fix list: ranked user methods (cost summed across every stack through them), root-to-leaf hot paths, and branch points where cost splits; CPU, allocations, exceptions or mixed |
 | `profile_io` | Where threads block in I/O — File, Http, Network, Database, Pipe, Console, SyncOverAsync, Lock, Sleep, WaitHandle — with call site, source, blocked ms, share and threads |
+| `profile_file_io` | Who reads and writes which file: per-process and per-file bytes and operation counts, read/write MB/s, and findings — write hotspot, small-write storm, handle churn, temp churn. Windows kernel ETW: Windows only and elevated |
 | `profile_symbols` | Reads PE debug records and downloads PDBs into the solution cache, so frames resolve to `file:line` |
 | `profile_compare` | Diffs two traces or two heap snapshots: per-method CPU, per-type allocations/heap, GC, exceptions, contention, with regression findings |
-| `profile_tools` | Status/install/update for the seven external diagnostics tools, and what VisualMCP already covers natively |
-| `profile_monitor` | Start, probe and stop a loopback `dotnet-monitor` (`--no-auth`, localhost only) |
+| `profile_tools` | Status/install/update for the seven external diagnostics tools, and what VisualMCP already covers natively (no profiling tool needs them) |
+| `profile_monitor` | Start, probe and stop the native in-process diagnostics sidecar: `/info`, `/processes`, `/metrics` (JSON or Prometheus), `/trace`, `/dump`, `/heap`, `/stacks`, `/fileio` over HTTP on loopback |
 
 Presets set the right providers and a stack walk: `gc` uses Verbose GC events plus allocation ticks with
 stacks, `cpu` uses the sample profiler, `diagnose` combines CPU samples, allocation ticks, GC, exceptions
@@ -191,6 +192,41 @@ profile_review_change  baselinePath=before.nettrace currentPath=after.nettrace
 
 For raw deltas rather than a verdict, use `profile_compare`; for two heap snapshots, `kind=heap`.
 
+### "Who is writing where, and how?"
+
+```
+# start the server elevated: the kernel file provider is a privileged ETW session
+profile_file_io  processName=MyApp.Api durationSeconds=15
+profile_file_io  processName=MyApp.Api durationSeconds=15 pathFilter=logs writeReport=true
+```
+
+`profile_file_io` is Visual Studio's **File I/O** tool, natively: the Windows kernel file provider reports
+every read and write on the machine, and the report keeps the target process — so it answers *who* (the
+process), *where* (the file), *how much* (bytes, read/write MB/s) and *how* (operations, open/close counts,
+average write size). The findings name the pattern: one file owns the writes (`file-write-hotspot`),
+thousands of tiny writes (`small-write-storm`, buffer them), an open/close per operation (`handle-churn`),
+temp-file churn, or writes whose file could not be resolved because it was opened before the capture. Pass
+`processId`/`processName` under load: an unfiltered capture is system-wide. For where threads *block* in file
+I/O use `profile_io`; for the managed code that performs the write use `profile_allocations` or
+`profile_root_cause`.
+
+The same report is available over HTTP from the native monitor:
+
+```
+profile_monitor  action=start
+profile_monitor  action=probe path="/fileio?pid=1234&durationSeconds=10"
+```
+
+## Monitoring over HTTP
+
+`profile_monitor` is the long-running sidecar, now in-process: `action=start` opens a loopback listener
+(default `http://127.0.0.1:52323`, port 0 picks a free one), and its routes are answered by the same
+services the tools use — `/info`, `/processes`, `/metrics?pid=&durationSeconds=&format=json|prometheus`,
+`/trace?pid=&profile=&durationSeconds=`, `/dump?pid=&type=`, `/heap?pid=&top=`, `/stacks?pid=&maxFrames=`,
+`/fileio?pid=&durationSeconds=`, `/artifact?path=` for the produced files. There is no `dotnet-monitor`
+binary, no child process and no settings file. Requests are bounded windows rather than continuous streams;
+the listener is loopback-only and unauthenticated, so do not expose the port.
+
 ## Artifacts and symbols
 
 Traces, dumps, reports and downloaded symbols land in:
@@ -230,6 +266,9 @@ profile_symbols  action=download modulePaths=[bin/Debug/net10.0/MyApp.Api.dll]
   (a `jmp`, a `ret` inside a finally/fault) are skipped and named.
 - Async state machines, inlining and framework frames can hide the user code you are looking for;
   `profile_hotpaths` and `profile_io` surface the user-code frame explicitly, which is why they exist.
+- `profile_file_io` needs **Windows and an elevated server** (or the Performance Log Users group): a kernel
+  ETW session is privileged. It reports the process that performed each operation, not the managed call
+  stack; pair it with `profile_allocations` for the code. On Linux the equivalent would need eBPF/perf.
 - `profile_threadpool` and `profile_review_change` refuse inconclusive windows on purpose. A confident
   wrong answer is worse than a refusal.
 

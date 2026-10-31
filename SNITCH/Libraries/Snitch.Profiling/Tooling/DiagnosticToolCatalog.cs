@@ -71,8 +71,8 @@ public static class DiagnosticToolCatalog
             Command: "dotnet-monitor",
             PackageId: "dotnet-monitor",
             Purpose: "A long-running sidecar that exposes diagnostics over HTTP (metrics, dumps, traces).",
-            NativeCoverage: "profile_monitor starts a local monitor with --no-auth, generates a settings file (dump storage + metrics), probes its endpoints and stops it.",
-            DelegatedOperations: "The service itself is not reimplemented: it is a server, not an operation. Profile collection stays native in this library.",
+            NativeCoverage: "profile_monitor hosts the same sidecar in-process on loopback, with no binary and no child process: /info, /processes, /metrics (JSON or Prometheus), /trace, /dump, /heap, /stacks and /fileio are answered by the EventPipe/ClrMD services of this library.",
+            DelegatedOperations: "The dotnet-monitor configuration schema, authentication and its continuous /live and /logs streams are not reproduced; the native monitor answers bounded requests, and /logs points at profile_events with the logging providers.",
             DocsUrl: "https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-monitor"),
 
         new(

@@ -59,6 +59,8 @@ public static class XamlAnalysis
         }
 
         var collection = new XamlCollection { Root = solutionDirectory ?? Directory.GetCurrentDirectory() };
+        foreach (var (name, directory) in projects)
+            collection.ProjectDirectories[name] = directory;
 
         if (!string.IsNullOrWhiteSpace(path))
         {
@@ -168,38 +170,228 @@ public static class XamlAnalysis
 
         foreach (var element in xml.Descendants())
         {
-            var line = LineOf(element);
-
             foreach (var attribute in element.Attributes())
             {
-                var isXamlNamespace = attribute.Name.NamespaceName.Contains("xaml", StringComparison.OrdinalIgnoreCase);
-                var value = attribute.Value;
+                if (!attribute.IsNamespaceDeclaration) continue;
 
-                if (isXamlNamespace && attribute.Name.LocalName == "Name" && !string.IsNullOrWhiteSpace(value))
-                    document.Names.Add(new XamlName(value.Trim(), line));
-
-                if (isXamlNamespace && attribute.Name.LocalName == "Key" && !string.IsNullOrWhiteSpace(value))
-                    document.Keys.Add(new XamlKey(value.Trim(), line, element.Name.LocalName));
-
-                if (!isXamlNamespace && IsEventHandler(attribute.Name.LocalName, value) && !value.StartsWith('{'))
-                    document.Handlers.Add(new XamlHandler(attribute.Name.LocalName, value.Trim(), line));
-
-                CollectReferences(document, value, line);
-            }
-
-            if (element.Name.LocalName is "DataTemplate" or "HierarchicalDataTemplate" &&
-                AttributeValue(element, "DataType") is null &&
-                AttributeInXamlNamespace(element, "DataType") is null)
-                document.TemplatesWithoutDataType.Add(line);
-
-            if (element.Name.LocalName == "Style" && AttributeInXamlNamespace(element, "Key") is { } styleKey)
-            {
-                var basedOn = AttributeValue(element, "BasedOn");
-                document.Styles.Add(new XamlStyle(styleKey, ReferenceKey(basedOn), line));
+                // A root declaration dominates: the first one seen for a prefix is the one kept.
+                var prefix = attribute.Name.LocalName == "xmlns" ? string.Empty : attribute.Name.LocalName;
+                document.Namespaces.TryAdd(prefix, attribute.Value);
             }
         }
 
+        foreach (var attribute in xml.Descendants().SelectMany(element => element.Attributes()))
+        {
+            if (attribute.Name.LocalName != "DataContext") continue;
+            if (!attribute.Name.NamespaceName.Contains("blend", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!XamlMarkup.TryParse(attribute.Value, out var design)) continue;
+
+            document.DesignDataContextType = design.Get("Type");
+            if (document.DesignDataContextType is not null) break;
+        }
+
+        if (root is not null) Walk(document, root, null, null, null, null);
         return document;
+    }
+
+    /// <summary>
+    /// Walks the tree instead of flattening it, because three facts are inherited and the rules need
+    /// them at the element: the type bindings are checked against (x:DataType / DataTemplate.DataType),
+    /// the ControlTemplate a TemplateBinding reads, and the Style a Setter belongs to.
+    /// </summary>
+    private static void Walk(XamlDocument document, XElement element, string? dataType,
+        string? templateTarget, string? styleKey, string? styleTarget)
+    {
+        var line = LineOf(element);
+        var localName = element.Name.LocalName;
+        var elementName = AttributeInXamlNamespace(element, "Name");
+
+        var ownDataType = AttributeValue(element, "DataType") ??
+                          AttributeInXamlNamespace(element, "DataType");
+
+        var isTemplate = localName is "DataTemplate" or "HierarchicalDataTemplate";
+        if (isTemplate && ownDataType is null) document.TemplatesWithoutDataType.Add(line);
+
+        // A template opens its own data scope: the ambient x:DataType of the page describes the page's
+        // data context, while the template's bindings describe one item of a collection.
+        var effectiveDataType = isTemplate ? ownDataType : ownDataType ?? dataType;
+
+        if (ownDataType is not null)
+            document.TypeReferences.Add(new XamlTypeReference(ownDataType, line, "DataType"));
+
+        var ownTemplateTarget = localName == "ControlTemplate" ? AttributeValue(element, "TargetType") : null;
+        var effectiveTemplateTarget = ownTemplateTarget ?? templateTarget;
+
+        if (ownTemplateTarget is not null)
+            document.TypeReferences.Add(new XamlTypeReference(ownTemplateTarget, line, "ControlTemplate.TargetType"));
+
+        var ownStyleKey = localName == "Style"
+            ? AttributeInXamlNamespace(element, "Key") ?? AttributeValue(element, "Key")
+            : null;
+        var ownStyleTarget = localName == "Style" ? AttributeValue(element, "TargetType") : null;
+        var effectiveStyleKey = ownStyleKey ?? styleKey;
+        var effectiveStyleTarget = ownStyleTarget ?? styleTarget;
+
+        if (localName == "Style")
+        {
+            var basedOn = AttributeValue(element, "BasedOn");
+            document.Styles.Add(new XamlStyle(ownStyleKey ?? string.Empty, ReferenceKey(basedOn), line)
+            {
+                TargetType = ownStyleTarget,
+                BasedOnType = TypeKey(basedOn),
+            });
+
+            if (ownStyleTarget is not null)
+                document.TypeReferences.Add(new XamlTypeReference(ownStyleTarget, line, "Style.TargetType"));
+        }
+
+        foreach (var attribute in element.Attributes())
+        {
+            if (attribute.IsNamespaceDeclaration) continue;
+
+            var attributeLine = LineOf(attribute);
+            var isXamlNamespace = attribute.Name.NamespaceName.Contains("xaml", StringComparison.OrdinalIgnoreCase);
+            var value = attribute.Value;
+
+            if (isXamlNamespace && attribute.Name.LocalName == "Name" && !string.IsNullOrWhiteSpace(value))
+                document.Names.Add(new XamlName(value.Trim(), attributeLine));
+
+            if (isXamlNamespace && attribute.Name.LocalName == "Key" && !string.IsNullOrWhiteSpace(value))
+                document.Keys.Add(new XamlKey(value.Trim(), attributeLine, localName));
+
+            if (!isXamlNamespace && IsEventHandler(attribute.Name.LocalName, value) && !value.StartsWith('{'))
+                document.Handlers.Add(new XamlHandler(attribute.Name.LocalName, value.Trim(), attributeLine));
+
+            // Storyboard.TargetName is a name reference the animation resolves at run time.
+            if (attribute.Name.LocalName == "TargetName" && !value.StartsWith('{') && !string.IsNullOrWhiteSpace(value))
+                document.NameReferences.Add(new XamlNameReference(value.Trim(), attributeLine, "Storyboard.TargetName"));
+
+            if (!XamlMarkup.TryParse(value, out var extension)) continue;
+
+            CollectReferences(document, extension, attributeLine);
+
+            if (!extension.IsBinding) continue;
+
+            document.Bindings.Add(new XamlBinding(
+                localName,
+                elementName,
+                attribute.Name.LocalName,
+                extension.Type,
+                XamlMarkup.PathOf(extension),
+                extension.Get("Mode"),
+                extension.Get("ElementName"),
+                extension.Get("RelativeSource"),
+                extension.Get("Source"),
+                attributeLine,
+                ColumnOf(attribute),
+                effectiveDataType)
+            {
+                TemplateTargetType = effectiveTemplateTarget,
+            });
+        }
+
+        // <TextBox.Text><Binding Path="Name" /></TextBox.Text> — the object-element form of a binding.
+        if (localName == "Binding")
+        {
+            var propertyElement = element.Parent;
+            var target = propertyElement?.Parent;
+            var propertyName = propertyElement?.Name.LocalName ?? "Binding";
+            var dot = propertyName.IndexOf('.');
+            if (dot >= 0) propertyName = propertyName[(dot + 1)..];
+
+            document.Bindings.Add(new XamlBinding(
+                target?.Name.LocalName ?? "Binding",
+                target is null ? null : AttributeInXamlNamespace(target, "Name"),
+                propertyName,
+                "Binding",
+                AttributeValue(element, "Path"),
+                AttributeValue(element, "Mode"),
+                AttributeValue(element, "ElementName"),
+                AttributeValue(element, "RelativeSource"),
+                AttributeValue(element, "Source"),
+                line,
+                ColumnOf(element),
+                effectiveDataType)
+            {
+                TemplateTargetType = effectiveTemplateTarget,
+            });
+        }
+
+        if (localName == "Setter")
+        {
+            document.Setters.Add(new XamlSetter(
+                AttributeValue(element, "Property"),
+                AttributeValue(element, "Value"),
+                line,
+                effectiveStyleKey,
+                effectiveStyleTarget));
+        }
+
+        foreach (var child in element.Elements())
+            Walk(document, child, effectiveDataType, effectiveTemplateTarget, effectiveStyleKey, effectiveStyleTarget);
+    }
+
+    /// <summary>
+    /// The names a markup extension refers to: a resource key, an element name, an x:Reference. Parsed
+    /// from the extension itself, so <c>Path=Foo</c> is a path and not an ElementName (the regex this
+    /// replaces could not tell the two apart).
+    /// </summary>
+    private static void CollectReferences(XamlDocument document, XamlMarkupExtension extension, int line)
+    {
+        switch (extension.Type)
+        {
+            case "StaticResource" or "DynamicResource" or "ThemeResource":
+            {
+                var key = ResourceKeyOf(extension);
+                if (key is not null) document.ResourceReferences.Add(new XamlResourceReference(key, line, extension.Type));
+                break;
+            }
+
+            case "x:Reference":
+            {
+                var name = extension.Get("Name") ??
+                           (extension.Positional.Count > 0 ? extension.Positional[0] : null);
+                if (!string.IsNullOrWhiteSpace(name))
+                    document.NameReferences.Add(new XamlNameReference(name.Trim(), line, "x:Reference"));
+                break;
+            }
+        }
+
+        if (extension.IsBinding && extension.Get("ElementName") is { } elementName && !elementName.StartsWith('{'))
+            document.NameReferences.Add(new XamlNameReference(elementName.Trim(), line, "ElementName"));
+    }
+
+    private static string? ResourceKeyOf(XamlMarkupExtension extension)
+    {
+        var key = extension.Get("ResourceKey") ??
+                  (extension.Positional.Count > 0 ? extension.Positional[0] : null);
+
+        if (string.IsNullOrWhiteSpace(key)) return null;
+        if (key.StartsWith('{')) return null;
+
+        return key.Trim();
+    }
+
+    /// <summary>The key of a <c>{StaticResource X}</c> value, when that is what the value is.</summary>
+    private static string? ReferenceKey(string? value)
+    {
+        if (!XamlMarkup.TryParse(value, out var extension)) return null;
+        if (extension.Type is not ("StaticResource" or "DynamicResource" or "ThemeResource")) return null;
+        return ResourceKeyOf(extension);
+    }
+
+    /// <summary>The type of a <c>BasedOn="{StaticResource {x:Type Button}}"</c> value, when that is how it is written.</summary>
+    private static string? TypeKey(string? value)
+    {
+        if (!XamlMarkup.TryParse(value, out var extension)) return null;
+
+        var raw = extension.Get("ResourceKey") ??
+                  (extension.Positional.Count > 0 ? extension.Positional[0] : null);
+
+        if (raw is null || !XamlMarkup.TryParse(raw, out var inner)) return null;
+        if (inner.Type is not ("Type" or "x:Type")) return null;
+
+        return inner.Get("TypeName") ?? (inner.Positional.Count > 0 ? inner.Positional[0] : null);
     }
 
     /// <summary>Resolves the code-behind type through Roslyn, with the member names the rules check.</summary>
@@ -240,39 +432,12 @@ public static class XamlAnalysis
     }
 
     // ── scanning helpers ─────────────────────────────────────────────────────
-    private static void CollectReferences(XamlDocument document, string value, int line)
-    {
-        foreach (var key in KeysIn(value, "StaticResource")) document.ResourceReferences.Add(new XamlResourceReference(key, line, "StaticResource"));
-        foreach (var key in KeysIn(value, "DynamicResource")) document.ResourceReferences.Add(new XamlResourceReference(key, line, "DynamicResource"));
-
-        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                     value, @"(?:ElementName|=)\s*([A-Za-z_][A-Za-z0-9_]*)"))
-        {
-            var name = match.Groups[1].Value;
-            if (name is "True" or "False") continue;
-            document.NameReferences.Add(new XamlNameReference(name, line, "ElementName"));
-        }
-
-        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                     value, @"\{x:Reference\s+([A-Za-z_][A-Za-z0-9_]*)"))
-            document.NameReferences.Add(new XamlNameReference(match.Groups[1].Value, line, "x:Reference"));
-    }
-
-    private static IEnumerable<string> KeysIn(string value, string kind)
-    {
-        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-                     value, @"\{" + kind + @"\s+(?:ResourceKey=)?([A-Za-z0-9_.]+)\s*\}"))
-            yield return match.Groups[1].Value;
-    }
-
-    private static string? ReferenceKey(string? value)
-    {
-        if (value is null) return null;
-        var keys = KeysIn(value, "StaticResource").Concat(KeysIn(value, "DynamicResource")).ToList();
-        return keys.Count > 0 ? keys[0] : null;
-    }
-
-    private static bool IsEventHandler(string name, string value)
+    /// <summary>
+    /// True when an attribute name/value pair is an event handler: the name ends with a known event
+    /// suffix and the value is a plain method name. Exposed because the editor refuses to move a
+    /// handler into a Style, which cannot carry one.
+    /// </summary>
+    public static bool IsEventHandler(string name, string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return false;
         if (!System.Text.RegularExpressions.Regex.IsMatch(value, @"^[A-Za-z_][A-Za-z0-9_.]*$")) return false;
@@ -293,6 +458,9 @@ public static class XamlAnalysis
             .FirstOrDefault();
 
     public static int LineOf(XObject node) => ((IXmlLineInfo)node).LineNumber;
+
+    /// <summary>The 1-based column the node starts at (the attribute name, not the line).</summary>
+    public static int ColumnOf(XObject node) => ((IXmlLineInfo)node).LinePosition;
 
     // ── findings ─────────────────────────────────────────────────────────────
     public static XamlFinding Finding(string ruleId, string filePath, string relativePath, int line,
@@ -406,15 +574,43 @@ public static class XamlAnalysis
     }
 }
 
-/// <summary>The files one call covers, plus what could not be read.</summary>
+/// <summary>The files one call covers, plus what could not be read and what each project is.</summary>
 public sealed class XamlCollection
 {
+    private readonly Dictionary<string, XamlProjectFacts> _projects = new(StringComparer.OrdinalIgnoreCase);
+
     public string? Error { get; set; }
     public string Root { get; set; } = string.Empty;
     public List<XamlFileEntry> Files { get; } = [];
     public List<string> Skipped { get; } = [];
     public List<string> Unreadable { get; } = [];
     public bool Truncated { get; set; }
+
+    /// <summary>project name → the directory its files live in, so the csproj can be found again.</summary>
+    public Dictionary<string, string> ProjectDirectories { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The dialect and target frameworks of the project a file belongs to. Computed on first use and
+    /// kept, because reading a csproj per file would be the expensive half of a solution-wide scan.
+    /// </summary>
+    public XamlProjectFacts FactsFor(XamlFileEntry file)
+    {
+        var key = file.Project ?? "(unassigned)";
+        if (_projects.TryGetValue(key, out var cached)) return cached;
+
+        var directory = file.Project is not null && ProjectDirectories.TryGetValue(key, out var known)
+            ? known
+            : Path.GetDirectoryName(file.FilePath);
+
+        var facts = XamlProjects.ForDirectory(directory, key, file.FilePath.EndsWith(".axaml", StringComparison.OrdinalIgnoreCase));
+        _projects[key] = facts;
+        return facts;
+    }
+
+    /// <summary>Every project the collection touched, in a stable order.</summary>
+    public List<XamlProjectFacts> Projects => _projects.Values
+        .OrderBy(facts => facts.Name, StringComparer.OrdinalIgnoreCase)
+        .ToList();
 }
 
 /// <summary>One XAML file on disk, with the project that owns it.</summary>

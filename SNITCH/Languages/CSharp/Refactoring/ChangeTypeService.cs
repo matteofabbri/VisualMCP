@@ -38,10 +38,6 @@ public sealed class ChangeTypeService : IChangeTypeService
         if (line < 1) return new { error = "Line must be 1-based." };
         if (string.IsNullOrWhiteSpace(newType)) return new { error = "The new type is required." };
 
-        var parsed = ParseTypeName(newType.Trim());
-        if (parsed.ContainsDiagnostics)
-            return new { error = $"'{newType}' is not a valid type name." };
-
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
@@ -54,6 +50,16 @@ public sealed class ChangeTypeService : IChangeTypeService
             .FirstOrDefault(candidate => candidate.FilePath is not null &&
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
+
+        // A VB document takes the same gate, written against VB syntax: the type name is parsed by the
+        // VB factory, so IEnumerable(Of Integer) is a type name there and is not one here.
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringSupport.ChangeTypeAsync(
+                _workspace, document, line, newType.Trim(), dryRun, cancellationToken);
+
+        var parsed = ParseTypeName(newType.Trim());
+        if (parsed.ContainsDiagnostics)
+            return new { error = $"'{newType}' is not a valid type name." };
 
         var root = await document.GetSyntaxRootAsync(cancellationToken);
         var model = await document.GetSemanticModelAsync(cancellationToken);

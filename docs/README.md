@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **404 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **411 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -38,11 +38,13 @@ EventPipe traces, and Razor pages are analysed as markup with CWE-tagged securit
 - **Refactoring** — 60+ semantic refactorings, from rename and extract method to extract class, change
   signature and move type, most of them compiler-gated.
 - **Code style** — `simplify_code` applies 87 of the 126 Microsoft code-style rule ids, with a
-  per-document compiler gate and a recorded, revertible edit history; `simplify_vb_code` covers 15 Visual
+  per-document compiler gate and a recorded, revertible edit history; `simplify_vb_code` covers 41 Visual
   Basic ids.
 - **Razor, Blazor and XAML** — page/component inventory, 28 Razor markup/accessibility/security rules,
-  verified edits, and a XAML layer (`XAML0001`–`XAML0009`, name/resource/style navigation) with the
-  code-behind resolved through Roslyn.
+  verified edits, and a XAML layer (`XAML0001`–`XAML0015`: names, keys, handlers, resources, templates and
+  **binding paths checked against the data type**, with the project's dialect detected) plus the binding
+  inspector, the element tree, name/resource/style navigation and verified edits — the code-behind is
+  resolved through Roslyn.
 - **Runtime work** — build, debug through a real DAP debugger, run, test with coverage, benchmark, profile
   a live .NET process (CPU, GC, allocations, I/O, locks, dumps) and get a plain-language verdict.
 - **The wider loop** — NuGet package facts and vulnerability fixes, .NET modernization, EF Core
@@ -74,7 +76,7 @@ walkthrough: [Getting started](getting-started.md).
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
 | [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 404 tools, grouped by area, with a one-line description of each |
+| [Tool catalogue](tools.md) | All 411 tools, grouped by area, with a one-line description of each |
 | [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |
@@ -141,8 +143,10 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   analysis tools, `context_action` for the 33 ids that have a VB spelling, and the refactorings that are
   not C#-idiom-specific) plus the language-neutral build/test/diagnostic
   tools; Razor and Blazor markup are analysed by a dedicated
-  scanner, and XAML has its own markup layer (inventory, `XAML0001`–`XAML0009` diagnostics, navigation)
-  with the code-behind resolved through Roslyn. EF Core migrations run through `ef_migrations`; SQL
+  scanner, and XAML has its own markup layer (inventory with the project's dialect, `XAML0001`–`XAML0015`
+  diagnostics with the binding paths checked against their data type, the binding inspector, the element
+  tree, navigation and verified edits) with the code-behind resolved through Roslyn. EF Core migrations
+  run through `ef_migrations`; SQL
   (`sql_files`, `analyze_sql`, SQL0001–SQL0010), JavaScript/TypeScript (`js_files`, `analyze_js`,
   JS0001–JS0017, with relative imports resolved), HTML/CSS (`markup_files`, `analyze_markup`), YAML
   (`yaml_files`, `analyze_yaml`, YAML0001–YAML0012) and F#

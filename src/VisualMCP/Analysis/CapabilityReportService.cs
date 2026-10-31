@@ -85,7 +85,9 @@ public sealed class CapabilityReportService : ICapabilityReportService
                               "and VisualBasicSymbolIndexFrontend (trees, symbol index, complexity, C# generation) + the VB halves of " +
                               "structural search, formatting/usings/cleanup, inspections and the analysis tools",
                 razor = "Snitch.Languages.Razor (heuristic markup scanner, 28 rules)",
-                xaml = "Snitch.Languages.Xaml (markup + Roslyn code-behind: inventory, XAML0001-0009, navigation)",
+                xaml = "Snitch.Languages.Xaml (markup + Roslyn: dialect detection per project, XAML0001-XAML0015, " +
+                       "binding validation against the data type, inventory, navigation, binding inspector, element tree, " +
+                       "verified edits)",
                 metacode = "Snitch.Metacode (C#, Visual Basic, Razor, pseudocode, Ghidra frontends; persisted index)",
                 sql = "Snitch.Languages.Sql (SqlAnalyzer: comments/literals masked, statements split, SQL0001-SQL0010; " +
                       "a pattern scanner, not a dialect parser)",

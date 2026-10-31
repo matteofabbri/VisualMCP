@@ -144,7 +144,7 @@ IDE. It is a rewrite engine over Roslyn syntax trees, not a formatter.
 - **Team preferences are option-driven**: `csharp_style_var_*` (`IDE0007`/`IDE0008`),
   `dotnet_style_parentheses_in_*` (`IDE0048`) and the blank-line family `IDE2000`–`IDE2006` act only when
   the repository sets the option; the result names the id and the option it waited for.
-- Visual Basic is a separate layer with **15 rewritten ids** and 34 with a reason, exposed by
+- Visual Basic is a separate layer with **41 rewritten ids** and 8 with a reason, exposed by
   `simplify_vb_code`.
 
 Representative rules: collection expressions (`IDE0028`, `IDE0300`, `IDE0301`), null-coalescing and
@@ -182,11 +182,16 @@ option is unset.
 
 ### Visual Basic
 
-`simplify_vb_code` has the same shape — scope, rules, `dryRun`, compiler gate, edit history — and 15
+`simplify_vb_code` has the same shape — scope, rules, `dryRun`, compiler gate, edit history — and 41
 rule ids: simplify name/member access, remove `Me.`, unnecessary cast, predefined type, `Is Nothing`,
 `If(a, b)`, `?.`, parentheses, compound assignment, boolean equality, conditional simplification,
-`IsNot` (driven by `visual_basic_style_prefer_isnot_expression`) and `ByVal` removal. It is a separate
-tool because the engine registers one style service per language; `simplify_code` rewrites C# only.
+`IsNot` (driven by `visual_basic_style_prefer_isnot_expression`), `ByVal` removal, the `Me.` qualifier
+(`dotnet_style_qualification_for_*`), the two `If`/`Else` folds to `If(c, a, b)`, a completed `Select
+Case`, object initializers, tuple element names, `NameOf`, interpolation, both LINQ chains,
+`HashCode.Combine`, modifier order, accessibility, `ReadOnly`, an unused member and an unread field
+removed, unreachable code, a dead store, an unused parameter, an auto-property, and the blank-line and
+file-header layout rules. It is a separate tool because the engine registers one style service per
+language; `simplify_code` rewrites C# only.
 
 ## Inspections and code fixes
 

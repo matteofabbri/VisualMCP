@@ -16,7 +16,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// Registers the profiling library: the diagnostic-tool installer, the EventPipe collectors,
 /// the ClrMD snapshots, the trace analyzer/advisor, the answer layer (slowdown, memory growth,
 /// thread-pool starvation, change review), the event/async/database readers, the instrumented
-/// profile, the symbol downloader and the monitor wrapper.
+/// profile, the symbol downloader, the kernel file-I/O collector and the native monitor.
 /// </summary>
 public static class ProfilingServiceCollectionExtensions
 {
@@ -46,7 +46,11 @@ public static class ProfilingServiceCollectionExtensions
         services.AddSingleton<IProfilingComparisonService, ProfilingComparisonService>();
         services.AddSingleton<IProfileDiagnosisService, ProfileDiagnosisService>();
         services.AddSingleton<ISymbolService, SymbolService>();
-        services.AddSingleton<IDotnetMonitorService, DotnetMonitorService>();
+        services.AddSingleton<IFileIoService, FileIoCollectionService>();
+
+        // The long-running sidecar is in-process: its routes call the same services registered
+        // above, so there is no dotnet-monitor binary to install or launch.
+        services.AddSingleton<IDiagnosticsMonitorService, NativeMonitorService>();
 
         // EventPipe as events only, and the three answers that need it: the Events Viewer, the async
         // timeline (TplEventSource) and the database commands (EF Core/SqlClient/... EventSource).

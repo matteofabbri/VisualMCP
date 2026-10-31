@@ -50,11 +50,18 @@ public sealed class AnalyzeXamlService : IAnalyzeXamlService
 
         var solution = await _workspace.EnsureSolutionLoadedAsync();
         var typeCache = new Dictionary<string, XamlTypeFacts?>(StringComparer.Ordinal);
+        var resolvers = new Dictionary<string, XamlTypeResolver?>(StringComparer.OrdinalIgnoreCase);
+        var dialectByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var document in documents)
         {
             XamlTypeFacts? codeBehind = null;
             var resolvable = false;
+
+            var file = collection.Files.First(entry =>
+                string.Equals(entry.FilePath, document.FilePath, StringComparison.OrdinalIgnoreCase));
+            var facts = collection.FactsFor(file);
+            dialectByFile[document.FilePath] = facts.DialectName;
 
             if (!string.IsNullOrWhiteSpace(document.ClassName))
             {
@@ -67,8 +74,18 @@ public sealed class AnalyzeXamlService : IAnalyzeXamlService
                 }
             }
 
+            var resolverKey = document.Project ?? string.Empty;
+            if (!resolvers.TryGetValue(resolverKey, out var resolver))
+            {
+                resolver = XamlTypeResolver.Create(solution, document.Project, facts);
+                resolvers[resolverKey] = resolver;
+            }
+
+            var validation = await XamlBindingValidator.ValidateAsync(document, resolver, facts.Dialect);
+
             findings.AddRange(XamlRules.Run(document, codeBehind, resolvable,
-                keysByProject.TryGetValue(document.Project ?? string.Empty, out var keys) ? keys : new HashSet<string>()));
+                keysByProject.TryGetValue(document.Project ?? string.Empty, out var keys) ? keys : new HashSet<string>(),
+                validation));
         }
 
         var minimum = XamlRuleCatalog.Rank(minSeverity);
@@ -96,15 +113,24 @@ public sealed class AnalyzeXamlService : IAnalyzeXamlService
             bySeverity = XamlAnalysis.CountBy(sorted, finding => finding.Severity),
             byCategory = XamlAnalysis.CountBy(sorted, finding => finding.Category),
             byRule = XamlAnalysis.CountBy(sorted, finding => finding.RuleId),
+            byDialect = dialectByFile
+                .GroupBy(pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase),
+            projects = collection.Projects.Select(facts => facts.ToJson()).ToList(),
             skipped = collection.Skipped.Count > 0 ? collection.Skipped : null,
             unreadable = collection.Unreadable.Count > 0 ? collection.Unreadable : null,
             findings = returned.Select(XamlAnalysis.ToJson),
             notes = new[]
             {
-                "Heuristic markup scan: it reads the XML and resolves the code-behind type through Roslyn. " +
-                "Bindings, styles and resources are not compiled, so a clean result is not a proof of correctness.",
+                "Markup scan plus the C# resolved through Roslyn. XAML0001-0009 and XAML0011/0014 read the " +
+                "markup alone; XAML0010/0012/0013/0015 need a loaded solution and a detected dialect, and an " +
+                "unknown type or project is 'checked nothing', never an error in the markup.",
                 "XAML0005 only fires when the project defines at least one x:Key: a key from a referenced " +
                 "assembly's theme dictionary is invisible here.",
+                "A binding is validated only when its data type resolves — an x:DataType/DataType, or a DataContext " +
+                "the code-behind assigns. A binding that names an ElementName, a RelativeSource or an explicit " +
+                "Source reads another object and is not checked.",
             },
         };
     }

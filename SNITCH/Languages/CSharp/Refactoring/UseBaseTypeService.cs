@@ -48,6 +48,10 @@ public sealed class UseBaseTypeService : IUseBaseTypeService
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
 
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringSupport.UseBaseTypeAsync(
+                _workspace, document, line, baseType, dryRun, cancellationToken);
+
         var root = await document.GetSyntaxRootAsync(cancellationToken);
         var model = await document.GetSemanticModelAsync(cancellationToken);
         var tree = await document.GetSyntaxTreeAsync(cancellationToken);

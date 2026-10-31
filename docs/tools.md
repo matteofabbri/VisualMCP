@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **404 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **411 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -98,7 +98,7 @@ Conventions:
 | `configure_formatting` | ✎ Set any other `.editorconfig` option (`csharp_*`, `dotnet_*`, `indent_*`, `end_of_line`, `charset`, `file_header_template`, …) at the same scopes, same upsert |
 | `suppress_finding` | ✎ preview Silence one finding where it takes effect: a `#pragma` around the member or a `SuppressMessage` attribute on it; compiler-gated |
 | `custom_inspections` | Inspections declared in `.visualMCP/inspections.json` (banned symbols/namespaces/attributes, identifier/string/comment patterns) with id, severity, message; `validate` checks the file |
-| `resharper_inspection_map` | Where ReSharper's inspection ids stand: the `rider` pack ids, the simplify_code/pack/tool mapping, the ids with no capability, plus the Inspection-type count of a local Rider install |
+| `resharper_inspection_map` | Where ReSharper's inspection ids stand, in two layers: the catalogue read from the local Rider installation's metadata (every id with its language group, the analyzer that produces it and its tooltip description), and the curated map on top (the `rider` pack ids, the simplify_code/pack/tool mapping, the ids with no capability), including the mapped ids this Rider version no longer declares |
 | `read_dot_settings` | Read the ReSharper `.DotSettings`/`.DotSettings.user` layers: inspection severities, disabled ids, custom dictionary words |
 | `find_spelling_issues` | Words one edit away from a word the solution or `.visualMCP/spelling.dic` + the `.DotSettings` words already use |
 | `naming_rules` | ✎ preview Apply `dotnet_naming_rule` from `.editorconfig`: list the violations with the expected name, or rename them (`apply=true`) |
@@ -231,7 +231,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | Tool | What it does |
 |---|---|
 | `simplify_code` | ✎ preview Apply the IDE's mechanical style suggestions to C#: 87 rule ids, at document, project or solution scope, compiler-gated, preview by default; IDE0005/IDE0032/IDE0290 are delegated to their own tools |
-| `simplify_vb_code` | ✎ preview The same engine for Visual Basic: 15 rule ids, compiler-gated, preview by default |
+| `simplify_vb_code` | ✎ preview The same engine for Visual Basic: 41 rule ids, compiler-gated, preview by default; the 8 ids it does not rewrite are returned with a reason each |
 | `code_cleanup` | ✎ preview Run the cleanup steps in order (style → usings → regions → reorder → format) over a document, project or solution; `steps` or a named `profile` — the built-in `full`/`reformat`/`style`/`usings`/`regions`/`reorder`/`safe` or a team one from `.visualMCP/cleanup-profiles.json`, which `saveProfileAs` writes |
 | `layout_code` | ✎ preview CodeMaid's Format Document rules Roslyn's formatter does not implement: reflow full-line `//` comments to a width, join a line range (refused when the token stream would change), collapse runs of blank lines and trim them at the braces |
 | `format_code` | ✎ preview Reformat with Roslyn using the project's `.editorconfig`, preserving line endings; document, project or solution |
@@ -307,8 +307,8 @@ the others change the session or the debuggee.
 
 ## Profiling
 
-All native: none of these spawns dotnet-trace, dotnet-counters, dotnet-gcdump, dotnet-dump or
-dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
+All native: none of these spawns dotnet-trace, dotnet-counters, dotnet-gcdump, dotnet-dump,
+dotnet-stack or dotnet-monitor. Full workflows in [Profiling](guides/profiling.md).
 
 | Tool | What it does |
 |---|---|
@@ -327,12 +327,13 @@ dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
 | `profile_retention` | Why a type is still alive: shortest GC-root chains (each frame names the holding field) and the referrer types |
 | `profile_dump` | Collect a dump (normal/withheap/triage/full) or analyse an existing `.dmp` with ClrMD |
 | `profile_symbols` | Inspect PE debug records and download PDBs so frames resolve to `file:line` |
-| `profile_monitor` | Start, probe and stop a loopback dotnet-monitor |
+| `profile_monitor` | Start, probe and stop the native in-process diagnostics sidecar: HTTP on loopback for `/info`, `/processes`, `/metrics` (JSON or Prometheus), `/trace`, `/dump`, `/heap`, `/stacks`, `/fileio` |
 | `profile_allocations` | Attribute sampled allocation bytes to the allocating method, type and `file:line`, with full stacks |
 | `profile_calltree` | Inclusive/exclusive CPU call tree, with optional folded-stacks export |
 | `profile_hotpaths` | Ranked hot methods, root-to-leaf paths and branch points; CPU, allocations, exceptions or mixed |
 | `profile_hotlines` | Which source line inside a method burns the CPU, resolved from the sampled instruction pointer through IL and the PDB |
 | `profile_io` | Where threads block in I/O — file, HTTP, network, database, pipe, console, sync-over-async, lock, sleep — with call site and duration |
+| `profile_file_io` | Who reads/writes which file: per-process and per-file bytes and operation counts, read/write MB/s and findings (write hotspot, small-write storm, handle churn). Windows kernel ETW: Windows only and elevated |
 | `profile_compare` | Diff two traces or two heap snapshots, with regression findings |
 | `profile_diagnose` | Counters + trace + stacks + heap in one call, with correlated findings and one report |
 | `profile_slowdown` | One verdict: cpu, gc, io-wait, sync-over-async, lock-wait or blocked-native, ranked by the share of the window it explains |
@@ -384,15 +385,25 @@ dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
 
 ## XAML
 
-The markup half of a WPF / WinUI 3 / MAUI / Avalonia solution: the files are read from disk, the
-code-behind is resolved through Roslyn. It does not compile the XAML, so bindings and styles are not
-proved — the notes say so.
+The markup half of a WPF / WinUI 3 / MAUI / Avalonia / UWP solution: the files are read from disk, the
+C# is resolved through Roslyn, and the project's own dialect decides which rules apply. It does not
+compile the XAML: a binding is checked against the type the markup names, and a type or a project it
+cannot resolve is reported as "not checked", never as an error in the markup.
 
 | Tool | What it does |
 |---|---|
-| `xaml_pages` | Inventory of `.xaml`/`.axaml` files: kind (window/page/userControl/maui/resourceDictionary/application), `x:Class` resolved to its code-behind type, markup counts |
-| `analyze_xaml` | Findings `XAML0001`–`XAML0009`: duplicate `x:Name`/`x:Key`, missing or unresolvable `x:Class`, an event handler with no method, a resource key nothing defines, a `DataTemplate` without its type, a name colliding with a member, invalid XML |
+| `xaml_pages` | Inventory of `.xaml`/`.axaml` files: kind (window/page/userControl/maui/resourceDictionary/application), `x:Class` resolved to its code-behind type, the **dialect** of each project (WPF / WinUI 3 / .NET MAUI / Avalonia / UWP) with the signals it was decided on, the target frameworks a MAUI project multi-targets, markup counts |
+| `analyze_xaml` | Findings `XAML0001`–`XAML0015`. Markup: duplicate `x:Name`/`x:Key`, missing or unresolvable `x:Class`, an event handler with no method, a resource key nothing defines, a `DataTemplate` without its type, a name colliding with a member, invalid XML. Bindings: a path segment that does not exist on its data type, a `Setter` without `Property`, a `Setter` property the `TargetType` does not declare, `x:Bind` in a dialect that does not compile it, an `ElementName`/`x:Reference`/`Storyboard.TargetName` that names no element, a prefixed or dotted `TargetType`/`DataType` that does not resolve |
+| `xaml_bindings` | The binding inspector: every `{Binding}`/`{x:Bind}`/`{CompiledBinding}`/`{TemplateBinding}` with its target, path, mode, source, the data type the path is checked against and where that type came from, the path walked member by member, and a status of `valid` / `missing-member` / `not-checked` (with the reason) |
+| `xaml_tree` | The element tree ONE file declares — element, `x:Name`, line, attributes, children — as nested data and as indented text: the static half of a visual tree (no layout, no styles applied, no rendering) |
 | `xaml_navigate` | Follow one name to everything attached to it: `name` (declarations + `ElementName` uses + the generated field), `resource` (definitions + uses), `style` (BasedOn chain and derived styles), `handler` (markup + method) |
+| `xaml_rename` | ✎ Rename an `x:Name` (declaration, `ElementName`/`x:Reference`/`Storyboard.TargetName` in the file, and the identifiers the code-behind uses for the generated field) or a resource `x:Key` (across the project's XAML files and the code-behind's string literals). An identifier that resolves to a real symbol is left alone and reported |
+| `xaml_extract_style` | ✎ Move an element's attributes into a keyed `Style` in the nearest `<X.Resources>` (created when the file has none) and set `Style="{StaticResource Key}"` on the element; event handlers, `x:*`, `Name` and `Style` stay |
+| `xaml_promote_resource` | ✎ Promote a literal attribute value to a resource in the dialect's syntax (`sys:Double`/`sys:String` in WPF with the namespace added when missing, `x:Double`/`x:String` elsewhere, `Color`, `SolidColorBrush`) and replace the attribute with `{StaticResource Key}` |
+| `format_xaml` | ✎ Normalise the indentation of one file: tag lines at their element's depth, attribute continuation lines aligned under the first attribute, trailing whitespace removed — and nothing else. The element/attribute signature must be identical after the rewrite |
+
+The four ✎ tools are previewed by default, refuse an edit whose result would not parse as XML (or would
+duplicate a key), and record every write in the edit history, so `revert_edit` undoes it.
 
 ## SQL
 
@@ -425,7 +436,7 @@ import to a file and no package specifier.
 | Tool | What it does |
 |---|---|
 | `markup_files` | Inventory: lines, element count, distinct classes / simple selectors, ids (and how many repeat), findings per file; `kind` picks html, css or both |
-| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0009` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a simple selector that matches no element in the scanned pages) |
+| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0009` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a simple selector that matches no element in the scanned pages); the CSS rules and selectors are also read from every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` |
 
 ## YAML
 

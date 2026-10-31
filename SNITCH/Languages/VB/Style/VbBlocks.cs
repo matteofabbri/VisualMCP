@@ -12,8 +12,9 @@ namespace Snitch.Languages.VB.Style;
 /// <para>
 /// A kind that is missing here is a kind where a statement rewrite silently does nothing, because the
 /// service only splices a match when <see cref="StatementsOf"/> answers with a non-empty list. The list
-/// covers every block that can hold executable statements in VB 15+, and nothing else: class/namespace
-/// blocks hold members, not statements.
+/// covers every block that can hold executable statements in VB 15+, plus the type and namespace blocks
+/// whose member list is the same <c>SyntaxList(Of StatementSyntax)</c> — which is what lets a rule fix a
+/// member's header (modifiers, accessibility) or remove an unused member as one splice.
 /// </para>
 /// </summary>
 internal static class VbBlocks
@@ -36,6 +37,11 @@ internal static class VbBlocks
         CatchBlockSyntax block => Nodes(block.Statements),
         FinallyBlockSyntax block => Nodes(block.Statements),
         CaseBlockSyntax block => Nodes(block.Statements),
+        // A type and a namespace hold members, and a VB member IS a statement here (a method block, a
+        // field declaration). The member-level rules — modifier order, accessibility, readonly, an
+        // unused member being removed — are spliced through the same list executable statements use.
+        TypeBlockSyntax block => Nodes(block.Members),
+        NamespaceBlockSyntax block => Nodes(block.Members),
         _ => [],
     };
 
@@ -61,6 +67,8 @@ internal static class VbBlocks
             CatchBlockSyntax block => block.WithStatements(list),
             FinallyBlockSyntax block => block.WithStatements(list),
             CaseBlockSyntax block => block.WithStatements(list),
+            TypeBlockSyntax block => block.WithMembers(list),
+            NamespaceBlockSyntax block => block.WithMembers(list),
             _ => parent,
         };
     }

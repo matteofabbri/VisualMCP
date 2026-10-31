@@ -1,12 +1,9 @@
-using System.Reflection.Metadata;
-using System.Reflection.PortableExecutable;
-
 namespace Snitch.Languages.CSharp.Inspections;
 
 /// <summary>
-/// Where a ReSharper inspection id stands in this product. The table is curated: the ~2500 ReSharper
-/// inspections are closed-source analyzers on JetBrains' PSI, so the honest answer is not "all ported" but
-/// "this id maps to that capability here, and these ids have none".
+/// Where a ReSharper inspection id stands in this product. Two layers: the catalogue is read from the Rider
+/// installation's metadata (every id the engine ships), while the coverage is a curated table that says which
+/// of those ids a capability here answers — the honest half of "the proprietary catalogue".
 /// </summary>
 public interface IResharperInspectionMapService
 {
@@ -22,16 +19,21 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
         ("ConvertToConstant.Local", "rider pack: ConvertToConstantLocalAnalyzer (reported as ConvertToConstant_Local)", "rider", "a local assigned once with a constant can be const; Roslyn ids cannot contain dots"),
         ("LoopVariableIsNeverChangedInsideLoop", "rider pack: LoopVariableChangedAnalyzer", "rider", "a for index written inside the body"),
         ("MemberCanBeMadeStatic.Global", "rider pack: MemberCanBeMadeStaticAnalyzer (reported as MemberCanBeMadeStatic_Global)", "rider", "a method that touches no instance state; Roslyn ids cannot contain dots"),
-        ("RedundantArgument", "rider pack: RedundantArgumentAnalyzer", "rider", "an argument equal to the parameter default"),
+        ("RedundantArgumentDefaultValue", "rider pack: RedundantArgumentAnalyzer", "rider", "an argument equal to the parameter default; Rider 2026 id (was RedundantArgument)"),
         ("EmptyConstructor", "rider pack: EmptyConstructorAnalyzer", "rider", "the only, public, parameterless, empty constructor"),
         ("RedundantIfElseBlock", "rider pack: RedundantIfElseAnalyzer", "rider", "if/else returning opposite bool literals"),
         ("ConditionIsAlwaysTrueOrFalse", "rider pack: ConstantConditionAnalyzer", "rider", "a computed constant condition (not the literal)"),
         ("RedundantBaseConstructorCall", "rider pack: RedundantBaseConstructorCallAnalyzer", "rider", "an explicit parameterless base() call"),
+        ("ConvertToCompoundAssignment", "rider pack: ConvertToCompoundAssignmentAnalyzer", "rider", "x = x + y → x += y, on a side-effect-free target"),
+        ("RedundantLambdaSignatureParentheses", "rider pack: RedundantLambdaSignatureParenthesesAnalyzer", "rider", "(x) => x → x => x for a single untyped parameter"),
+        ("StringLiteralAsInterpolationArgument", "rider pack: StringLiteralAsInterpolationArgumentAnalyzer", "rider", "a literal inside an interpolation merges into the text"),
+        ("RedundantCheckBeforeAssignment", "rider pack: RedundantCheckBeforeAssignmentAnalyzer", "rider", "if (a != b) a = b; writes the value either way"),
+        ("UseNameofExpression", "rider pack: UseNameofExpressionAnalyzer", "rider", "a literal naming a parameter → nameof, in the ArgumentException family and paramName arguments"),
 
         // The style engine rewrites these under their IDE ids.
         ("RedundantCast", "simplify_code IDE0004", "style", "unnecessary cast"),
         ("RedundantNameQualifier", "simplify_code IDE0002", "style", "qualifier that is in scope without it"),
-        ("ForRedundantThisQualifier", "simplify_code IDE0003", "style", "removal only: requiring 'this.' is not a rewrite"),
+        ("ArrangeThisQualifier", "simplify_code IDE0003", "style", "removal only: requiring 'this.' is not a rewrite; Rider 2026 id (was ForRedundantThisQualifier)"),
         ("SuggestVarOrType_BuiltInTypes", "simplify_code IDE0007/IDE0008", "style", "option-driven csharp_style_var_*"),
         ("SuggestVarOrType_Elsewhere", "simplify_code IDE0007/IDE0008", "style", "option-driven csharp_style_var_*"),
         ("SuggestVarOrType_SimpleTypes", "simplify_code IDE0007/IDE0008", "style", "option-driven csharp_style_var_*"),
@@ -57,9 +59,8 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
 
         // The ReSharper refactoring-shaped ids are context actions or refactoring tools.
         ("InvertIf", "context_action invert_if", "context", "if/else branch swap"),
-        ("UseNameofExpression", "—", "none", "string literal → nameof: not implemented as a rewrite"),
         ("MemberCanBePrivate.Global", "—", "none", "needs whole-solution usage plus an accessibility edit"),
-        ("MemberCanBeInternal.Global", "—", "none", "the same, across assemblies"),
+        ("MemberCanBeInternal", "—", "none", "the same, across assemblies; Rider 2026 id (was MemberCanBeInternal.Global)"),
         ("RedundantOverload.Global", "—", "none", "overload set analysis, not implemented"),
         ("LoopCanBeConvertedToQuery", "—", "none", "LINQ conversion analysis, not implemented"),
         ("RedundantLambdaParameterType", "—", "none", "not implemented"),
@@ -83,6 +84,40 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
         var uncovered = Map.Where(entry => entry.Kind == "none").Select(entry => entry.Id).ToList();
         var limit = Math.Clamp(maxUncovered < 1 ? 100 : maxUncovered, 1, 1000);
 
+        var rider = includeInstall ? ResolveRiderPath(riderPath) : null;
+        var catalogue = rider is null ? null : ReSharperCatalogueReader.Read(rider);
+
+        object? install = null;
+        object? coverage = null;
+        var catalogueIdCount = 0;
+
+        if (includeInstall)
+        {
+            if (rider is null)
+            {
+                install = new
+                {
+                    found = false,
+                    note = "No Rider installation was found; pass riderPath or set RIDER_HOME.",
+                };
+            }
+            else if (catalogue is not { Found: true })
+            {
+                install = new
+                {
+                    found = true,
+                    path = rider,
+                    error = catalogue?.Error ?? "lib/ReSharperHost was not found under this installation.",
+                };
+            }
+            else
+            {
+                install = Describe(catalogue);
+                coverage = Coverage(catalogue, limit);
+                catalogueIdCount = catalogue.Ids.Count;
+            }
+        }
+
         return Task.FromResult<object>(new
         {
             curatedCount = entries.Count,
@@ -91,71 +126,74 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
             uncovered = uncovered.Take(limit).ToList(),
             uncoveredCount = uncovered.Count,
             entries,
-            install = includeInstall ? ScanInstall(riderPath) : null,
-            note = "The table is curated, not exhaustive: the ReSharper catalogue has ~2500 ids, implemented as " +
-                   "closed-source analyzers over JetBrains' PSI, and each one would be a reimplementation rather " +
-                   "than a registration here. The install scan counts the Inspection/Inspector types in the local " +
-                   "Rider to show the scale; their ids are runtime registrations and cannot be enumerated from " +
-                   "metadata. 'rider' is an opt-in inspection pack: inspect_code packs=rider.",
+            catalogueIdCount,
+            coverage,
+            install,
+            note = "Two layers. The catalogue is read from the Rider installation's metadata: each " +
+                   "ConfigurableSeverityHighlighting id on a highlighting class, linked to the ElementProblemAnalyzer that " +
+                   "produces it. The coverage is curated: each id this product answers, with the capability that answers it, " +
+                   "or 'none'. A catalogue id with no entry here is not implemented. 'rider' is an opt-in inspection pack: " +
+                   "inspect_code packs=rider.",
         });
     }
 
-    /// <summary>
-    /// Counts the Inspection/Inspector types in the local Rider installation — evidence of the scale, not a
-    /// catalogue of ids (a type name is not the inspection id).
-    /// </summary>
-    private static object? ScanInstall(string? riderPath)
+    /// <summary>What the installation ships, by language group.</summary>
+    private static object Describe(ReSharperCatalogue catalogue)
     {
-        var path = ResolveRiderPath(riderPath);
-        if (path is null)
-            return new { found = false, note = "No Rider installation was found; pass riderPath or set RIDER_HOME." };
+        var groups = catalogue.Ids
+            .GroupBy(id => id.Languages, StringComparer.Ordinal)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => new { group = group.Key, count = group.Count() })
+            .ToList();
 
-        var host = Path.Combine(path, "lib", "ReSharperHost");
-        if (!Directory.Exists(host))
-            return new { found = true, path, error = "lib/ReSharperHost was not found under this installation." };
-
-        var assemblies = 0;
-        var inspectionTypes = 0;
-        var sample = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(host, "*.dll"))
-        {
-            try
-            {
-                using var stream = File.OpenRead(file);
-                using var pe = new PEReader(stream);
-                if (!pe.HasMetadata) continue;
-
-                assemblies++;
-                var reader = pe.GetMetadataReader();
-                foreach (var handle in reader.TypeDefinitions)
-                {
-                    var definition = reader.GetTypeDefinition(handle);
-                    var name = reader.GetString(definition.Name);
-                    if (name.StartsWith('<')) continue;
-                    if (!name.EndsWith("Inspection", StringComparison.Ordinal) &&
-                        !name.EndsWith("Inspector", StringComparison.Ordinal))
-                        continue;
-
-                    inspectionTypes++;
-                    if (sample.Count < 20 && !sample.Contains(name)) sample.Add(name);
-                }
-            }
-            catch (Exception)
-            {
-                // A native or unreadable DLL in the folder is not a failure of the scan.
-            }
-        }
-
-        sample.Sort(StringComparer.Ordinal);
         return new
         {
             found = true,
-            path,
-            assembliesScanned = assemblies,
-            inspectionTypes,
-            sample,
-            note = "Type names are evidence of the scale; the inspection IDs are runtime registrations and settings keys.",
+            path = catalogue.Path,
+            assembliesScanned = catalogue.AssembliesScanned,
+            idCount = catalogue.Ids.Count,
+            groups,
+            withAnalyzer = catalogue.Ids.Count(id => id.AnalyzerType is not null),
+            withDescription = catalogue.Ids.Count(id => id.Description is not null),
+            decodeFailures = catalogue.DecodeFailures,
+            decodeFailureSample = catalogue.DecodeFailureSample,
+            resourceErrors = catalogue.ResourceErrors,
+            sample = catalogue.Ids.Take(20).Select(id => id.Id).ToList(),
+            note = "Read from the installation's metadata: the ids are ConfigurableSeverityHighlighting arguments, the analyzer " +
+                   "is the ElementProblemAnalyzer that names the highlighting, and the description is the tooltip text the " +
+                   "attribute's resource name resolves to.",
+        };
+    }
+
+    /// <summary>The curated map compared against the real catalogue, in both directions.</summary>
+    private static object Coverage(ReSharperCatalogue catalogue, int limit)
+    {
+        var known = catalogue.Ids.Select(id => id.Id).ToHashSet(StringComparer.Ordinal);
+        var mapped = Map.Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
+
+        var mappedInCatalogue = Map.Select(entry => entry.Id).Where(known.Contains).ToList();
+        var mappedNotInCatalogue = Map.Select(entry => entry.Id).Where(id => !known.Contains(id)).ToList();
+        var uncoveredHere = catalogue.Ids.Count(id => !mapped.Contains(id.Id));
+        var uncoveredSample = catalogue.Ids
+            .Where(id => !mapped.Contains(id.Id))
+            .Take(limit)
+            .Select(id => new
+            {
+                id = id.Id,
+                group = id.Languages,
+                analyzer = id.AnalyzerType,
+                description = id.Description,
+            })
+            .ToList();
+
+        return new
+        {
+            mappedInCatalogueCount = mappedInCatalogue.Count,
+            mappedNotInCatalogueCount = mappedNotInCatalogue.Count,
+            mappedNotInCatalogue = mappedNotInCatalogue.Take(limit).ToList(),
+            uncoveredFromCatalogueCount = uncoveredHere,
+            uncoveredFromCatalogue = uncoveredSample,
         };
     }
 

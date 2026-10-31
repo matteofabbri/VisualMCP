@@ -7,6 +7,16 @@ using static Microsoft.CodeAnalysis.VisualBasic.SyntaxFactory;
 namespace Snitch.Languages.VB.Style;
 
 /// <summary>
+/// A rule whose answer depends on the repository's options or on the whole solution, so it implements
+/// the context entry point; the model-only entry point has nothing to answer and stays empty.
+/// </summary>
+public abstract class VbContextRewrite : VbStyleRewrite
+{
+    public override StyleMatch? TryMatch(SyntaxNode node, SemanticModel model, CancellationToken cancellationToken) =>
+        null;
+}
+
+/// <summary>
 /// The Visual Basic half of a style rewrite: <see cref="Snitch.Languages.Style.StyleRewrite"/> plus the
 /// helpers that need VB's own syntax factory. Visual Basic has no expression-bodied members and no
 /// braces, so a rule here never replaces a whole block: it replaces an expression, or one statement.
@@ -28,6 +38,28 @@ public abstract class VbStyleRewrite : Snitch.Languages.Style.StyleRewrite
 
     protected StyleMatch MatchStatement(SyntaxNode node, string statementText) =>
         Match(node, ParseExecutableStatement(statementText).WithTriviaFrom(node));
+
+    /// <summary>
+    /// A member rewritten as a whole: the text is parsed inside a throwaway class, because VB has no
+    /// "parse a declaration" entry point — a field, a property block and a method block are members of
+    /// a type, not executable statements.
+    /// </summary>
+    protected StyleMatch MatchMember(SyntaxNode node, string memberText) =>
+        Match(node, ParseMember(memberText).WithTriviaFrom(node));
+
+    /// <summary>One member parsed out of a wrapper class; the declaration the text describes.</summary>
+    protected static SyntaxNode ParseMember(string text)
+    {
+        var unit = ParseCompilationUnit(
+            "Class __VisualMcpMemberHost" + Environment.NewLine + text + Environment.NewLine + "End Class");
+
+        var host = unit.Members.OfType<TypeBlockSyntax>().FirstOrDefault();
+        var member = host?.Members.FirstOrDefault();
+        if (member is not null) return member;
+
+        // A malformed fragment still has to answer with a node: the compiler gate refuses the result.
+        return ParseExecutableStatement(text);
+    }
 
     /// <summary>
     /// Whether writing <paramref name="nameText"/> at <paramref name="at"/> would bind to

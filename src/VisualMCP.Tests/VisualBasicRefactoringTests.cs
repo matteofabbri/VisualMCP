@@ -108,4 +108,78 @@ public sealed class VisualBasicRefactoringTests
         // Two declarations carry the name: the interface's and the implementation's.
         Assert.Contains("overload", ResultAssert.Error(result));
     }
+
+    [Fact]
+    public async Task ChangeType_ReplacesTheTypeOfAVbDeclaration()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("C.vb", """
+            Public Class C
+                Public Function F() As Integer
+                    Dim count As Integer = 0
+                    Return count
+                End Function
+            End Class
+            """);
+
+        var result = await new ChangeTypeService(workspace).ChangeType(workspace.PathOf("C.vb"), 3, "Long");
+
+        ResultAssert.Succeeded(result);
+        Assert.Contains("Dim count As Long", workspace.Read("C.vb"));
+    }
+
+    [Fact]
+    public async Task UseBaseType_ReplacesTheTypeWithAnInterface()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("C.vb", """
+            Imports System.Collections.Generic
+
+            Public Class C
+                Private _items As List(Of Integer) = New List(Of Integer)
+
+                Public Function Count() As Integer
+                    Return _items.Count
+                End Function
+            End Class
+            """);
+
+        var result = await new UseBaseTypeService(workspace).UseBaseType(workspace.PathOf("C.vb"), 4, "IEnumerable");
+
+        ResultAssert.Succeeded(result);
+        Assert.Contains("As IEnumerable(Of Integer)", workspace.Read("C.vb"));
+    }
+
+    [Fact]
+    public async Task TypeToPartial_MarksEveryVbDeclarationPartial()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("C.vb", """
+            Public Class C
+            End Class
+            """);
+
+        var result = await new TypeToPartialService(workspace).TypeToPartial(workspace.PathOf("C.vb"), "C");
+
+        ResultAssert.Succeeded(result);
+        Assert.Contains("Public Partial Class C", workspace.Read("C.vb"));
+    }
+
+    [Fact]
+    public async Task SafeDelete_RemovesAnUnreferencedVbMember()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("C.vb", """
+            Public Class C
+                Private Sub Unused()
+                End Sub
+
+                Public Sub Run()
+                End Sub
+            End Class
+            """);
+
+        var result = await new SafeDeleteService(workspace).SafeDelete("Unused", containingType: null);
+
+        ResultAssert.Succeeded(result);
+        var text = workspace.Read("C.vb");
+        Assert.DoesNotContain("Unused", text);
+        Assert.Contains("Public Sub Run", text);
+    }
 }

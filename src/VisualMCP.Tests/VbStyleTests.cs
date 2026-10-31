@@ -167,6 +167,319 @@ public sealed class VbStyleTests
                 End Function
             End Class
             """, "o IsNot other");
+
+        // IDE0009 — the qualified form, when the repository asks for it.
+        yield return CaseWithConfig("IDE0009", QualificationPreferred, """
+            Friend Class C
+                Private _value As Integer = 1
+
+                Public Function F() As Integer
+                    Return _value
+                End Function
+            End Class
+            """, "Return Me._value");
+
+        // IDE0010 — the enum member no Case names yet.
+        yield return Case("IDE0010", """
+            Friend Enum Status
+                Active
+                Retired
+            End Enum
+
+            Friend Class C
+                Public Function F(s As Status) As Integer
+                    Select Case s
+                        Case Status.Active
+                            Return 1
+                    End Select
+
+                    Return 0
+                End Function
+            End Class
+            """, "Case Status.Retired");
+
+        // IDE0017 — a local created empty and then filled member by member.
+        yield return Case("IDE0017", """
+            Friend Class Book
+                Public Property Title As String
+                Public Property Pages As Integer
+            End Class
+
+            Friend Class C
+                Public Function F() As Book
+                    Dim book = New Book()
+                    book.Title = "Code"
+                    book.Pages = 3
+                    Return book
+                End Function
+            End Class
+            """, "New Book() With {.Title = \"Code\", .Pages = 3}");
+
+        // IDE0033 — Item1 on a tuple that names its elements.
+        yield return Case("IDE0033", """
+            Friend Class C
+                Public Function F() As Integer
+                    Dim pair As (Id As Integer, Name As String) = (1, "a")
+                    Return pair.Item1
+                End Function
+            End Class
+            """, "Return pair.Id");
+
+        // IDE0035 — the statement after the Return cannot run.
+        yield return Case("IDE0035", """
+            Friend Class C
+                Public Function F() As Integer
+                    Return 1
+                    Dim unreachable As Integer = 2
+                    Return unreachable
+                End Function
+            End Class
+            """, "Return 1", "!unreachable");
+
+        // IDE0036 — the order the repository asks for.
+        yield return CaseWithConfig("IDE0036", ModifierOrderPreferred, """
+            Friend Class C
+                Private Shared Function F() As Integer
+                    Return 1
+                End Function
+            End Class
+            """, "Shared Private Function F");
+
+        // IDE0040 — the accessibility VB would assume, written out.
+        yield return CaseWithConfig("IDE0040", AccessibilityAlways, """
+            Friend Class C
+                Function F() As Integer
+                    Return 1
+                End Function
+            End Class
+            """, "Public Function F");
+
+        // IDE0044 — a field only the constructor writes.
+        yield return Case("IDE0044", """
+            Friend Class C
+                Private _value As Integer
+
+                Public Sub New()
+                    _value = 1
+                End Sub
+
+                Public Function Read() As Integer
+                    Return _value
+                End Function
+            End Class
+            """, "Private ReadOnly _value As Integer");
+
+        // IDE0045 — the same branch fold for an assignment.
+        yield return Case("IDE0045", """
+            Friend Class C
+                Public Function F(b As Boolean) As Integer
+                    Dim x As Integer
+                    If b Then
+                        x = 1
+                    Else
+                        x = 2
+                    End If
+
+                    Return x
+                End Function
+            End Class
+            """, "x = If(b, 1, 2)");
+
+        // IDE0046 — the If/Else shape folds into the conditional expression.
+        yield return Case("IDE0046", """
+            Friend Class C
+                Public Function F(b As Boolean) As Integer
+                    If b Then
+                        Return 1
+                    Else
+                        Return 2
+                    End If
+                End Function
+            End Class
+            """, "Return If(b, 1, 2)");
+
+        // IDE0048 — the parentheses the repository asks for.
+        yield return CaseWithConfig("IDE0048", ParenthesesForClarity, """
+            Friend Class C
+                Public Function F(a As Integer, b As Integer, c As Integer) As Integer
+                    Return a + b + c
+                End Function
+            End Class
+            """, "Return (a + b) + c");
+
+        // IDE0051 — a private member nothing refers to.
+        yield return Case("IDE0051", """
+            Friend Class C
+                Private Sub Unused()
+                End Sub
+
+                Public Sub Run()
+                End Sub
+            End Class
+            """, "Public Sub Run", "!Unused");
+
+        // IDE0052 — a private field that is only ever written.
+        yield return Case("IDE0052", """
+            Friend Class C
+                Private _count As Integer
+
+                Public Sub Increment()
+                    _count = 1
+                End Sub
+            End Class
+            """, "Public Sub Increment", "!_count");
+
+        // IDE0059 — the first store is overwritten before anything reads it.
+        yield return Case("IDE0059", """
+            Friend Class C
+                Public Function F() As Integer
+                    Dim x As Integer = 0
+                    x = 1
+                    x = 2
+                    Return x
+                End Function
+            End Class
+            """, "x = 2", "!x = 1");
+
+        // IDE0070 — the multiply-and-add hash fold.
+        yield return Case("IDE0070", """
+            Friend Class C
+                Private _name As String
+                Private _pages As Integer
+
+                Public Overrides Function GetHashCode() As Integer
+                    Dim hash As Integer = 17
+                    hash = hash * 31 + _name.GetHashCode()
+                    hash = hash * 31 + _pages.GetHashCode()
+                    Return hash
+                End Function
+            End Class
+            """, "Return HashCode.Combine(_name, _pages)");
+
+        // IDE0071 — an interpolation hole that only calls ToString.
+        yield return Case("IDE0071", """
+            Friend Class C
+                Public Function F(x As Integer) As String
+                    Return $"value {x.ToString()}"
+                End Function
+            End Class
+            """, "value {x}");
+
+        // IDE0073 — the repository's header.
+        yield return CaseWithConfig("IDE0073", FileHeader, """
+            Friend Class C
+            End Class
+            """, "Copyright (c) Acme");
+
+        // IDE0082 — GetType(T).Name is NameOf(T).
+        yield return Case("IDE0082", """
+            Friend Class C
+                Public Function F() As String
+                    Return GetType(C).Name
+                End Function
+            End Class
+            """, "Return NameOf(C)");
+
+        // IDE0120 — Where(...).Any() is Any(...).
+        yield return Case("IDE0120", """
+            Imports System.Collections.Generic
+
+            Friend Class C
+                Public Function F(xs As IEnumerable(Of Integer)) As Boolean
+                    Return xs.Where(Function(x) x > 1).Any()
+                End Function
+            End Class
+            """, "Return xs.Any(Function(x) x > 1)");
+
+        // IDE0121 — Where(TypeOf … Is T).Cast(Of T)() is OfType(Of T)().
+        yield return Case("IDE0121", """
+            Imports System.Collections.Generic
+
+            Friend Class C
+                Public Function F(xs As IEnumerable(Of Object)) As IEnumerable(Of String)
+                    Return xs.Where(Function(o) TypeOf o Is String).Cast(Of String)()
+                End Function
+            End Class
+            """, "Return xs.OfType(Of String)()");
+
+        // IDE0140 — the type written once instead of twice.
+        yield return Case("IDE0140", """
+            Friend Class Book
+            End Class
+
+            Friend Class C
+                Public Function F() As Book
+                    Dim book As Book = New Book()
+                    Return book
+                End Function
+            End Class
+            """, "Dim book As New Book()", "!As Book = New Book()");
+
+        // IDE0280 — the paramName literal is NameOf.
+        yield return Case("IDE0280", """
+            Imports System
+
+            Friend Class C
+                Public Sub F(value As String)
+                    If value Is Nothing Then
+                        Throw New ArgumentNullException("value")
+                    End If
+                End Sub
+            End Class
+            """, "NameOf(value)");
+
+        // IDE2000 — two blank lines become one when the repository forbids them.
+        yield return CaseWithConfig("IDE2000", BlankLinesForbidden, """
+            Friend Class C
+                Public Sub First()
+                End Sub
+
+
+                Public Sub Second()
+                End Sub
+            End Class
+            """);
+
+        // IDE2003 — a blank line after the block when the repository asks for one.
+        yield return CaseWithConfig("IDE2003", BlankLineAfterBlockRequired, """
+            Friend Class C
+                Public Sub F()
+                    If True Then
+                        Dim a As Integer = 1
+                    End If
+                    Dim b As Integer = 2
+                End Sub
+            End Class
+            """);
+
+        // IDE0032 — a private field that only backs one property.
+        yield return Case("IDE0032", """
+            Friend Class C
+                Private _name As String
+
+                Public Property Name As String
+                    Get
+                        Return _name
+                    End Get
+                    Set(value As String)
+                        _name = value
+                    End Set
+                End Property
+            End Class
+            """, "Public Property Name As String", "!_name");
+
+        // IDE0060 — a parameter nobody reads, and the argument every call site passes.
+        yield return Case("IDE0060", """
+            Friend Class C
+                Private Function Twice(value As Integer, unused As String) As Integer
+                    Return value * 2
+                End Function
+
+                Public Function Run() As Integer
+                    Return Twice(2, "x")
+                End Function
+            End Class
+            """, "Twice(value As Integer)", "Return Twice(2)");
     }
 
     /// <summary>
@@ -318,6 +631,335 @@ public sealed class VbStyleTests
                 End Function
             End Class
             """);
+
+        // IDE0009 — the repository did not ask for Me.
+        yield return Intact("IDE0009", """
+            Friend Class C
+                Private _value As Integer = 1
+
+                Public Function F() As Integer
+                    Return _value
+                End Function
+            End Class
+            """);
+
+        // IDE0010 — Case Else already answers for every value.
+        yield return Intact("IDE0010", """
+            Friend Enum Status
+                Active
+                Retired
+            End Enum
+
+            Friend Class C
+                Public Function F(s As Status) As Integer
+                    Select Case s
+                        Case Status.Active
+                            Return 1
+                        Case Else
+                            Return 0
+                    End Select
+                End Function
+            End Class
+            """);
+
+        // IDE0017 — another statement separates the creation from the assignments.
+        yield return Intact("IDE0017", """
+            Friend Class Book
+                Public Property Title As String
+            End Class
+
+            Friend Class C
+                Public Function F() As Book
+                    Dim book = New Book()
+                    Console.WriteLine("between")
+                    book.Title = "Code"
+                    Return book
+                End Function
+            End Class
+            """);
+
+        // IDE0033 — the tuple has no element names to offer.
+        yield return Intact("IDE0033", """
+            Friend Class C
+                Public Function F() As Integer
+                    Dim pair As (Integer, String) = (1, "a")
+                    Return pair.Item1
+                End Function
+            End Class
+            """);
+
+        // IDE0035 — an If is not an unconditional jump.
+        yield return Intact("IDE0035", """
+            Friend Class C
+                Public Function F(b As Boolean) As Integer
+                    If b Then
+                        Return 1
+                    End If
+                    Return 2
+                End Function
+            End Class
+            """);
+
+        // IDE0036 — the modifiers are already in the configured order.
+        yield return IntactWithConfig("IDE0036", ModifierOrderPreferred, """
+            Friend Class C
+                Shared Private Function F() As Integer
+                    Return 1
+                End Function
+            End Class
+            """);
+
+        // IDE0040 — the accessibility is already written.
+        yield return IntactWithConfig("IDE0040", AccessibilityAlways, """
+            Friend Class C
+                Public Function F() As Integer
+                    Return 1
+                End Function
+            End Class
+            """);
+
+        // IDE0044 — the field is written outside the constructor.
+        yield return Intact("IDE0044", """
+            Friend Class C
+                Private _value As Integer
+
+                Public Sub Set(it As Integer)
+                    _value = it
+                End Sub
+            End Class
+            """);
+
+        // IDE0045 — the branches store into different targets.
+        yield return Intact("IDE0045", """
+            Friend Class C
+                Public Function F(b As Boolean, x As Integer, y As Integer) As Integer
+                    If b Then
+                        x = 1
+                    Else
+                        y = 2
+                    End If
+
+                    Return x + y
+                End Function
+            End Class
+            """);
+
+        // IDE0046 — the branches do more than return.
+        yield return Intact("IDE0046", """
+            Friend Class C
+                Public Function F(b As Boolean) As Integer
+                    If b Then
+                        Console.WriteLine(1)
+                        Return 1
+                    Else
+                        Return 2
+                    End If
+                End Function
+            End Class
+            """);
+
+        // IDE0048 — the repository did not ask for parentheses.
+        yield return Intact("IDE0048", """
+            Friend Class C
+                Public Function F(a As Integer, b As Integer, c As Integer) As Integer
+                    Return a + b + c
+                End Function
+            End Class
+            """);
+
+        // IDE0051 — the private member is called.
+        yield return Intact("IDE0051", """
+            Friend Class C
+                Private Function Used() As Integer
+                    Return 1
+                End Function
+
+                Public Function Run() As Integer
+                    Return Used()
+                End Function
+            End Class
+            """);
+
+        // IDE0052 — the field is read.
+        yield return Intact("IDE0052", """
+            Friend Class C
+                Private _count As Integer
+
+                Public Sub Increment()
+                    _count = 1
+                End Sub
+
+                Public Function Read() As Integer
+                    Return _count
+                End Function
+            End Class
+            """);
+
+        // IDE0059 — the value is read before it is overwritten.
+        yield return Intact("IDE0059", """
+            Friend Class C
+                Public Function F() As Integer
+                    Dim x As Integer = 0
+                    x = 1
+                    Dim y As Integer = x
+                    Return y
+                End Function
+            End Class
+            """);
+
+        // IDE0070 — the fold has a step that is not a GetHashCode call.
+        yield return Intact("IDE0070", """
+            Friend Class C
+                Public Overrides Function GetHashCode() As Integer
+                    Dim hash As Integer = 17
+                    hash = hash * 31 + 7
+                    hash = hash * 31 + 9
+                    Return hash
+                End Function
+            End Class
+            """);
+
+        // IDE0071 — the ToString call has an argument, so the format is part of it.
+        yield return Intact("IDE0071", """
+            Friend Class C
+                Public Function F(x As Double) As String
+                    Return $"value {x.ToString("N2")}"
+                End Function
+            End Class
+            """);
+
+        // IDE0073 — no header template in the repository.
+        yield return Intact("IDE0073", """
+            Friend Class C
+            End Class
+            """);
+
+        // IDE0082 — FullName is not Name.
+        yield return Intact("IDE0082", """
+            Friend Class C
+                Public Function F() As String
+                    Return GetType(C).FullName
+                End Function
+            End Class
+            """);
+
+        // IDE0120 — Count() is not Any().
+        yield return Intact("IDE0120", """
+            Imports System.Collections.Generic
+
+            Friend Class C
+                Public Function F(xs As IEnumerable(Of Integer)) As Integer
+                    Return xs.Where(Function(x) x > 1).Count()
+                End Function
+            End Class
+            """);
+
+        // IDE0121 — a Cast on its own has no predicate to fold.
+        yield return Intact("IDE0121", """
+            Imports System.Collections.Generic
+
+            Friend Class C
+                Public Function F(xs As IEnumerable(Of Object)) As IEnumerable(Of String)
+                    Return xs.Cast(Of String)()
+                End Function
+            End Class
+            """);
+
+        // IDE0140 — the created type is a different one.
+        yield return Intact("IDE0140", """
+            Friend Class Book
+            End Class
+
+            Friend Class Novel
+                Inherits Book
+            End Class
+
+            Friend Class C
+                Public Function F() As Book
+                    Dim book As Book = New Novel()
+                    Return book
+                End Function
+            End Class
+            """);
+
+        // IDE0280 — the message argument is not a paramName.
+        yield return Intact("IDE0280", """
+            Imports System
+
+            Friend Class C
+                Public Sub F()
+                    Throw New Exception("value")
+                End Sub
+            End Class
+            """);
+
+        // IDE2000 — the repository allows multiple blank lines.
+        yield return Intact("IDE2000", """
+            Friend Class C
+                Public Sub First()
+                End Sub
+
+
+                Public Sub Second()
+                End Sub
+            End Class
+            """);
+
+        // IDE2003 — the repository allows a statement right after the block.
+        yield return Intact("IDE2003", """
+            Friend Class C
+                Public Sub F()
+                    If True Then
+                        Dim a As Integer = 1
+                    End If
+                    Dim b As Integer = 2
+                End Sub
+            End Class
+            """);
+
+        // IDE0032 — the field is used outside the property, so it is not a backing field.
+        yield return Intact("IDE0032", """
+            Friend Class C
+                Private _name As String
+
+                Public Property Name As String
+                    Get
+                        Return _name
+                    End Get
+                    Set(value As String)
+                        _name = value
+                    End Set
+                End Property
+
+                Public Function Length() As Integer
+                    Return _name.Length
+                End Function
+            End Class
+            """);
+
+        // IDE0060 — the parameter is read.
+        yield return Intact("IDE0060", """
+            Friend Class C
+                Private Function Twice(value As Integer) As Integer
+                    Return value * 2
+                End Function
+
+                Public Function Run() As Integer
+                    Return Twice(2)
+                End Function
+            End Class
+            """);
+
+        // IDE0003 — the repository asked for "Me." on fields, so the qualifier is not removed (IDE0009 owns it).
+        yield return IntactWithConfig("IDE0003", QualificationPreferred, """
+            Friend Class C
+                Private _value As Integer = 1
+
+                Public Function F() As Integer
+                    Return Me._value
+                End Function
+            End Class
+            """);
     }
 
     private const string IsNotPreferred = """
@@ -327,13 +969,64 @@ public sealed class VbStyleTests
         visual_basic_style_prefer_isnot_expression = true
         """;
 
+    private const string QualificationPreferred = """
+        root = true
+
+        [*.vb]
+        dotnet_style_qualification_for_field = true
+        """;
+
+    private const string ModifierOrderPreferred = """
+        root = true
+
+        [*.vb]
+        visual_basic_preferred_modifier_order = shared, private
+        """;
+
+    private const string AccessibilityAlways = """
+        root = true
+
+        [*.vb]
+        dotnet_style_require_accessibility_modifiers = always
+        """;
+
+    private const string ParenthesesForClarity = """
+        root = true
+
+        [*.vb]
+        dotnet_style_parentheses_in_arithmetic_binary_operators = always_for_clarity
+        """;
+
+    private const string FileHeader = """
+        root = true
+
+        [*.vb]
+        file_header_template = ' Copyright (c) Acme
+        """;
+
+    private const string BlankLinesForbidden = """
+        root = true
+
+        [*.vb]
+        dotnet_style_allow_multiple_blank_lines_experimental = false
+        """;
+
+    private const string BlankLineAfterBlockRequired = """
+        root = true
+
+        [*.vb]
+        dotnet_style_allow_statement_immediately_after_block_experimental = false
+        """;
+
     private static object[] Case(string id, string source, params string[] expected) =>
         [id, source, expected, null];
 
     private static object[] CaseWithConfig(string id, string editorConfig, string source, params string[] expected) =>
         [id, source, expected, editorConfig];
 
-    private static object[] Intact(string id, string source) => [id, source];
+    private static object[] Intact(string id, string source) => [id, source, null];
+
+    private static object[] IntactWithConfig(string id, string editorConfig, string source) => [id, source, editorConfig];
 
     [Theory]
     [MemberData(nameof(RuleCases))]
@@ -356,14 +1049,20 @@ public sealed class VbStyleTests
 
         var text = workspace.Read("C.vb");
         foreach (var fragment in expected)
-            Assert.Contains(fragment, text);
+        {
+            // A leading '!' asserts the fragment is gone, which is how a removal is checked.
+            if (fragment.StartsWith('!')) Assert.DoesNotContain(fragment[1..], text);
+            else Assert.Contains(fragment, text);
+        }
     }
 
     [Theory]
     [MemberData(nameof(IntactCases))]
-    public async Task VbSimplify_LeavesTheShapeAlone(string id, string source)
+    public async Task VbSimplify_LeavesTheShapeAlone(string id, string source, string? editorConfig)
     {
-        using var workspace = VisualBasicWorkspace.Create("C.vb", source);
+        using var workspace = editorConfig is null
+            ? VisualBasicWorkspace.Create("C.vb", source)
+            : VisualBasicWorkspace.CreateWithEditorConfig(editorConfig, "C.vb", source);
 
         var service = new VbSimplifyCodeService(workspace);
         var result = await service.SimplifyAsync("document", workspace.PathOf("C.vb"), null, id, dryRun: false);
@@ -379,7 +1078,7 @@ public sealed class VbStyleTests
     public void VbRules_EverySupportedIdHasARewriteAndAnIntactCase()
     {
         var supported = VbSimplifyCodeService.Rules.Select(rule => rule.Id).ToList();
-        Assert.InRange(supported.Count, 10, 15);
+        Assert.InRange(supported.Count, 30, 60);
 
         var rewritten = RuleCases().Select(data => (string)data[0]).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var intact = IntactCases().Select(data => (string)data[0]).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -485,13 +1184,13 @@ public sealed class VbStyleTests
         using var workspace = VisualBasicWorkspace.Create("C.vb", "Friend Class C\nEnd Class\n");
 
         var service = new VbSimplifyCodeService(workspace);
-        var result = await service.SimplifyAsync("document", workspace.PathOf("C.vb"), null, "IDE0140", dryRun: true);
+        var result = await service.SimplifyAsync("document", workspace.PathOf("C.vb"), null, "IDE0074", dryRun: true);
 
         var json = ResultAssert.Json(result);
         Assert.Contains("not rewritable", json.GetProperty("error").GetString());
         Assert.Contains(json.GetProperty("notRewritten").EnumerateArray(),
-            entry => entry.GetProperty("id").GetString() == "IDE0140" &&
-                     entry.GetProperty("reason").GetString()!.Contains("layout"));
+            entry => entry.GetProperty("id").GetString() == "IDE0074" &&
+                     entry.GetProperty("reason").GetString()!.Contains("null-coalescing"));
     }
 
     /// <summary>

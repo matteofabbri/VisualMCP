@@ -44,7 +44,7 @@ public sealed class VbStyleLanguage : IStyleLanguage
         try
         {
             var options = document.Project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GetOptions(tree);
-            return Parse(key => options.TryGetValue(key, out var value) ? value : null);
+            return Parse(key => options.TryGetValue(key, out var value) ? value : null, document.Name, document.Project.Name);
         }
         catch (Exception)
         {
@@ -59,7 +59,7 @@ public sealed class VbStyleLanguage : IStyleLanguage
     /// option (VB has block namespaces only), so <see cref="StyleOptions.Braces"/> and
     /// <see cref="StyleOptions.Namespaces"/> stay at their defaults.
     /// </summary>
-    public static StyleOptions Parse(Func<string, string?> option) => new()
+    public static StyleOptions Parse(Func<string, string?> option, string? fileName = null, string? projectName = null) => new()
     {
         // "Protected Friend" is one modifier, so the split keeps the space inside an entry.
         ModifierOrder = (option("visual_basic_preferred_modifier_order") ?? string.Empty)
@@ -79,6 +79,39 @@ public sealed class VbStyleLanguage : IStyleLanguage
             "false" => IsNotPreference.PreferNot,
             _ => IsNotPreference.None,
         },
+        Qualification = new QualificationStyle
+        {
+            Field = Qualification(option("dotnet_style_qualification_for_field")),
+            Property = Qualification(option("dotnet_style_qualification_for_property")),
+            Method = Qualification(option("dotnet_style_qualification_for_method")),
+            Event = Qualification(option("dotnet_style_qualification_for_event")),
+        },
+        Parentheses = new ParenthesesStyle
+        {
+            Arithmetic = Clarity(option("dotnet_style_parentheses_in_arithmetic_binary_operators")),
+            Relational = Clarity(option("dotnet_style_parentheses_in_relational_binary_operators")),
+            OtherBinary = Clarity(option("dotnet_style_parentheses_in_other_binary_operators")),
+        },
+        AllowMultipleBlankLines = Boolean(option("dotnet_style_allow_multiple_blank_lines_experimental")),
+        AllowStatementImmediatelyAfterBlock = Boolean(option("dotnet_style_allow_statement_immediately_after_block_experimental")),
+        FileHeader = StyleOptions.ResolveHeader(option("file_header_template"), fileName, projectName),
+    };
+
+    private static QualificationPreference Qualification(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "true" => QualificationPreference.PreferQualified,
+        "false" => QualificationPreference.PreferUnqualified,
+        _ => QualificationPreference.None,
+    };
+
+    private static bool Clarity(string? value) =>
+        string.Equals(value?.Trim(), "always_for_clarity", StringComparison.OrdinalIgnoreCase);
+
+    private static bool? Boolean(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "true" => true,
+        "false" => false,
+        _ => null,
     };
 }
 
