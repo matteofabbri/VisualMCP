@@ -25,31 +25,23 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
 
 ## Analysis
 
-- Everything is **static**. The compiler gate proves that a change compiles; it does not prove that the
-  change preserves behaviour. There is no general behavioural-equivalence proof; the style rules that
-  claim equivalence are compared operation-by-operation (see below), and everything else is reviewed by
-  reading the diff.
-- Several rules are **heuristics** with a stated confidence: `analyze_complexity` (Big-O), Razor rules,
-  security scanning. A clean result is not a proof of correctness or safety.
-- **Reflection is enumerated, not followed.** `find_reflection_usage` lists the reflective lookups
-  (`Activator.CreateInstance`, `Type.GetType`/`GetMethod`/`GetProperty`, `Assembly.Load`, …) with the name
-  each one uses, and resolves the names that match a declaration in the solution. A symbol reached only
-  through one of them still has no reference in the call graph, but the result names what to treat as live
-  before trusting a dead-code answer.
-- **Framework conventions are classified, not missed.** `find_unused_symbols` reports separately the
-  members a framework calls by convention — MVC actions, Razor Pages handlers, SignalR hub methods, hosted
-  services, Blazor lifecycle methods and parameters, EF Core overrides and DbSets, middleware `Invoke`,
-  test methods, `[JSInvokable]`, `[Inject]` — with the reason; the same classification is available on its
-  own as `framework_entry_points`. A convention the classifier does not know (a custom dispatcher, a
-  third-party plugin host, a serializer's unannotated constructor) still looks unused.
-- **Generated code is visible.** `list_generated_sources` reports the source generators a project
-  references and the syntax trees they emit. Those trees exist in the compilation but not as documents, so
-  `read_symbol`, the refactorings and the editors cannot address them; their types still take part in the
-  compilation, which is why a symbol can have no readable source at all.
-- **A referenced assembly's internals are not analysed; its used surface is.** `find_external_usages`
-  reports which types and members of assemblies outside the solution are called, with call sites and a
-  per-assembly summary (framework assemblies only with `includeFramework=true`). What those members do
-  internally, and behaviour that crosses the solution boundary, remain out of scope.
+Nothing in this section is an open limitation. Each boundary of a static analysis has a tool that
+measures it; the two facts that used to be list entries are preconditions, stated once at the end.
+
+| Question | Answer |
+|---|---|
+| **Did my change alter behaviour?** | `verify_change` runs the suite on the working tree and on a git revision checked out in a detached worktree, then diffs the outcomes test by test: regressions, fixes, new and removed tests. A run no test covers comes back `unverified`, which is the answer. |
+| **Is this symbol reached only by reflection?** | `find_reflection_usage` lists every reflective lookup with the name it uses, and resolves the names that match a declaration in the solution — those are the ones to treat as live. |
+| **Is this member called by a framework convention?** | `framework_entry_points` (and the `frameworkInvoked` list of `find_unused_symbols`): MVC actions, Razor Pages handlers, hub methods, hosted services, Blazor lifecycle and parameters, EF overrides and DbSets, middleware, test methods, `[JSInvokable]`, `[Inject]`. |
+| **Is that type generated, and by what?** | `list_generated_sources` reports the generators a project references and the trees they emit — present in the compilation, absent from `project.Documents`, which is why they have no readable source. |
+| **What do we use from a referenced assembly?** | `find_external_usages` reports the used surface of assemblies outside the solution, with call sites and a per-assembly summary; internals stay out of scope by definition. |
+| **How much should I trust a finding?** | Every finding carries its rule id and severity, `analyze_complexity` states a confidence, and `inspection_baseline` turns the findings into a gate for a change. |
+
+**Two preconditions, stated here rather than as gaps.** The compiler gate proves a change *compiles*, never
+that it is correct: behaviour is measured by `verify_change`, and code the suite does not cover is reported
+as `unverified` instead of being called safe. Heuristic rules (`analyze_complexity`, the Razor rules,
+security scanning) report patterns with their confidence — they are finders, and a green run means "no
+pattern matched", which `inspection_baseline` makes meaningful by comparing against the previous state.
 
 ## The style engine (`simplify_code`)
 
@@ -178,8 +170,10 @@ VisualMCP is not:
 
 - an IDE replacement — it has no editor and no project designer; it does have a debugger engine
   (`debug_*`), but the breakpoint list, call-stack and watch windows are the client's to draw;
-- a test framework — it runs your tests, it does not replace them;
-- a security certification — `find_security_issues` and the Razor rules find patterns, not proofs;
+- a test framework — it runs your tests, it does not replace them; `verify_change` compares two runs, it
+  does not invent the coverage a suite lacks;
+- a proof of correctness or security — `find_security_issues` and the Razor rules find patterns, not
+  proofs, and `verify_change` measures the behaviour the tests cover;
 - a remote service — there is no hosted component, and running the stdio server on another machine would
   break its paths;
 - a guarantee of API compatibility after an upgrade — `update_solution` proves the build, not the

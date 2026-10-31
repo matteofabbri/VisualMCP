@@ -51,7 +51,8 @@ static async Task RunServerAsync(string[] args)
         "(MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests) -> framework_entry_points (and the " +
         "frameworkInvoked list find_unused_symbols now reports instead of calling them unused); source generators and the trees " +
         "they emit, which are in the compilation but not in project.Documents -> list_generated_sources. What a referenced " +
-        "assembly's surface is actually used for -> find_external_usages.\n" +
+        "assembly's surface is actually used for -> find_external_usages. Whether a change altered BEHAVIOUR (tests run on the " +
+        "working tree and on a git revision in a detached worktree, outcomes diffed per test) -> verify_change.\n" +
         "- Architecture and quality questions: are the layer rules respected (a dependency pointing back up, with file:line) -> " +
         "check_layer_violations; the dependency graph as a DOT/Mermaid diagram -> export_dependency_graph; is this class " +
         "really two classes (LCOM4) -> get_cohesion_metrics; test suite quality (no assert, empty, unreadable names, async void) -> " +

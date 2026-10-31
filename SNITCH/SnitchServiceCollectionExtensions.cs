@@ -78,6 +78,8 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Planning.IBoardService, Planning.BoardService>();
         services.AddSingleton<Execution.IStopServerService, Execution.StopServerService>();
         services.AddSingleton<Languages.CSharp.Testing.IMutationTestingService, Languages.CSharp.Testing.MutationTestingService>();
+        // The runtime half of analysis: the suite on both sides of a change, diffed test by test.
+        services.AddSingleton<Languages.CSharp.Testing.IVerifyChangeService, Languages.CSharp.Testing.VerifyChangeService>();
         services.AddSingleton<Runtime.IHttpFileService, Runtime.HttpFileService>();
         services.AddSingleton<IFixLineEndingsService, FixLineEndingsService>();
         services.AddSingleton<Web.IDownloadFileService, Web.DownloadFileService>();

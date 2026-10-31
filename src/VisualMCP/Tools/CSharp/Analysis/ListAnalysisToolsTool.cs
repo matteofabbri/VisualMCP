@@ -111,6 +111,12 @@ public static class ListAnalysisToolsTool
             },
             new
             {
+                name        = "verify_change",
+                trigger     = "Did this change alter behaviour? Prove it with the tests instead of reading the diff",
+                description = "Runs the suite on the working tree and on a git revision in a detached worktree and diffs the outcomes test by test: regressions, fixes, new/removed tests, verdict. The runtime half of analysis.",
+            },
+            new
+            {
                 name        = "analyze_dependencies",
                 trigger     = "Project reference graph, which projects depend on which, project-level circular references",
                 description = "Builds the project dependency graph, detects project-level cycles, and identifies root projects.",
