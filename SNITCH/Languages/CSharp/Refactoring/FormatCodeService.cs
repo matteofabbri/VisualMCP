@@ -7,15 +7,22 @@ namespace Snitch.Languages.CSharp.Refactoring;
 
 /// <summary>
 /// The scope selection shared by the tools that operate on a document, a project or the solution.
-/// Kept in one place so "document" means the same file for every tool that accepts it.
+/// Kept in one place so "document" means the same file for every tool that accepts it, and defined
+/// over both languages a .NET solution can hold: C# and Visual Basic documents are in scope unless
+/// the caller asks for one of them.
 /// </summary>
 internal static class DocumentScopes
 {
+    /// <summary>The languages the Roslyn formatter and the scope-shaped tools operate on.</summary>
+    public static readonly string[] SupportedLanguages = [LanguageNames.CSharp, LanguageNames.VisualBasic];
+
     public static (List<Document> Documents, object? Error) Select(
-        Solution solution, string scope, string? filePath, string? projectName)
+        Solution solution, string scope, string? filePath, string? projectName, string[]? languages = null)
     {
+        var accepted = languages ?? SupportedLanguages;
+
         IEnumerable<Document> documents = solution.Projects
-            .Where(project => project.Language == LanguageNames.CSharp)
+            .Where(project => accepted.Contains(project.Language, StringComparer.Ordinal))
             .SelectMany(project => project.Documents)
             .Where(document => document.SourceCodeKind == SourceCodeKind.Regular && document.FilePath is not null);
 
@@ -53,7 +60,8 @@ internal static class DocumentScopes
 /// ReSharper's "Reformat Code" as a tool of its own. The style engine used the Roslyn formatter only
 /// through the opt-in IDE0055 rule; this applies it directly to a document, a project or the whole
 /// solution, using the project's own options (including <c>.editorconfig</c>), and keeps each file's
-/// line-ending convention.
+/// line-ending convention. Roslyn's formatter is language-aware, so the same call formats a
+/// <c>.vb</c> document with VB's own rules.
 /// </summary>
 public interface IFormatCodeService
 {
@@ -89,7 +97,7 @@ public sealed class FormatCodeService : IFormatCodeService
 
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
-            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
+            return new { error = "No solution could be auto-located from the working directory. Call load_solution first." };
 
         var (documents, selectionError) = DocumentScopes.Select(solution, level, filePath, projectName);
         if (selectionError is not null) return selectionError;

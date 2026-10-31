@@ -17,7 +17,7 @@ public interface IAddParamsModifierService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class AddParamsModifierService : IAddParamsModifierService
+public sealed partial class AddParamsModifierService : IAddParamsModifierService
 {
     private readonly IRoslynWorkspace _workspace;
 
@@ -45,6 +45,10 @@ public sealed class AddParamsModifierService : IAddParamsModifierService
             .FirstOrDefault(candidate => candidate.FilePath is not null &&
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
+
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await TryVisualBasicAsync(_workspace, document, methodName, containingType, dryRun, cancellationToken)
+                   ?? new { error = "The Visual Basic rewrite did not produce a result." };
 
         var root = await document.GetSyntaxRootAsync(cancellationToken);
         var model = await document.GetSemanticModelAsync(cancellationToken);

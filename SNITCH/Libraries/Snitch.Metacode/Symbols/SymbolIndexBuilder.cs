@@ -1,7 +1,6 @@
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Snitch.Metacode.Frontends;
 using Snitch.Metacode.Rendering;
 
@@ -28,11 +27,12 @@ public sealed class SymbolIndexBuilder
     public SymbolIndexBuilder(
         IEnumerable<ISymbolIndexFrontend>? frontends = null, Func<MetacodeTranslator>? translator = null)
     {
-        _frontends = frontends?.ToList() ?? [new CSharpSymbolIndexFrontend()];
+        _frontends = frontends?.ToList() ?? [new CSharpSymbolIndexFrontend(), new VisualBasicSymbolIndexFrontend()];
 
         // The frontends keep per-document state (their diagnostics), so one shared translator is not
-        // thread-safe while the build runs a document per thread: each document gets its own.
-        _translator = translator ?? (() => new MetacodeTranslator([new CSharpFrontend()]));
+        // thread-safe while the build runs a document per thread: each document gets its own, with the
+        // readers for every language the index accepts.
+        _translator = translator ?? (() => new MetacodeTranslator([new CSharpFrontend(), new VisualBasicFrontend()]));
     }
 
     /// <summary>The frontend that understands the tree, or null when none does.</summary>
@@ -99,13 +99,13 @@ public sealed class SymbolIndexBuilder
             // An attribute name binds to the constructor its arguments select; the reference a reader
             // makes is to the attribute type, which is also what the declaration index has a row for.
             if (symbol is IMethodSymbol { MethodKind: MethodKind.Constructor, ContainingType: { } attribute }
-                && node.Parent is AttributeSyntax)
+                && frontend.IsAttributeName(node))
                 symbol = attribute;
 
             if (!IsIndexable(symbol)) continue;
 
             var kind = frontend.Classify(node, symbol, model);
-            var container = ContainerKeyAt(model, node);
+            var container = ContainerKeyAt(model, node, frontend);
             usages.Add(Use(node, symbol, kind, container, path, hash));
         }
 
@@ -285,22 +285,21 @@ public sealed class SymbolIndexBuilder
     /// reported as its property, a local function as its method, and a synthesized entry point as its
     /// type, so a caller never points at a row that does not exist.
     /// </summary>
-    private static string ContainerKeyAt(SemanticModel model, SyntaxNode node)
+    private static string ContainerKeyAt(SemanticModel model, SyntaxNode node, ISymbolIndexFrontend frontend)
     {
         var symbol = model.GetEnclosingSymbol(node.SpanStart);
 
-        // A type's header — its base list, its attributes, a type-parameter constraint — is inside no
+        // A type's header — its base list, its attributes, an inheritance statement — is inside no
         // member, so the enclosing symbol there is the namespace. What the use belongs to is the type.
         if (symbol is null or INamespaceSymbol)
         {
-            switch (node.AncestorsAndSelf().FirstOrDefault(ancestor => ancestor is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax))
+            foreach (var ancestor in node.AncestorsAndSelf())
             {
-                case BaseTypeDeclarationSyntax type:
-                    symbol = model.GetDeclaredSymbol(type);
-                    break;
-                case DelegateDeclarationSyntax @delegate:
-                    symbol = model.GetDeclaredSymbol(@delegate);
-                    break;
+                if (!frontend.IsDeclaration(ancestor)) continue;
+                if (frontend.DeclaredSymbol(ancestor, model) is not INamedTypeSymbol type) continue;
+
+                symbol = type;
+                break;
             }
         }
 

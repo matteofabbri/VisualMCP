@@ -10,7 +10,7 @@ public interface IFindDeadCodeService
     Task<object> FindDeadCode(string? projectName);
 }
 
-public sealed class FindDeadCodeService : IFindDeadCodeService
+public sealed partial class FindDeadCodeService : IFindDeadCodeService
 {
     private readonly IRoslynWorkspace _workspace;
     public FindDeadCodeService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -20,7 +20,7 @@ public sealed class FindDeadCodeService : IFindDeadCodeService
     {
         var solution = await _workspace.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
+            return new { error = "No solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))
@@ -38,6 +38,12 @@ public sealed class FindDeadCodeService : IFindDeadCodeService
                 var root  = await document.GetSyntaxRootAsync();
                 var model = await document.GetSemanticModelAsync();
                 if (root is null || model is null) continue;
+
+                if (project.Language == LanguageNames.VisualBasic)
+                {
+                    CollectVisualBasic(document, project, root, model, findings);
+                    continue;
+                }
 
                 // ── Roslyn diagnostics: CS0162 unreachable code ─────────────────────
                 var diags = model.GetDiagnostics();

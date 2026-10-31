@@ -46,7 +46,7 @@ public interface IPerformanceAnalyzer
 /// A finding is a place to look, not a proof: the engine reports the shape and the symbol, and the
 /// message says what the alternative is.
 /// </summary>
-public sealed class PerformancePatternAnalyzer : IPerformanceAnalyzer
+public sealed partial class PerformancePatternAnalyzer : IPerformanceAnalyzer
 {
     private static readonly HashSet<string> Materializers = new(StringComparer.Ordinal)
     {
@@ -64,10 +64,10 @@ public sealed class PerformancePatternAnalyzer : IPerformanceAnalyzer
     {
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
-            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
+            return new { error = "No solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
-            .Where(project => project.Language == LanguageNames.CSharp)
+            .Where(project => project.Language is LanguageNames.CSharp or LanguageNames.VisualBasic)
             .Where(project => projectName is null || project.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
@@ -94,12 +94,12 @@ public sealed class PerformancePatternAnalyzer : IPerformanceAnalyzer
 
                 foreach (var loop in root.DescendantNodes().Where(IsLoop))
                 {
-                    var body = LoopBody(loop);
-                    if (body is null) continue;
-
-                    foreach (var node in body.DescendantNodesAndSelf())
+                    foreach (var node in BodyNodes(loop))
                     {
-                        var finding = Describe(node, model, document, cancellationToken);
+                        var finding = project.Language == LanguageNames.VisualBasic
+                            ? DescribeVisualBasic(node, model, document)
+                            : Describe(node, model, document, cancellationToken);
+
                         if (finding is null) continue;
                         if (!seen.Add($"{finding.Rule}|{finding.File}|{finding.Line}|{finding.Snippet}")) continue;
 
@@ -151,21 +151,41 @@ public sealed class PerformancePatternAnalyzer : IPerformanceAnalyzer
     private static bool IsAnalyzable(Document document) =>
         document.SourceCodeKind == SourceCodeKind.Regular &&
         !document.Name.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) &&
-        !document.Name.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase);
+        !document.Name.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase) &&
+        !document.Name.EndsWith(".g.vb", StringComparison.OrdinalIgnoreCase) &&
+        !document.Name.EndsWith(".Designer.vb", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLoop(SyntaxNode node) => node
         is ForStatementSyntax or ForEachStatementSyntax
         or WhileStatementSyntax or DoStatementSyntax
-        or ForEachVariableStatementSyntax;
+        or ForEachVariableStatementSyntax
+        or Microsoft.CodeAnalysis.VisualBasic.Syntax.ForBlockSyntax
+        or Microsoft.CodeAnalysis.VisualBasic.Syntax.ForEachBlockSyntax
+        or Microsoft.CodeAnalysis.VisualBasic.Syntax.WhileBlockSyntax
+        or Microsoft.CodeAnalysis.VisualBasic.Syntax.DoLoopBlockSyntax;
 
-    private static SyntaxNode? LoopBody(SyntaxNode loop) => loop switch
+    /// <summary>
+    /// The nodes inside a loop body. C# has one body statement; VB has a block whose statements are
+    /// the body, so the same rules read both without a second walker.
+    /// </summary>
+    private static IEnumerable<SyntaxNode> BodyNodes(SyntaxNode loop) => loop switch
     {
-        ForStatementSyntax @for => @for.Statement,
-        ForEachStatementSyntax @foreach => @foreach.Statement,
-        ForEachVariableStatementSyntax @foreach => @foreach.Statement,
-        WhileStatementSyntax @while => @while.Statement,
-        DoStatementSyntax @do => @do.Statement,
-        _ => null,
+        ForStatementSyntax @for => @for.Statement.DescendantNodesAndSelf(),
+        ForEachStatementSyntax @foreach => @foreach.Statement.DescendantNodesAndSelf(),
+        ForEachVariableStatementSyntax @foreach => @foreach.Statement.DescendantNodesAndSelf(),
+        WhileStatementSyntax @while => @while.Statement.DescendantNodesAndSelf(),
+        DoStatementSyntax @do => @do.Statement.DescendantNodesAndSelf(),
+
+        Microsoft.CodeAnalysis.VisualBasic.Syntax.ForBlockSyntax @for =>
+            @for.Statements.SelectMany(statement => statement.DescendantNodesAndSelf()),
+        Microsoft.CodeAnalysis.VisualBasic.Syntax.ForEachBlockSyntax @foreach =>
+            @foreach.Statements.SelectMany(statement => statement.DescendantNodesAndSelf()),
+        Microsoft.CodeAnalysis.VisualBasic.Syntax.WhileBlockSyntax @while =>
+            @while.Statements.SelectMany(statement => statement.DescendantNodesAndSelf()),
+        Microsoft.CodeAnalysis.VisualBasic.Syntax.DoLoopBlockSyntax @do =>
+            @do.Statements.SelectMany(statement => statement.DescendantNodesAndSelf()),
+
+        _ => [],
     };
 
     private static PerformanceFinding? Describe(

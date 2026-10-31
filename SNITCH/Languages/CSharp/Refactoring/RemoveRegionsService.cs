@@ -1,6 +1,4 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.ComponentModel;
 using Snitch.Workspace;
 
@@ -47,15 +45,15 @@ public sealed class RemoveRegionsService : IRemoveRegionsService
                 var root = await document.GetSyntaxRootAsync();
                 if (root is null || document.FilePath is null) continue;
 
-                // Collect all #region and #endregion directives
+                // Collect all #region and #endregion directives, in either language: C# writes
+                // "#region …", VB writes "#Region ""…"" / #End Region", and both end '#endregion'.
                 var directives = root.DescendantTrivia()
-                    .Where(t => t.IsKind(SyntaxKind.RegionDirectiveTrivia) ||
-                                t.IsKind(SyntaxKind.EndRegionDirectiveTrivia))
+                    .Where(IsRegionDirective)
                     .ToList();
 
                 if (directives.Count == 0) continue;
 
-                totalRegions += directives.Count(t => t.IsKind(SyntaxKind.RegionDirectiveTrivia));
+                totalRegions += directives.Count(IsRegionStart);
 
                 // Remove directive lines from the source text
                 // Work on raw text: remove the entire line for each directive
@@ -80,7 +78,7 @@ public sealed class RemoveRegionsService : IRemoveRegionsService
                 results.Add(new
                 {
                     document.FilePath,
-                    RegionsRemoved = directives.Count(t => t.IsKind(SyntaxKind.RegionDirectiveTrivia)),
+                    RegionsRemoved = directives.Count(IsRegionStart),
                 });
 
                 if (!dryRun)
@@ -98,4 +96,21 @@ public sealed class RemoveRegionsService : IRemoveRegionsService
             files = results,
         };
     }
+
+    /// <summary>Whether a trivia is a region or an end-region directive, in C# or in Visual Basic.</summary>
+    private static bool IsRegionDirective(SyntaxTrivia trivia)
+    {
+        if (!trivia.IsDirective) return false;
+
+        var text = CompactDirective(trivia);
+        return text.StartsWith("#region", StringComparison.OrdinalIgnoreCase) ||
+               text.StartsWith("#endregion", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRegionStart(SyntaxTrivia trivia) =>
+        CompactDirective(trivia).StartsWith("#region", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary><c>#End Region</c> and <c>#endregion</c> are the same directive written two ways.</summary>
+    private static string CompactDirective(SyntaxTrivia trivia) =>
+        string.Concat(trivia.ToString().TrimStart().Where(character => !char.IsWhiteSpace(character)));
 }

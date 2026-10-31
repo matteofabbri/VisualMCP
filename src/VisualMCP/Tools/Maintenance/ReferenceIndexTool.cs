@@ -19,6 +19,8 @@ public static class ReferenceIndexTool
         "declarations of a file; action=metacode returns the metacode tree of a declaration (or every tree of a file) — " +
         "the same canonical pseudocode the translator prints, stored per symbol; action=unused lists non-public " +
         "declarations nothing uses. action=who is refs. " +
+        "C# and Visual Basic are both indexed, and the keys are language-neutral, so a C# caller of a VB " +
+        "method lands on the same row as the VB declaration. " +
         "The index is a snapshot keyed on file content: build it before querying, and rebuild after edits.")]
     public static Task<object> ReferenceIndex(
         ISymbolIndexService index,

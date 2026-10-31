@@ -66,6 +66,7 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
         string? projectName = null, bool force = false, CancellationToken cancellationToken = default)
     {
         if (!TryOpen(out var error)) return error!;
+        EnsureKeyFormat();
 
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
@@ -81,7 +82,8 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
         var documents = projects
             .SelectMany(project => project.Documents
                 .Where(document => document.FilePath is not null &&
-                                   document.FilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                                   (document.FilePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
+                                    document.FilePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase)))
                 .Select(document => (Project: project.Name, Document: document)))
             .ToList();
 
@@ -116,7 +118,8 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
                     var facts = await _builder.BuildAsync(document, item.Project, hash, token);
                     if (facts is null)
                     {
-                        // A language with no index frontend (VB today): counted, never silently dropped.
+                        // A language with no index frontend (F# leaves the workspace unloaded, and a
+                        // document with no file path never gets here): counted, never silently dropped.
                         Interlocked.Increment(ref unsupported);
                         return;
                     }
@@ -157,7 +160,7 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
             database = _index.Path,
             note = skipped > 0
                 ? "Unchanged documents were skipped: their stored hash already matches the file."
-                : "Every C# document was indexed.",
+                : "Every C# and Visual Basic document was indexed.",
         };
     }
 
@@ -177,7 +180,7 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
             usageKinds = Rows(status.UsageKinds),
             newest = status.Newest,
             note = "Content hashes decide what to rebuild: a document whose hash matches its file is not re-indexed. " +
-                   "C# only: a document in another language has no frontend yet.",
+                   "C# and Visual Basic: a document in another language has no frontend yet.",
         };
     }
 
@@ -548,6 +551,22 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
     }
 
     public void Dispose() => _index.Dispose();
+
+    /// <summary>
+    /// The key format is part of what a row means. When it changes — a normalized global prefix, a
+    /// special type spelled the same in both languages — rows written by the old format would never
+    /// match a new key, and the unchanged-file skip would keep them forever. The index is dropped once;
+    /// the rebuild reads the files, so nothing is lost.
+    /// </summary>
+    private const string KeyFormatVersion = "2";
+
+    private void EnsureKeyFormat()
+    {
+        if (_store.Get("symbol-index:key-format") is { Value: KeyFormatVersion }) return;
+
+        _index.Clear();
+        _store.Set("symbol-index:key-format", KeyFormatVersion, "key-format");
+    }
 
     // ── resolution and shaping ──────────────────────────────────────────────
 

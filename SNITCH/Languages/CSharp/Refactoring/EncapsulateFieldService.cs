@@ -52,6 +52,12 @@ public sealed class EncapsulateFieldService : IEncapsulateFieldService
 
         if (field.IsConst)
             return new { error = "Cannot encapsulate a const field." };
+
+        // A VB field is the same symbol, but the property is a different shape of syntax.
+        if (field.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbEncapsulateField.RunAsync(
+                _workspace, field, propertyName, dryRun);
+
         if (field.IsReadOnly && field.DeclaredAccessibility != Accessibility.Public)
             return new { error = "Field is readonly — encapsulate would remove the ability to set it. Rename it to a property manually." };
 

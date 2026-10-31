@@ -647,7 +647,17 @@ public sealed class VbStyleTests
                 "ProbeVb",
                 LanguageNames.VisualBasic,
                 filePath: Path.Combine(fake._directory, "ProbeVb.vbproj"),
-                compilationOptions: new VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+                compilationOptions: new VisualBasicCompilationOptions(
+                    OutputKind.DynamicallyLinkedLibrary,
+                    // The imports an SDK VB project gets from MSBuild, so a snippet behaves like a real
+                    // project: without them every BCL name in a test would have to be fully qualified.
+                    globalImports: GlobalImport.Parse(
+                        "System",
+                        "System.Collections",
+                        "System.Collections.Generic",
+                        "System.Diagnostics",
+                        "System.Linq",
+                        "Microsoft.VisualBasic")),
                 parseOptions: new VisualBasicParseOptions(
                     Microsoft.CodeAnalysis.VisualBasic.LanguageVersion.Latest,
                     DocumentationMode.None,
@@ -678,7 +688,10 @@ public sealed class VbStyleTests
                         Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview,
                         DocumentationMode.None,
                         SourceCodeKind.Regular),
-                    metadataReferences: References());
+                    metadataReferences: References(),
+                    // The C# project references the VB one, so a C# file can use a VB declaration —
+                    // which is what makes the mixed-solution tests mean something.
+                    projectReferences: [new ProjectReference(projectId)]);
 
                 solution = solution.AddProject(csharpInfo);
                 var csharpPath = fake.PathOf(other.Name);

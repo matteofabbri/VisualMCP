@@ -48,8 +48,19 @@ public sealed class MetacodeSource
     public static MetacodeSource FromVisualBasic(string text, string? path = null) =>
         new(text, path, MetacodeLanguage.VisualBasic, null);
 
-    public static MetacodeSource FromSyntaxTree(SyntaxTree tree) =>
-        new(tree.ToString(), tree.FilePath is { Length: > 0 } p ? p : null, MetacodeLanguage.CSharp, tree);
+    /// <summary>
+    /// A Roslyn tree the caller already has. A C# tree travels with the source — the C# frontend prefers
+    /// it to re-parsing — while a Visual Basic tree only contributes its text and path: the VB frontend
+    /// parses VB itself, so handing it a C#-typed <see cref="Roslyn"/> would be the wrong tree.
+    /// </summary>
+    public static MetacodeSource FromSyntaxTree(SyntaxTree tree)
+    {
+        var path = tree.FilePath is { Length: > 0 } p ? p : null;
+
+        return tree.Options.Language == LanguageNames.VisualBasic
+            ? new MetacodeSource(tree.ToString(), path, MetacodeLanguage.VisualBasic, null)
+            : new MetacodeSource(tree.ToString(), path, MetacodeLanguage.CSharp, tree);
+    }
 
     /// <summary>
     /// A CPython <c>ast</c> dump as JSON: every node is an object with <c>_type</c> (or <c>type</c>)

@@ -1,5 +1,4 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Snitch.Languages.CSharp.Analysis.Complexity;
 using Snitch.Workspace;
 
@@ -41,7 +40,7 @@ public sealed class GetComplexityHotspotsService : IGetComplexityHotspotsService
                 var model = await document.GetSemanticModelAsync();
                 if (root is null || model is null) continue;
 
-                foreach (var method in root.DescendantNodes().OfType<BaseMethodDeclarationSyntax>())
+                foreach (var method in ComplexityAnalyzer.MethodUnits(root))
                 {
                     var sym = model.GetDeclaredSymbol(method);
                     if (sym is null) continue;

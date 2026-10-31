@@ -26,6 +26,12 @@ public interface ISymbolIndexFrontend
     /// </summary>
     bool IsReferenceName(SyntaxNode node);
 
+    /// <summary>
+    /// Whether the name is the type half of an attribute. Its parent then binds to the attribute's
+    /// constructor, and the reference a reader makes is to the attribute type.
+    /// </summary>
+    bool IsAttributeName(SyntaxNode node);
+
     /// <summary>How the name at <paramref name="node"/> uses <paramref name="symbol"/>.</summary>
     string Classify(SyntaxNode node, ISymbol symbol, SemanticModel model);
 
@@ -79,6 +85,8 @@ public sealed class CSharpSymbolIndexFrontend : ISymbolIndexFrontend
             _ => true,
         };
     }
+
+    public bool IsAttributeName(SyntaxNode node) => node.Parent is AttributeSyntax;
 
     public string Classify(SyntaxNode node, ISymbol symbol, SemanticModel model)
     {

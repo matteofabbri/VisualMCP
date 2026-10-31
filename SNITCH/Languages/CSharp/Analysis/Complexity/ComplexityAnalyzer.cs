@@ -24,11 +24,17 @@ namespace Snitch.Languages.CSharp.Analysis.Complexity;
 /// that contains them (the same way the compiler sees them, each with its own body).
 /// </para>
 /// </summary>
-public static class ComplexityAnalyzer
+public static partial class ComplexityAnalyzer
 {
-    /// <summary>Analyzes one method, constructor, operator, accessor, lambda or local function.</summary>
+    /// <summary>
+    /// Analyzes one method, constructor, operator, accessor, lambda or local function, in C# or in
+    /// Visual Basic: the numbers are the same metric, and the unit's syntax decides the walk.
+    /// </summary>
     public static ComplexityMetrics Analyze(SyntaxNode unit, SemanticModel? model = null, string? filePath = null)
     {
+        if (unit.SyntaxTree.Options.Language == LanguageNames.VisualBasic)
+            return AnalyzeVisualBasic(unit, model, filePath);
+
         var (body, name, parameters) = Describe(unit);
         var span = unit.GetLocation().GetLineSpan();
         var firstLine = span.StartLinePosition.Line + 1;
@@ -90,20 +96,36 @@ public static class ComplexityAnalyzer
 
     /// <summary>
     /// Every unit in <paramref name="root"/> that gets its own score: methods, constructors, operators,
-    /// accessors, expression-bodied properties/indexers, local functions and lambdas.
+    /// accessors, expression-bodied properties/indexers, local functions and lambdas — in C# or VB.
     /// </summary>
     public static IEnumerable<SyntaxNode> Units(SyntaxNode root) => root.DescendantNodes().Where(IsUnit);
 
-    public static bool IsUnit(SyntaxNode node) => node switch
-    {
-        BaseMethodDeclarationSyntax                                    => true,
-        LocalFunctionStatementSyntax                                   => true,
-        AccessorDeclarationSyntax                                      => true,
-        AnonymousFunctionExpressionSyntax                              => true,
-        PropertyDeclarationSyntax { ExpressionBody: not null }         => true,
-        IndexerDeclarationSyntax { ExpressionBody: not null }          => true,
-        _                                                              => false,
-    };
+    /// <summary>The method-like units only (no accessors or lambdas): what a hotspot ranking lists.</summary>
+    public static IEnumerable<SyntaxNode> MethodUnits(SyntaxNode root) =>
+        root.DescendantNodes().Where(IsMethodUnit);
+
+    public static bool IsUnit(SyntaxNode node) => node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+        ? IsVisualBasicUnit(node)
+        : node switch
+        {
+            BaseMethodDeclarationSyntax                                => true,
+            LocalFunctionStatementSyntax                               => true,
+            AccessorDeclarationSyntax                                  => true,
+            AnonymousFunctionExpressionSyntax                          => true,
+            PropertyDeclarationSyntax { ExpressionBody: not null }     => true,
+            IndexerDeclarationSyntax { ExpressionBody: not null }      => true,
+            _                                                          => false,
+        };
+
+    /// <summary>The units a "worst methods" ranking reads: methods, constructors and operators.</summary>
+    public static bool IsMethodUnit(SyntaxNode node) => node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+        ? IsVisualBasicMethodUnit(node)
+        : node is BaseMethodDeclarationSyntax;
+
+    /// <summary>The name a unit is ranked under, in either language.</summary>
+    public static string NameOf(SyntaxNode unit) => unit.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+        ? DescribeVisualBasic(unit).Name
+        : Describe(unit).Name;
 
     /// <summary>Low/Medium/High/Critical, whichever of the two metrics is worse.</summary>
     public static string RiskOf(int cyclomatic, int cognitive) =>
@@ -120,26 +142,21 @@ public static class ComplexityAnalyzer
 
     /// <summary>
     /// Halstead volume: (N1+N2)·log2(n1+n2) over the tokens of the body, identifiers and literals as
-    /// operands and everything else (keywords included) as operators.
+    /// operands and everything else (keywords included) as operators. The token kinds are compared by
+    /// name so the same formula reads a C# and a VB body.
     /// </summary>
-    private static int HalsteadVolume(SyntaxNode body)
+    private static int HalsteadVolume(SyntaxNode body) => HalsteadVolume(body.DescendantTokens());
+
+    private static int HalsteadVolume(IEnumerable<SyntaxToken> tokens)
     {
         var operators = new HashSet<string>(StringComparer.Ordinal);
         var operands = new HashSet<string>(StringComparer.Ordinal);
         var operatorCount = 0;
         var operandCount = 0;
 
-        foreach (var token in body.DescendantTokens())
+        foreach (var token in tokens)
         {
-            var isOperand =
-                token.IsKind(SyntaxKind.IdentifierToken) ||
-                token.IsKind(SyntaxKind.NumericLiteralToken) ||
-                token.IsKind(SyntaxKind.StringLiteralToken) ||
-                token.IsKind(SyntaxKind.CharacterLiteralToken) ||
-                token.IsKind(SyntaxKind.Utf8StringLiteralToken) ||
-                token.IsKind(SyntaxKind.InterpolatedStringTextToken);
-
-            if (isOperand)
+            if (IsOperandToken(token))
             {
                 operands.Add(token.Text);
                 operandCount++;
@@ -156,6 +173,19 @@ public static class ComplexityAnalyzer
 
         return (int)Math.Round((operatorCount + operandCount) * Math.Log2(vocabulary));
     }
+
+    /// <summary>
+    /// The operand half of Halstead: a name or a literal. The kind is read by name because the C# and
+    /// Visual Basic enums are different types with the same spellings.
+    /// </summary>
+    private static bool IsOperandToken(SyntaxToken token) => token.Kind().ToString() is
+        "IdentifierToken" or
+        "NumericLiteralToken" or
+        "StringLiteralToken" or
+        "CharacterLiteralToken" or
+        "Utf8StringLiteralToken" or
+        "InterpolatedStringTextToken" or
+        "DateLiteralToken";
 
     /// <summary>Visual Studio's maintainability index, clamped to 0-100.</summary>
     private static int MaintainabilityIndex(int volume, int cyclomatic, int lines)
@@ -191,8 +221,6 @@ public static class ComplexityAnalyzer
             ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters.Count,
             _ => 0,
         };
-
-    private static string NameOf(SyntaxNode unit) => Describe(unit).Name;
 
     private static string FullNameOf(SyntaxNode unit, SemanticModel? model)
     {

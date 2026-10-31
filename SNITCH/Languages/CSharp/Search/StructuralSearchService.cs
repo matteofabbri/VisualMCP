@@ -1,8 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using Snitch.Languages.CSharp.Refactoring;
 using Snitch.Storage;
@@ -11,11 +9,17 @@ using Snitch.Workspace;
 namespace Snitch.Languages.CSharp.Search;
 
 /// <summary>
-/// ReSharper's Structural Search and Replace: a pattern is ordinary C# with <c>$name$</c> holes,
+/// ReSharper's Structural Search and Replace: a pattern is ordinary code with <c>$name$</c> holes,
 /// matched against the syntax tree of the solution and, when a replacement is given, rewritten in
 /// place. Unlike text search this respects the tree — trivia, comments and string contents are never
 /// mistaken for code — and unlike a symbol query it can ask for a shape ("a call to X whose argument
 /// is null") that no single symbol name describes.
+/// <para>
+/// The pattern is written in the language of the code it searches: C# for <c>.cs</c> documents,
+/// Visual Basic for <c>.vb</c> documents. A mixed solution may therefore produce two matches for the
+/// same intent only if the caller wrote both patterns; the default is to try the pattern in every
+/// language the scope holds and report which ones it parsed in.
+/// </para>
 /// </summary>
 public interface IStructuralSearchService
 {
@@ -31,18 +35,15 @@ public interface IStructuralSearchService
         string? projectName,
         bool dryRun,
         int maxResults,
+        string? language = null,
         CancellationToken cancellationToken = default);
 }
 
 public sealed class StructuralSearchService : IStructuralSearchService
 {
-    /// <summary>
-    /// <c>$x$</c> is not a valid C# identifier, so the pattern is parsed with this prefix in place of
-    /// the dollars; every occurrence of it in the parsed tree is a hole.
-    /// </summary>
-    private const string HolePrefix = "__ssr_";
-
-    private static readonly Regex Hole = new(@"\$([A-Za-z_][A-Za-z0-9_]*)\$", RegexOptions.Compiled);
+    /// <summary>The languages a pattern can be written in; the C# reader first, as most code is C#.</summary>
+    private static readonly IStructuralPatternLanguage[] Languages =
+        [new CSharpPatternLanguage(), new VisualBasicPatternLanguage()];
 
     private readonly IRoslynWorkspace _workspace;
     private readonly IVisualMcpStore? _store;
@@ -61,6 +62,7 @@ public sealed class StructuralSearchService : IStructuralSearchService
         string? projectName,
         bool dryRun,
         int maxResults,
+        string? language = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(pattern))
@@ -72,51 +74,57 @@ public sealed class StructuralSearchService : IStructuralSearchService
 
         if (maxResults <= 0) maxResults = 200;
 
-        var parsed = Parse(pattern, out var patternError);
-        if (parsed is null) return new { error = patternError };
+        var requested = string.IsNullOrWhiteSpace(language) || language.Equals("auto", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : language.Trim().ToLowerInvariant();
 
-        ParsedPattern? replacementPattern = null;
-        if (!string.IsNullOrWhiteSpace(replacement))
-        {
-            replacementPattern = Parse(replacement, out var replacementError);
-            if (replacementPattern is null) return new { error = replacementError };
-
-            var unbound = replacementPattern.Placeholders.Except(parsed.Placeholders, StringComparer.Ordinal).ToList();
-            if (unbound.Count > 0)
-                return new
-                {
-                    error = "The replacement uses placeholders the pattern does not bind: " +
-                            string.Join(", ", unbound.Select(name => "$" + name + "$")) + ".",
-                    patternPlaceholders = parsed.Placeholders.Select(name => "$" + name + "$").ToList(),
-                };
-        }
+        if (requested is not null && Languages.All(known => known.Id != requested))
+            return new
+            {
+                error = $"language must be one of: {string.Join(", ", Languages.Select(known => known.Id))} (or auto).",
+            };
 
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
-            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
+            return new { error = "No solution could be auto-located from the working directory. Call load_solution first." };
 
-        var (documents, selectionError) = SelectDocuments(solution, level, filePath, projectName);
+        var (documents, selectionError) = SelectDocuments(solution, level, filePath, projectName, requested);
         if (selectionError is not null) return selectionError;
+
+        var (patterns, replacements, languages, warnings) = ParseFor(documents, pattern, replacement, requested);
+        if (patterns.Count == 0)
+            return new
+            {
+                error = warnings.Count > 0
+                    ? string.Join(" ", warnings)
+                    : "The scope holds no document in a language this pattern can be read in.",
+                pattern,
+                language = requested ?? "auto",
+                languages,
+            };
 
         var matches = new List<StructuralMatch>();
         var truncated = false;
 
         foreach (var document in documents)
         {
+            var reader = ReaderFor(document);
+            if (reader is null || !patterns.TryGetValue(reader.Id, out var parsed)) continue;
+
             var root = await document.GetSyntaxRootAsync(cancellationToken);
             var text = await document.GetTextAsync(cancellationToken);
             if (root is null) continue;
 
-            foreach (var candidate in Candidates(root, parsed))
+            foreach (var candidate in reader.Candidates(root, parsed))
             {
                 if (candidate.Span.Length == 0) continue;
 
                 var bindings = new Dictionary<string, string>(StringComparer.Ordinal);
-                if (!TryMatch(parsed.Root, candidate, bindings)) continue;
+                if (!TryMatch(parsed.Root, candidate, reader, bindings)) continue;
 
                 var position = text.Lines.GetLinePosition(candidate.SpanStart);
                 matches.Add(new StructuralMatch(
-                    document, candidate, bindings, position.Line + 1, position.Character + 1,
+                    document, reader, candidate, bindings, position.Line + 1, position.Character + 1,
                     candidate.ToString().Trim()));
 
                 if (matches.Count > maxResults) { truncated = true; break; }
@@ -132,19 +140,22 @@ public sealed class StructuralSearchService : IStructuralSearchService
             .Where(match => !matches.Take(maxResults).Any(other => other != match && other.Node.Span.Contains(match.Node.Span)))
             .ToList();
 
-        if (replacementPattern is null)
+        if (replacements.Count == 0)
         {
             return new
             {
                 tool = "structural_search",
                 pattern,
                 scope = level,
+                languages,
+                warnings,
                 matchCount = outermost.Count,
                 truncated,
                 matches = outermost
                     .Select(match => new
                     {
                         @file = match.Document.FilePath,
+                        language = match.Language.Id,
                         line = match.Line,
                         column = match.Column,
                         text = match.Text,
@@ -165,6 +176,7 @@ public sealed class StructuralSearchService : IStructuralSearchService
             {
                 tool = "structural_replace",
                 pattern, replacement, scope = level,
+                languages, warnings,
                 matchCount = 0, applied = false, dryRun,
                 note = "No node matches the pattern in this scope; nothing to replace.",
             };
@@ -185,23 +197,27 @@ public sealed class StructuralSearchService : IStructuralSearchService
         foreach (var group in outermost.GroupBy(match => match.Document.Id))
         {
             var document = group.First().Document;
+            var reader = group.First().Language;
+            var replacementPattern = replacements[reader.Id];
+
             var root = await document.GetSyntaxRootAsync(cancellationToken);
             var text = await document.GetTextAsync(cancellationToken);
             if (root is null) continue;
 
             // One ReplaceNodes pass, not a ReplaceNode per match: after the first replacement the
             // other nodes belong to the old tree, and replacing them there is a silent no-op.
-            var replacements = new Dictionary<SyntaxNode, SyntaxNode>();
+            var nodes = new Dictionary<SyntaxNode, SyntaxNode>();
             foreach (var match in group)
             {
-                var built = BuildReplacement(replacementPattern, match, text, out var buildError);
+                var built = BuildReplacement(replacementPattern, match, text, reader, out var buildError);
                 if (built is null)
                     return new { error = buildError, text = match.Text, line = match.Line, file = match.Document.FilePath };
 
-                replacements[match.Node] = built;
+                nodes[match.Node] = built;
                 previews.Add(new
                 {
                     @file = document.FilePath,
+                    language = reader.Id,
                     line = match.Line,
                     column = match.Column,
                     before = match.Text,
@@ -209,7 +225,7 @@ public sealed class StructuralSearchService : IStructuralSearchService
                 });
             }
 
-            root = root.ReplaceNodes(replacements.Keys, (original, _) => replacements[original]);
+            root = root.ReplaceNodes(nodes.Keys, (original, _) => nodes[original]);
             changed[document.Id] = root.ToFullString();
         }
 
@@ -245,6 +261,8 @@ public sealed class StructuralSearchService : IStructuralSearchService
             pattern,
             replacement,
             scope = level,
+            languages,
+            warnings,
             matchCount = outermost.Count,
             filesChanged = changed.Count,
             dryRun,
@@ -259,103 +277,88 @@ public sealed class StructuralSearchService : IStructuralSearchService
 
     // ── pattern parsing ──────────────────────────────────────────────────────
 
-    private enum PatternMode { Expression, Statement, Member }
+    /// <summary>
+    /// Parses the pattern (and the replacement) in every language the selected scope holds. A
+    /// language whose reader cannot parse it contributes a warning, not a failure: a C#-shaped
+    /// pattern in a mixed solution still searches the C# documents.
+    /// </summary>
+    private static (Dictionary<string, ParsedPattern> Patterns, Dictionary<string, ParsedPattern> Replacements,
+        List<string> Languages, List<string> Warnings) ParseFor(
+        IReadOnlyList<Document> documents, string pattern, string? replacement, string? requested)
+    {
+        var patterns = new Dictionary<string, ParsedPattern>(StringComparer.Ordinal);
+        var replacements = new Dictionary<string, ParsedPattern>(StringComparer.Ordinal);
+        var warnings = new List<string>();
 
-    /// <summary>A parsed pattern: the tree with holes, how it was parsed, and the holes it names.</summary>
-    private sealed record ParsedPattern(
-        SyntaxNode Root,
-        PatternMode Mode,
-        IReadOnlyList<string> Placeholders,
-        bool IsExpressionWildcard,
-        bool IsStatementWildcard);
+        for (var index = 0; index < Languages.Length; index++)
+        {
+            var candidate = Languages[index];
+            if (requested is not null && candidate.Id != requested) continue;
+            if (!documents.Any(document => ReaderFor(document)?.Id == candidate.Id)) continue;
+
+            var parsed = candidate.Parse(pattern, out var patternError);
+            if (parsed is null)
+            {
+                warnings.Add($"{candidate.Name}: {patternError}");
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(replacement))
+            {
+                var replacementPattern = candidate.Parse(replacement, out var replacementError);
+                if (replacementPattern is null)
+                {
+                    warnings.Add($"{candidate.Name}: {replacementError}");
+                    continue;
+                }
+
+                var unbound = replacementPattern.Placeholders.Except(parsed.Placeholders, StringComparer.Ordinal).ToList();
+                if (unbound.Count > 0)
+                {
+                    warnings.Add($"{candidate.Name}: the replacement uses placeholders the pattern does not bind: " +
+                                 string.Join(", ", unbound.Select(name => "$" + name + "$")) + ".");
+                    continue;
+                }
+
+                replacements[candidate.Id] = replacementPattern;
+            }
+
+            patterns[candidate.Id] = parsed;
+        }
+
+        return (patterns, replacements, patterns.Keys.ToList(), warnings);
+    }
 
     private sealed record StructuralMatch(
         Document Document,
+        IStructuralPatternLanguage Language,
         SyntaxNode Node,
         Dictionary<string, string> Bindings,
         int Line,
         int Column,
         string Text);
 
-    /// <summary>
-    /// Parses the pattern as a statement first (so a trailing <c>;</c> means "a statement"), then an
-    /// expression, then a member declaration. A pattern that is a single <c>$x$</c> is a wildcard over
-    /// every expression; <c>$x$;</c> a wildcard over every statement.
-    /// </summary>
-    private static ParsedPattern? Parse(string text, out string? error)
+    /// <summary>The reader of a document's language: one per Roslyn language, decided by the project.</summary>
+    private static IStructuralPatternLanguage? ReaderFor(Document document) => document.Project.Language switch
     {
-        error = null;
-        var normalized = Hole.Replace(text, match => HolePrefix + match.Groups[1].Value);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            error = "The pattern is empty.";
-            return null;
-        }
-
-        var placeholders = Hole.Matches(text)
-            .Select(match => match.Groups[1].Value)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        if (SyntaxFactory.ParseStatement(normalized) is { } statement && !statement.ContainsDiagnostics)
-        {
-            var isStatementWildcard =
-                statement is ExpressionStatementSyntax { Expression: IdentifierNameSyntax identifier } &&
-                IsHole(identifier.Identifier.ValueText);
-
-            return new ParsedPattern(statement, PatternMode.Statement, placeholders,
-                IsExpressionWildcard: false, isStatementWildcard);
-        }
-
-        if (SyntaxFactory.ParseExpression(normalized) is { } expression && !expression.ContainsDiagnostics)
-        {
-            var isExpressionWildcard =
-                expression is IdentifierNameSyntax identifier && IsHole(identifier.Identifier.ValueText);
-
-            return new ParsedPattern(expression, PatternMode.Expression, placeholders,
-                isExpressionWildcard, IsStatementWildcard: false);
-        }
-
-        if (SyntaxFactory.ParseMemberDeclaration(normalized) is { } member && !member.ContainsDiagnostics)
-            return new ParsedPattern(member, PatternMode.Member, placeholders,
-                IsExpressionWildcard: false, IsStatementWildcard: false);
-
-        error = $"'{text}' is not a valid C# expression, statement or member declaration. " +
-                "Write a hole as $name$ (for example: Console.WriteLine($argument$)); a hole in statement " +
-                "position carries its own semicolon (for example: if ($condition$) $body$;).";
-        return null;
-    }
-
-    private static bool IsHole(string text) => text.StartsWith(HolePrefix, StringComparison.Ordinal);
+        LanguageNames.CSharp => Languages[0],
+        LanguageNames.VisualBasic => Languages[1],
+        _ => null,
+    };
 
     // ── matching ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The nodes a pattern can match. A wildcard is offered every expression (or statement); a normal
-    /// pattern is offered only nodes of its own kind, which keeps a solution-wide search linear.
-    /// </summary>
-    private static IEnumerable<SyntaxNode> Candidates(SyntaxNode root, ParsedPattern pattern)
-    {
-        if (pattern.IsExpressionWildcard) return root.DescendantNodes().OfType<ExpressionSyntax>();
-        if (pattern.IsStatementWildcard) return root.DescendantNodes().OfType<StatementSyntax>();
-
-        return root.DescendantNodes().Where(node => node.RawKind == pattern.Root.RawKind);
-    }
-
-    /// <summary>
     /// Structural equality with holes. A hole binds the text of whatever sits in its position — an
     /// identifier, a whole expression, a type, a statement — and every further occurrence of the same
-    /// hole must bind the same text.
+    /// hole must bind the same text, which is what makes <c>$x$ + $x$</c> a repeated-operand search.
     /// </summary>
-    private static bool TryMatch(SyntaxNode pattern, SyntaxNode candidate, Dictionary<string, string> bindings)
+    private static bool TryMatch(
+        SyntaxNode pattern, SyntaxNode candidate, IStructuralPatternLanguage language,
+        Dictionary<string, string> bindings)
     {
-        if (pattern is IdentifierNameSyntax identifier && IsHole(identifier.Identifier.ValueText))
-            return Bind(bindings, identifier.Identifier.ValueText[HolePrefix.Length..], candidate.ToString());
-
-        // `$body$` in a statement position stands for one statement of any shape, a block included.
-        if (pattern is ExpressionStatementSyntax { Expression: IdentifierNameSyntax hole } &&
-            IsHole(hole.Identifier.ValueText))
-            return Bind(bindings, hole.Identifier.ValueText[HolePrefix.Length..], candidate.ToString());
+        if (language.IsHoleNode(pattern, out var hole))
+            return Bind(bindings, hole, candidate.ToString());
 
         if (pattern.RawKind != candidate.RawKind) return false;
 
@@ -380,10 +383,9 @@ public sealed class StructuralSearchService : IStructuralSearchService
                 var candidateToken = candidateChild.AsToken();
 
                 // A hole in a name position (`$name$`, or the name in a member declaration).
-                if (IsHole(patternToken.ValueText))
+                if (language.IsHoleToken(patternToken, out var tokenHole))
                 {
-                    if (!Bind(bindings, patternToken.ValueText[HolePrefix.Length..], candidateToken.Text))
-                        return false;
+                    if (!Bind(bindings, tokenHole, candidateToken.Text)) return false;
                     continue;
                 }
 
@@ -393,7 +395,7 @@ public sealed class StructuralSearchService : IStructuralSearchService
             }
 
             if (candidateChild.IsToken) return false;
-            if (!TryMatch(patternChild.AsNode()!, candidateChild.AsNode()!, bindings)) return false;
+            if (!TryMatch(patternChild.AsNode()!, candidateChild.AsNode()!, language, bindings)) return false;
         }
     }
 
@@ -423,6 +425,7 @@ public sealed class StructuralSearchService : IStructuralSearchService
         ParsedPattern replacement,
         StructuralMatch match,
         SourceText sourceText,
+        IStructuralPatternLanguage language,
         out string? error)
     {
         error = null;
@@ -430,12 +433,12 @@ public sealed class StructuralSearchService : IStructuralSearchService
         var text = replacement.Root.ToFullString();
         foreach (var (name, bound) in match.Bindings.OrderByDescending(pair => pair.Key.Length))
         {
-            var hole = Regex.Escape(HolePrefix + name);
+            var hole = Regex.Escape(StructuralHoles.Prefix + name);
             var trimmed = bound.TrimEnd();
 
-            // A statement hole is written `$body$;` in the replacement. When the bound text is itself a
-            // terminated statement or a block, the `;` would be left behind as an empty statement —
-            // harmless in a block, a parse error as the embedded statement of an `if`.
+            // A statement hole is written `$body$;` in C#. When the bound text is itself a terminated
+            // statement or a block, the `;` would be left behind as an empty statement — harmless in a
+            // block, a parse error as the embedded statement of an `if`.
             var holePattern = trimmed.EndsWith(';') || trimmed.EndsWith('}')
                 ? hole + @"[ \t]*;?"
                 : hole + @"\b";
@@ -445,10 +448,10 @@ public sealed class StructuralSearchService : IStructuralSearchService
 
         text = Reindent(text, IndentationOf(sourceText, match.Node.SpanStart));
 
-        var parsed = ParseFor(match.Node, text);
+        var parsed = language.ParseLike(match.Node, text);
         if (parsed is null || parsed.ContainsDiagnostics)
         {
-            error = $"The replacement does not parse as a {Describe(match.Node)} after substitution: {text.Trim()}";
+            error = $"The replacement does not parse as a {language.Describe(match.Node)} after substitution: {text.Trim()}";
             return null;
         }
 
@@ -482,37 +485,19 @@ public sealed class StructuralSearchService : IStructuralSearchService
         return prefix.All(character => character is ' ' or '\t') ? prefix : string.Empty;
     }
 
-    private static string Describe(SyntaxNode node) => node switch
-    {
-        StatementSyntax => "statement",
-        ExpressionSyntax => "expression",
-        MemberDeclarationSyntax => "member declaration",
-        _ => "node",
-    };
-
-    private static SyntaxNode? ParseFor(SyntaxNode original, string text)
-    {
-        if (original is StatementSyntax)
-            return SyntaxFactory.ParseStatement(text);
-
-        if (original is ExpressionSyntax)
-            return SyntaxFactory.ParseExpression(text);
-
-        if (original is MemberDeclarationSyntax)
-            return SyntaxFactory.ParseMemberDeclaration(text);
-
-        return null;
-    }
-
     // ── scope ────────────────────────────────────────────────────────────────
 
     private static (List<Document> Documents, object? Error) SelectDocuments(
-        Solution solution, string scope, string? filePath, string? projectName)
+        Solution solution, string scope, string? filePath, string? projectName, string? language)
     {
         IEnumerable<Document> documents = solution.Projects
-            .Where(project => project.Language == LanguageNames.CSharp)
+            .Where(project => project.Language is LanguageNames.CSharp or LanguageNames.VisualBasic)
             .SelectMany(project => project.Documents)
             .Where(document => document.SourceCodeKind == SourceCodeKind.Regular && document.FilePath is not null);
+
+        if (language is not null)
+            documents = documents.Where(document =>
+                document.Project.Language == (language == "vb" ? LanguageNames.VisualBasic : LanguageNames.CSharp));
 
         switch (scope)
         {

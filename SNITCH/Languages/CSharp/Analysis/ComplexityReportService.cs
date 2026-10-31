@@ -121,7 +121,12 @@ public sealed class ComplexityReportService : IComplexityReportService
             };
 
         var metrics = ComplexityAnalyzer.Analyze(unit, model, document.FilePath);
-        var suggestions = ComplexityPlanner.Suggest(unit, model, cancellationToken);
+
+        // The planner rewrites C# syntax; a VB unit gets the numbers and the contributors, which is
+        // what the report is read for, and no auto-applicable move.
+        var suggestions = unit.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? []
+            : ComplexityPlanner.Suggest(unit, model, cancellationToken);
 
         return new
         {
@@ -307,16 +312,7 @@ public sealed class ComplexityReportService : IComplexityReportService
         return units.FirstOrDefault(candidate => NameOf(candidate).Equals(methodName, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string NameOf(SyntaxNode unit) => unit switch
-    {
-        MethodDeclarationSyntax method => method.Identifier.ValueText,
-        ConstructorDeclarationSyntax constructor => constructor.Identifier.ValueText,
-        LocalFunctionStatementSyntax local => local.Identifier.ValueText,
-        AccessorDeclarationSyntax accessor => accessor.Keyword.Text,
-        PropertyDeclarationSyntax property => property.Identifier.ValueText,
-        AnonymousFunctionExpressionSyntax => "lambda",
-        _ => unit.Kind().ToString(),
-    };
+    private static string NameOf(SyntaxNode unit) => ComplexityAnalyzer.NameOf(unit);
 
     private static int StartLine(SyntaxNode node) => node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
 

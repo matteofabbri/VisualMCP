@@ -161,13 +161,32 @@ public sealed class InspectCodeService : IInspectCodeService
         {
             try
             {
+                // A pack contributes the analyzers that read the project's language: the .NET analyzers
+                // ship a C# and a VB set, the house rules have one implementation each, and the
+                // C#-only packs (Roslynator, StyleCop, AsyncFixer, Meziantou, the ReSharper-shaped
+                // ones) inspect no VB project at all. Saying so once is better than a silent 0.
+                var projectAnalyzers = selected
+                    .SelectMany(pack => pack.AnalyzersFor(project.Language))
+                    .Distinct()
+                    .ToImmutableArray();
+
+                if (projectAnalyzers.IsEmpty)
+                {
+                    var language = project.Language == LanguageNames.VisualBasic ? "Visual Basic" : "C#";
+                    foreach (var pack in selected.Where(pack => pack.AnalyzersFor(project.Language).IsEmpty))
+                        warnings.Add($"{pack.Pack.Id}: no {language} analyzer " +
+                                     $"(the pack is {string.Join("/", pack.Languages)} only).");
+
+                    continue;
+                }
+
                 var compilation = await project.GetCompilationAsync(cts.Token);
                 if (compilation is null) continue;
 
                 if (enableAll)
                     compilation = EnableAllRules(compilation, dormantRules);
 
-                var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
+                var withAnalyzers = compilation.WithAnalyzers(projectAnalyzers, project.AnalyzerOptions);
                 var diagnostics = await withAnalyzers.GetAnalyzerDiagnosticsAsync(cts.Token);
 
                 foreach (var diagnostic in diagnostics)

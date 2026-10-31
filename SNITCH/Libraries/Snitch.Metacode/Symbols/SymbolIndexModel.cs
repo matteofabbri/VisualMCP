@@ -137,6 +137,12 @@ public static class SymbolKeys
     /// this Roslyn version: it omits the member options, so every method formats as its bare name and
     /// two overloads — or two members with the same name in different types — would collapse into one key.
     /// </summary>
+    /// <remarks>
+    /// <c>UseSpecialTypes</c> is deliberately absent. It is the one option whose output is
+    /// language-specific: C# prints <c>int</c> where Visual Basic prints <c>Integer</c>, and a key must
+    /// mean the same symbol in both languages or a C# call into a VB method lands on a different row
+    /// from the VB declaration. Without it both print <c>System.Int32</c>.
+    /// </remarks>
     private static readonly SymbolDisplayFormat KeyFormat = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included,
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
@@ -149,9 +155,7 @@ public static class SymbolKeys
         parameterOptions:
             SymbolDisplayParameterOptions.IncludeType |
             SymbolDisplayParameterOptions.IncludeParamsRefOut,
-        miscellaneousOptions:
-            SymbolDisplayMiscellaneousOptions.UseSpecialTypes |
-            SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
 
     /// <summary>The key of a symbol or of a type/namespace used as a container.</summary>
     public static string For(ISymbol symbol)
@@ -162,7 +166,22 @@ public static class SymbolKeys
             _ => symbol.OriginalDefinition,
         };
 
-        return $"{definition.Kind}:{definition.ToDisplayString(KeyFormat)}";
+        return $"{definition.Kind}:{Normalize(definition.ToDisplayString(KeyFormat))}";
+    }
+
+    /// <summary>
+    /// The spellings that still differ between the two languages' display services: the global prefix
+    /// (<c>global::</c> / <c>Global.</c>) and the parameter qualifiers (<c>ref</c> / <c>ByRef</c>,
+    /// <c>params</c> / <c>ParamArray</c>). A key is shared across languages, so the C# spelling wins.
+    /// </summary>
+    private static string Normalize(string display)
+    {
+        // VB qualifies every name it prints with `Global.`, C# only the outermost one.
+        var text = display.Replace("Global.", "global::", StringComparison.Ordinal);
+
+        return text
+            .Replace("ByRef ", "ref ", StringComparison.Ordinal)
+            .Replace("ParamArray ", "params ", StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -17,11 +17,40 @@ public sealed record InspectionPack(
     string[] FilePrefixes,
     string Description);
 
-/// <summary>A pack whose assemblies were found, plus the analyzers and code fixes they expose for C#.</summary>
+/// <summary>
+/// A pack whose assemblies were found, plus the analyzers and code fixes they expose per language. A
+/// pack is rarely single-language: the .NET analyzers ship both a <c>cs</c> and a <c>vb</c> folder, and
+/// the house rules have one implementation per language.
+/// </summary>
 internal sealed record LoadedInspectionPack(
     InspectionPack Pack,
-    ImmutableArray<DiagnosticAnalyzer> Analyzers,
-    ImmutableArray<CodeFixProvider> Fixers);
+    ImmutableArray<DiagnosticAnalyzer> CSharpAnalyzers,
+    ImmutableArray<DiagnosticAnalyzer> VisualBasicAnalyzers,
+    ImmutableArray<CodeFixProvider> Fixers)
+{
+    /// <summary>Every analyzer in the pack, whichever language it reads.</summary>
+    public ImmutableArray<DiagnosticAnalyzer> Analyzers =>
+        CSharpAnalyzers.AddRange(VisualBasicAnalyzers);
+
+    /// <summary>The analyzers that read a project's language; empty when the pack has none for it.</summary>
+    public ImmutableArray<DiagnosticAnalyzer> AnalyzersFor(string language) => language switch
+    {
+        LanguageNames.VisualBasic => VisualBasicAnalyzers,
+        _ => CSharpAnalyzers,
+    };
+
+    /// <summary>The languages this pack actually inspects.</summary>
+    public IReadOnlyList<string> Languages
+    {
+        get
+        {
+            var languages = new List<string>(2);
+            if (CSharpAnalyzers.Length > 0) languages.Add("cs");
+            if (VisualBasicAnalyzers.Length > 0) languages.Add("vb");
+            return languages;
+        }
+    }
+}
 
 /// <summary>What the loader managed to load, and why anything else failed.</summary>
 internal sealed record InspectionPackLibrary(
@@ -53,8 +82,13 @@ internal static class InspectionPackCatalog
         new InspectionPack("roslynator", "Roslynator.Analyzers", new[] { "Roslynator." },
             "ReSharper-style inspections: redundant code, simplifications, language usage (RCS)."),
         new InspectionPack("netanalyzers", "Microsoft.CodeAnalysis.NetAnalyzers",
-            new[] { "Microsoft.CodeAnalysis.NetAnalyzers", "Microsoft.CodeAnalysis.CSharp.NetAnalyzers" },
-            "Microsoft CA rules: design, globalization, performance, reliability, security, usage."),
+            new[]
+            {
+                "Microsoft.CodeAnalysis.NetAnalyzers",
+                "Microsoft.CodeAnalysis.CSharp.NetAnalyzers",
+                "Microsoft.CodeAnalysis.VisualBasic.NetAnalyzers",
+            },
+            "Microsoft CA rules: design, globalization, performance, reliability, security, usage — for C# and Visual Basic."),
         new InspectionPack("asyncfixer", "AsyncFixer", new[] { "AsyncFixer" },
             "Async/await pitfalls: sync-over-async, fire-and-forget, async void (ASYNC)."),
         new InspectionPack("meziantou", "Meziantou.Analyzer", new[] { "Meziantou.Analyzer" },
@@ -140,19 +174,22 @@ internal static class InspectionPackCatalog
             // every other pack is an external analyzer package discovered on disk or in the NuGet cache.
             if (definition.Id is "house" or "rider")
             {
-                var own = definition.Id == "house"
-                    ? ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer())
-                    : ImmutableArray.Create<DiagnosticAnalyzer>(
-                        new Rider.ConvertToConstantLocalAnalyzer(),
-                        new Rider.LoopVariableChangedAnalyzer(),
-                        new Rider.MemberCanBeMadeStaticAnalyzer(),
-                        new Rider.RedundantArgumentAnalyzer(),
-                        new Rider.EmptyConstructorAnalyzer(),
-                        new Rider.RedundantIfElseAnalyzer(),
-                        new Rider.ConstantConditionAnalyzer(),
-                        new Rider.RedundantBaseConstructorCallAnalyzer());
+                var (packCsharp, packVisualBasic) = definition.Id == "house"
+                    ? (ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer()),
+                       ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileVisualBasicAnalyzer()))
+                    : (ImmutableArray.Create<DiagnosticAnalyzer>(
+                           new Rider.ConvertToConstantLocalAnalyzer(),
+                           new Rider.LoopVariableChangedAnalyzer(),
+                           new Rider.MemberCanBeMadeStaticAnalyzer(),
+                           new Rider.RedundantArgumentAnalyzer(),
+                           new Rider.EmptyConstructorAnalyzer(),
+                           new Rider.RedundantIfElseAnalyzer(),
+                           new Rider.ConstantConditionAnalyzer(),
+                           new Rider.RedundantBaseConstructorCallAnalyzer()),
+                       ImmutableArray<DiagnosticAnalyzer>.Empty);
 
-                packs.Add(new LoadedInspectionPack(definition, own, ImmutableArray<CodeFixProvider>.Empty));
+                packs.Add(new LoadedInspectionPack(
+                    definition, packCsharp, packVisualBasic, ImmutableArray<CodeFixProvider>.Empty));
                 continue;
             }
 
@@ -164,16 +201,20 @@ internal static class InspectionPackCatalog
                 continue;
             }
 
-            var analyzers = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
+            var csharpAnalyzers = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
+            var visualBasicAnalyzers = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
             var fixers = ImmutableArray.CreateBuilder<CodeFixProvider>();
             var loader = new AnalyzerAssemblyLoader();
 
-            foreach (var assembly in assemblies)
+            foreach (var (language, assembly) in assemblies)
             {
                 try
                 {
                     var reference = new AnalyzerFileReference(assembly, loader);
-                    analyzers.AddRange(reference.GetAnalyzers(LanguageNames.CSharp));
+                    var found = reference.GetAnalyzers(language).ToImmutableArray();
+
+                    if (language == LanguageNames.VisualBasic) visualBasicAnalyzers.AddRange(found);
+                    else csharpAnalyzers.AddRange(found);
                 }
                 catch (Exception ex)
                 {
@@ -187,24 +228,40 @@ internal static class InspectionPackCatalog
                 fixers.AddRange(LoadFixers(assembly, loader, definition.Id, warnings));
             }
 
-            if (analyzers.Count == 0)
+            var csharp = Distinct(csharpAnalyzers);
+            var visualBasic = Distinct(visualBasicAnalyzers);
+            if (csharp.Length == 0 && visualBasic.Length == 0)
             {
-                warnings.Add($"{definition.Id}: assemblies loaded but exposed no C# analyzer.");
+                warnings.Add($"{definition.Id}: assemblies loaded but exposed no analyzer.");
                 continue;
             }
 
-            packs.Add(new LoadedInspectionPack(definition, analyzers.ToImmutable(), fixers.ToImmutable()));
+            packs.Add(new LoadedInspectionPack(definition, csharp, visualBasic, Distinct(fixers)));
         }
 
         return new InspectionPackLibrary(packs, warnings);
     }
 
     /// <summary>
-    /// Ships-first: a user (or a release layout) can drop DLLs into <c>&lt;app&gt;/analyzers</c>.
-    /// Otherwise the package is read from the NuGet global folder, where PackageDownload put it.
+    /// The same analyzer can be reached twice — a shipped flat folder is asked for both languages —
+    /// so each language list keeps one instance per analyzer type.
     /// </summary>
-    private static List<string> Discover(InspectionPack pack, string shippedDirectory)
+    private static ImmutableArray<T> Distinct<T>(ImmutableArray<T>.Builder items) where T : class =>
+        items
+            .GroupBy(item => item.GetType().AssemblyQualifiedName, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToImmutableArray();
+
+    /// <summary>
+    /// Ships-first: a user (or a release layout) can drop DLLs into <c>&lt;app&gt;/analyzers</c>.
+    /// Otherwise the package is read from the NuGet global folder, where PackageDownload put it. Each
+    /// assembly is paired with the language whose folder it came from, because a package ships its
+    /// analyzers under <c>cs</c> and <c>vb</c> and asks each set only about the language it reads.
+    /// </summary>
+    private static List<(string Language, string Assembly)> Discover(InspectionPack pack, string shippedDirectory)
     {
+        var found = new List<(string, string)>();
+
         if (Directory.Exists(shippedDirectory))
         {
             var shipped = Directory.EnumerateFiles(shippedDirectory, "*.dll")
@@ -212,25 +269,45 @@ internal static class InspectionPackCatalog
                     Path.GetFileName(file).StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            if (shipped.Count > 0) return shipped;
+            if (shipped.Count > 0)
+            {
+                // A flat folder carries no language: ask every DLL about both and let Roslyn's
+                // DiagnosticAnalyzer attribute decide.
+                foreach (var file in shipped)
+                {
+                    found.Add((LanguageNames.CSharp, file));
+                    found.Add((LanguageNames.VisualBasic, file));
+                }
+
+                return found;
+            }
         }
 
         var package = NewestPackageVersion(pack.PackageId);
-        if (package is null) return new List<string>();
+        if (package is null) return found;
 
-        var folder = BestAnalyzerFolder(Path.Combine(package, "analyzers", "dotnet"));
-        return folder is null ? new List<string>() : Directory.EnumerateFiles(folder, "*.dll").ToList();
+        var root = Path.Combine(package, "analyzers", "dotnet");
+        foreach (var (language, folder) in new[] { (LanguageNames.CSharp, "cs"), (LanguageNames.VisualBasic, "vb") })
+        {
+            var path = BestAnalyzerFolder(root, folder);
+            if (path is null) continue;
+
+            found.AddRange(Directory.EnumerateFiles(path, "*.dll").Select(file => (language, file)));
+        }
+
+        return found;
     }
 
     /// <summary>
-    /// Packages ship either <c>analyzers/dotnet/cs</c> or one folder per supported Roslyn version
-    /// (<c>roslyn4.7</c>, <c>roslyn5.9</c>, …). Take the newest variant the host Roslyn can run.
+    /// Packages ship either <c>analyzers/dotnet/cs</c> (and <c>…/vb</c>) or one folder per supported
+    /// Roslyn version (<c>roslyn4.7</c>, <c>roslyn5.9</c>, …). Take the newest variant the host Roslyn
+    /// can run, in the requested language.
     /// </summary>
-    private static string? BestAnalyzerFolder(string analyzersRoot)
+    private static string? BestAnalyzerFolder(string analyzersRoot, string language)
     {
         if (!Directory.Exists(analyzersRoot)) return null;
 
-        var plain = Path.Combine(analyzersRoot, "cs");
+        var plain = Path.Combine(analyzersRoot, language);
         if (Directory.Exists(plain)) return plain;
 
         var host = typeof(Compilation).Assembly.GetName().Version ?? new Version(4, 0);
@@ -242,12 +319,13 @@ internal static class InspectionPackCatalog
 
         if (candidates.Count == 0) return null;
 
-        var compatible = candidates
+        return candidates
             .Where(candidate => candidate.Version! <= host)
-            .Select(candidate => Path.Combine(candidate.Dir, "cs"))
-            .FirstOrDefault(PathExists);
-
-        return compatible ?? Path.Combine(candidates[0].Dir, "cs");
+            .Select(candidate => Path.Combine(candidate.Dir, language))
+            .FirstOrDefault(PathExists)
+            ?? (candidates
+                .Select(candidate => Path.Combine(candidate.Dir, language))
+                .FirstOrDefault(PathExists));
     }
 
     private static bool PathExists(string path) => Directory.Exists(path);

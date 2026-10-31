@@ -15,7 +15,10 @@ public static class InspectCodeTool
         "over every project and return findings with severity, inspection id, file, line and message. " +
         "Covers redundant code, unused members, simplifications, async pitfalls, CA design/reliability rules, " +
         "correctness and security smells, plus the VisualMCP house rules (pack 'house', VMC0001: one type " +
-        "per file). Works on ANY solution without referencing any analyzer package. " +
+        "per file). Each pack contributes the analyzers that read a project's language: the .NET analyzers " +
+        "ship a Visual Basic set and VMC0001 has a VB implementation, while the C#-only packs report that " +
+        "they do not cover a VB project instead of returning a silent zero. Works on ANY solution " +
+        "without referencing any analyzer package. " +
         "This is the tool to call after implementing or changing code, and before a refactor; it finds what " +
         "the compiler does not. Narrow it with projectName / filePath, or filter with ids (e.g. 'RCS,CA18*') " +
         "and excludeIds (e.g. 'CA1707').")]

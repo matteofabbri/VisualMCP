@@ -10,7 +10,7 @@ public interface IFindAsyncAntiPatternsService
     Task<object> FindAsyncAntiPatterns(string? projectName, bool checkConfigureAwait);
 }
 
-public sealed class FindAsyncAntiPatternsService : IFindAsyncAntiPatternsService
+public sealed partial class FindAsyncAntiPatternsService : IFindAsyncAntiPatternsService
 {
     private readonly IRoslynWorkspace _workspace;
     public FindAsyncAntiPatternsService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -21,7 +21,7 @@ public sealed class FindAsyncAntiPatternsService : IFindAsyncAntiPatternsService
     {
         var solution = await _workspace.EnsureSolutionLoadedAsync();
         if (solution is null)
-            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
+            return new { error = "No solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
 
         var projects = solution.Projects
             .Where(p => projectName is null || p.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase))
@@ -39,6 +39,12 @@ public sealed class FindAsyncAntiPatternsService : IFindAsyncAntiPatternsService
                 var root  = await document.GetSyntaxRootAsync();
                 var model = await document.GetSemanticModelAsync();
                 if (root is null || model is null) continue;
+
+                if (project.Language == LanguageNames.VisualBasic)
+                {
+                    CollectVisualBasic(document, project, root, model, findings, checkConfigureAwait);
+                    continue;
+                }
 
                 // ── .Result / .Wait() / .GetAwaiter().GetResult() blocking ────────────
                 foreach (var access in root.DescendantNodes().OfType<MemberAccessExpressionSyntax>())
