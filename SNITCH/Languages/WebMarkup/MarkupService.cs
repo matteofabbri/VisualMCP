@@ -50,6 +50,9 @@ public sealed class MarkupService : IMarkupService
                 elements = analysis.Elements,
                 ids = analysis.Ids.Count,
                 duplicateIds = analysis.Ids.GroupBy(id => id, StringComparer.Ordinal).Count(group => group.Count() > 1),
+                classes = analysis.Nodes?.SelectMany(node => node.Classes)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0,
+                selectors = analysis.Selectors?.Count ?? 0,
                 findings = analysis.Findings.Count,
             });
         }
@@ -90,7 +93,15 @@ public sealed class MarkupService : IMarkupService
 
         var (root, files, truncated) = Discover(path, normalizedKind, maxFiles);
         var findings = new List<MarkupFinding>();
+        var analyses = new List<(string File, MarkupAnalysis Analysis)>();
         var analyzed = 0;
+
+        void AddIfSelected(MarkupFinding finding)
+        {
+            if (Rank(finding.Severity) < Rank(severity)) return;
+            if (ruleId is not null && finding.RuleId != ruleId) return;
+            findings.Add(finding);
+        }
 
         foreach (var file in files)
         {
@@ -98,12 +109,67 @@ public sealed class MarkupService : IMarkupService
             if (analysis is null) continue;
             analyzed++;
 
+            var relative = Relative(root, file);
+            analyses.Add((relative, analysis));
             foreach (var finding in analysis.Findings)
+                AddIfSelected(finding with { File = relative });
+        }
+
+        var notes = new List<string>
+        {
+            "A structural scan of tags and rules, not a renderer: it does not run a browser and cannot tell " +
+            "whether a stylesheet is actually used.",
+        };
+
+        var pages = analyses.Where(entry => entry.Analysis.Kind == "html").ToList();
+        var stylesheets = analyses.Where(entry => entry.Analysis.Kind == "css").ToList();
+        var nodes = pages.SelectMany(entry => entry.Analysis.Nodes ?? []).ToList();
+
+        if (pages.Count > 0 && stylesheets.Count > 0)
+        {
+            notes.Add("CSS0009 resolves only simple selectors (tag, .class, #id, tag.class) against the tag/class/id " +
+                      "index of the scanned pages; a combinator, an attribute, a pseudo-class and the cascade are " +
+                      "not resolved.");
+
+            foreach (var (file, analysis) in stylesheets)
             {
-                if (Rank(finding.Severity) < Rank(severity)) continue;
-                if (ruleId is not null && finding.RuleId != ruleId) continue;
-                findings.Add(finding with { File = Relative(root, file) });
+                foreach (var selector in analysis.Selectors ?? [])
+                {
+                    if (nodes.Any(node => MarkupAnalyzer.Matches(node, selector))) continue;
+                    AddIfSelected(UnmatchedSelector(file, selector));
+                }
             }
+
+            var defined = stylesheets
+                .SelectMany(entry => entry.Analysis.Classes ?? [])
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var reported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (file, analysis) in pages)
+            {
+                foreach (var node in analysis.Nodes ?? [])
+                {
+                    foreach (var className in node.Classes)
+                    {
+                        if (defined.Contains(className)) continue;
+                        if (!reported.Add($"{file}|{node.Line}|{className}")) continue;
+
+                        AddIfSelected(new MarkupFinding("HTML0015", "info", "Maintainability",
+                            $"The class '{className}' is used here and defined in no scanned stylesheet.", file,
+                            node.Line, node.Column, $"class=\"{className}\"",
+                            "Remove the class, or write the rule it was meant to match. A stylesheet loaded from a " +
+                            "CDN or a utility framework is outside this scan and makes the finding a false positive."));
+                    }
+                }
+            }
+        }
+        else if (pages.Count == 0)
+        {
+            notes.Add("Selector matching was skipped: no HTML page is in scope.");
+        }
+        else
+        {
+            notes.Add("Selector matching was skipped: no stylesheet is in scope, so CSS0009 and HTML0015 cannot be judged.");
         }
 
         var shown = findings.Take(maxFindings).ToList();
@@ -127,10 +193,15 @@ public sealed class MarkupService : IMarkupService
                 .ToDictionary(group => group.Key, group => group.Count()),
             findings = shown,
             truncated = findings.Count > shown.Count,
-            note = "A structural scan of tags and rules, not a renderer: it does not resolve CSS selectors against " +
-                   "the DOM, does not run a browser, and cannot tell whether a stylesheet is actually used.",
+            note = string.Join(" ", notes),
         };
     }
+
+    private static MarkupFinding UnmatchedSelector(string file, CssSimpleSelector selector) =>
+        new("CSS0009", "info", "Maintainability",
+            $"The selector '{selector.Text}' matches no tag, class or id in the scanned pages.",
+            file, selector.Line, selector.Column, selector.Text,
+            "Remove the rule, or check the spelling: a typo here is a style that never applies.");
 
     private static (string Kind, string? Error) Normalize(string kind)
     {

@@ -9,7 +9,8 @@ public static class MarkupTools
 {
     [McpServerTool(Name = "markup_files"), Description(
         "What the solution's HTML and stylesheets are: every .html/.htm and .css/.scss file under the solution (or " +
-        "under `path`), with its line, element and id counts (how many ids repeat) and the findings it carries. " +
+        "under `path`), with its line, element and id counts (how many ids repeat), the distinct classes a page " +
+        "uses / the simple selectors a stylesheet declares, and the findings it carries. " +
         "`kind` picks html, css or both. Build output, node_modules, dist, coverage and vendored libraries are " +
         "skipped. Use it to find the page before reading it; analyze_markup lists the findings. Read-only.")]
     public static Task<object> MarkupFiles(
@@ -25,10 +26,13 @@ public static class MarkupTools
         "id, HTML0005 <label> attached to nothing, HTML0006 nested <form>, HTML0007 deprecated element, HTML0008 " +
         "inline event handler, HTML0009 target=_blank without rel, HTML0010 empty href, HTML0011 <button> without " +
         "type, HTML0012 form control without name, HTML0013 subresource over http://, HTML0014 unclosed or " +
-        "mismatched tag. CSS rules: CSS0001 !important, CSS0002 ID selector, CSS0003 empty rule, CSS0004 @import, " +
-        "CSS0005 a selector declared twice, CSS0006 unbalanced braces, CSS0007 javascript: URL, CSS0008 " +
-        "expression(). It reads tags with a quote-aware scanner and both languages with comments masked. It does " +
-        "not render the page or resolve selectors against a DOM. Read-only.")]
+        "mismatched tag, HTML0015 a class used in markup that no scanned stylesheet defines. CSS rules: CSS0001 " +
+        "!important, CSS0002 ID selector, CSS0003 empty rule, CSS0004 @import, CSS0005 a selector declared twice, " +
+        "CSS0006 unbalanced braces, CSS0007 javascript: URL, CSS0008 expression(), CSS0009 a simple selector that " +
+        "matches no element in the scanned pages. It reads tags with a quote-aware scanner and both languages with " +
+        "comments masked. Selector matching is lexical: only tag, .class, #id and tag.class are resolved against " +
+        "the tag/class/id index of the scanned pages — no specificity, pseudo-classes, combinators or cascade, and " +
+        "it does not render the page. Read-only.")]
     public static Task<object> AnalyzeMarkup(
         IMarkupService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,

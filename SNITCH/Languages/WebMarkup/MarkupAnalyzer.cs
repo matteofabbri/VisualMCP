@@ -68,6 +68,7 @@ public static class MarkupAnalyzer
         ["HTML0012"] = "Form control without name",
         ["HTML0013"] = "Subresource loaded over http://",
         ["HTML0014"] = "Unclosed or mismatched tag",
+        ["HTML0015"] = "Class used in markup and defined in no scanned stylesheet",
         ["CSS0001"] = "!important",
         ["CSS0002"] = "ID selector in a stylesheet",
         ["CSS0003"] = "Empty rule",
@@ -76,7 +77,16 @@ public static class MarkupAnalyzer
         ["CSS0006"] = "Unbalanced braces",
         ["CSS0007"] = "javascript: URL",
         ["CSS0008"] = "IE expression()",
+        ["CSS0009"] = "A simple selector that matches no element in the scanned pages",
     };
+
+    /// <summary>
+    /// The class and id tokens a selector mentions. Read from the selector text only, so a value inside a
+    /// declaration (a colour, a URL) is never mistaken for a class the stylesheet defines.
+    /// </summary>
+    private static readonly Regex ClassMention = new(@"(?<![\w-])\.(-?[_A-Za-z][-\w]*)", RegexOptions.Compiled);
+    private static readonly Regex IdMention = new(@"(?<![\w-])#(-?[_A-Za-z][-\w]*)", RegexOptions.Compiled);
+    private static readonly Regex CssRuleSelector = new(@"^[^{};@]+$", RegexOptions.Compiled);
 
     // ── HTML ───────────────────────────────────────────────────────────────────
 
@@ -97,6 +107,7 @@ public static class MarkupAnalyzer
 
         var tags = ScanTags(masked);
         var openForms = 0;
+        var nodes = new List<MarkupNode>();
 
         foreach (var tag in tags)
         {
@@ -120,6 +131,16 @@ public static class MarkupAnalyzer
 
             if (tag.Closing) continue;
             var attributes = ReadAttributes(masked, tag);
+
+            var (nodeLine, nodeColumn) = Position(lineStarts, tag.Offset);
+            nodes.Add(new MarkupNode(
+                name,
+                attributes.TryGetValue("id", out var nodeId) ? nodeId : null,
+                attributes.TryGetValue("class", out var classValue)
+                    ? classValue.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                    : Array.Empty<string>(),
+                nodeLine,
+                nodeColumn));
 
             if (Deprecated.Contains(name))
                 Add("HTML0007", "warning", "Maintainability",
@@ -204,7 +225,8 @@ public static class MarkupAnalyzer
 
         return new MarkupAnalysis(
             "html", lineStarts.Length, tags.Count(tag => !tag.Closing), ids,
-            findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList());
+            findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList(),
+            nodes);
     }
 
     /// <summary>The tag scanner's balance: an unclosed element or a close that does not match.</summary>
@@ -326,10 +348,120 @@ public static class MarkupAnalyzer
                 $"The selector '{duplicate.Selector}' is declared again.", duplicate.Offset,
                 "Merge the two blocks: a later declaration silently wins over the earlier one.");
 
+        var selectors = SimpleSelectors(masked, lineStarts).ToList();
+        var classes = RuleSelectors(masked)
+            .SelectMany(rule => ClassesIn(rule.Selector))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         return new MarkupAnalysis(
             "css", lineStarts.Length, balance.Open, [],
-            findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList());
+            findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList(),
+            Selectors: selectors, Classes: classes);
     }
+
+    // ── selector index ─────────────────────────────────────────────────────────
+
+    /// <summary>The selector of every rule, as written, at the offset it starts.</summary>
+    private static IEnumerable<(string Selector, int Offset)> RuleSelectors(string masked)
+    {
+        var start = 0;
+
+        for (var index = 0; index < masked.Length; index++)
+        {
+            if (masked[index] == '}')
+            {
+                start = index + 1;
+                continue;
+            }
+
+            if (masked[index] != '{') continue;
+
+            var raw = masked[start..index];
+            var selector = raw.Trim();
+            var offset = start + (raw.Length - raw.TrimStart().Length);
+            start = index + 1;
+
+            if (selector.Length == 0 || selector.StartsWith('@') || !CssRuleSelector.IsMatch(selector))
+                continue;
+
+            yield return (selector, offset);
+        }
+    }
+
+    /// <summary>
+    /// The simple selectors of the stylesheet, with the element they name: one tag, one class or one id,
+    /// optionally a tag with one of the two (<c>div.card</c>). Everything else — a descendant or child
+    /// combinator, an attribute, a pseudo-class, a comma list — is deliberately not returned: matching it
+    /// needs the DOM and the cascade, and a guess would be a false finding.
+    /// </summary>
+    private static IEnumerable<CssSimpleSelector> SimpleSelectors(string masked, int[] lineStarts)
+    {
+        foreach (var (selectorText, offset) in RuleSelectors(masked))
+        {
+            foreach (var part in selectorText.Split(','))
+            {
+                var simple = part.Trim();
+                if (!TryParseSimpleSelector(simple, out var tag, out var className, out var id)) continue;
+
+                var (line, column) = Position(lineStarts, offset + selectorText.IndexOf(simple, StringComparison.Ordinal));
+                yield return new CssSimpleSelector(simple, tag, className, id, line, column);
+            }
+        }
+    }
+
+    /// <summary>The simple selector grammar: [tag|*][.class|#id], nothing else.</summary>
+    private static bool TryParseSimpleSelector(
+        string text, out string? tag, out string? className, out string? id)
+    {
+        tag = null;
+        className = null;
+        id = null;
+
+        if (string.IsNullOrEmpty(text) || text == "*") return false;
+
+        var marker = text.IndexOfAny(['.', '#']);
+        var tagPart = marker < 0 ? text : text[..marker];
+        var suffix = marker < 0 ? string.Empty : text[marker..];
+
+        if (tagPart.Length > 0)
+        {
+            if (tagPart != "*")
+            {
+                if (!IsCssIdentifier(tagPart)) return false;
+                tag = tagPart;
+            }
+        }
+
+        if (suffix.Length > 0)
+        {
+            if (suffix.Length < 2 || !IsCssIdentifier(suffix[1..])) return false;
+
+            if (suffix[0] == '.') className = suffix[1..];
+            else id = suffix[1..];
+        }
+
+        return tag is not null || className is not null || id is not null;
+    }
+
+    private static bool IsCssIdentifier(string value) =>
+        value.Length > 0 &&
+        !char.IsDigit(value[0]) &&
+        value.All(character => char.IsLetterOrDigit(character) || character is '-' or '_');
+
+    /// <summary>Whether an element index entry can satisfy a simple selector.</summary>
+    public static bool Matches(MarkupNode node, CssSimpleSelector selector) =>
+        (selector.Tag is null || string.Equals(node.Tag, selector.Tag, StringComparison.OrdinalIgnoreCase)) &&
+        (selector.Class is null ||
+         node.Classes.Contains(selector.Class, StringComparer.OrdinalIgnoreCase)) &&
+        (selector.Id is null || string.Equals(node.Id, selector.Id, StringComparison.Ordinal));
+
+    /// <summary>The class and id tokens a selector mentions, complex selectors included.</summary>
+    public static IReadOnlyList<string> ClassesIn(string selector) =>
+        ClassMention.Matches(selector).Select(match => match.Groups[1].Value).ToList();
+
+    public static IReadOnlyList<string> IdsIn(string selector) =>
+        IdMention.Matches(selector).Select(match => match.Groups[1].Value).ToList();
 
     private static (int Open, int Close, int ProblemOffset) Braces(string masked)
     {
@@ -602,6 +734,16 @@ public sealed record MarkupFinding(
     string RuleId, string Severity, string Category, string Message, string File, int Line, int Column,
     string Snippet, string? Fix);
 
+/// <summary>One element of the page index: what a simple selector can be matched against.</summary>
+public sealed record MarkupNode(
+    string Tag, string? Id, IReadOnlyList<string> Classes, int Line, int Column);
+
+/// <summary>A simple selector (tag, .class, #id or tag.class) with the element it names.</summary>
+public sealed record CssSimpleSelector(
+    string Text, string? Tag, string? Class, string? Id, int Line, int Column);
+
 /// <summary>The facts a scan of one markup file produces.</summary>
 public sealed record MarkupAnalysis(
-    string Kind, int Lines, int Elements, IReadOnlyList<string> Ids, IReadOnlyList<MarkupFinding> Findings);
+    string Kind, int Lines, int Elements, IReadOnlyList<string> Ids, IReadOnlyList<MarkupFinding> Findings,
+    IReadOnlyList<MarkupNode>? Nodes = null, IReadOnlyList<CssSimpleSelector>? Selectors = null,
+    IReadOnlyList<string>? Classes = null);

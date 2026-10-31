@@ -214,4 +214,117 @@ public sealed class MarkupAnalyzerTests
         var badKind = ResultAssert.Error(await service.AnalyzeAsync(root, "yaml", "info", null, 100, 100));
         Assert.Contains("kind must be", badKind);
     }
+
+    // ── the tag/class/id index and the simple-selector match ─────────────────
+
+    [Fact]
+    public void ThePageIndexReadsTagsClassesAndIds()
+    {
+        var analysis = MarkupAnalyzer.AnalyzeHtml(
+            """<div id="main" class="card wide"><span class="badge">x</span></div>""", "probe.html");
+
+        Assert.NotNull(analysis.Nodes);
+        Assert.Equal(2, analysis.Nodes.Count);
+
+        var div = analysis.Nodes[0];
+        Assert.Equal("div", div.Tag);
+        Assert.Equal("main", div.Id);
+        Assert.Contains("card", div.Classes);
+        Assert.Contains("wide", div.Classes);
+
+        Assert.Equal("span", analysis.Nodes[1].Tag);
+        Assert.Null(analysis.Nodes[1].Id);
+    }
+
+    [Fact]
+    public void OnlySimpleSelectorsAreIndexedAndComplexOnesStillDefineTheirClasses()
+    {
+        var analysis = MarkupAnalyzer.AnalyzeCss("""
+            .card { color: red; }
+            div.card { color: blue; }
+            #main { color: green; }
+            .a .b { color: black; }
+            .a:hover { color: grey; }
+            [data-x] { color: white; }
+            """, "probe.css");
+
+        var texts = analysis.Selectors!.Select(selector => selector.Text).ToArray();
+        Assert.Contains(".card", texts);
+        Assert.Contains("div.card", texts);
+        Assert.Contains("#main", texts);
+        Assert.DoesNotContain(".a .b", texts);
+        Assert.DoesNotContain(".a:hover", texts);
+        Assert.DoesNotContain("[data-x]", texts);
+
+        var classes = analysis.Classes!;
+        Assert.Contains("a", classes);
+        Assert.Contains("b", classes);
+        Assert.Contains("card", classes);
+    }
+
+    [Fact]
+    public async Task ASelectorThatMatchesNothingIsReported()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"),
+            """<div class="card" id="main"></div>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), """
+            .card { color: red; }
+            .missing { color: blue; }
+            #nope { color: green; }
+            section { color: black; }
+            .card .missing { color: grey; }
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "CSS0009", 100, 100));
+        var snippets = json.GetProperty("findings").EnumerateArray()
+            .Select(finding => finding.GetProperty("Snippet").GetString())
+            .ToList();
+
+        Assert.Equal(3, json.GetProperty("findingCount").GetInt32());
+        Assert.Contains(".missing", snippets);
+        Assert.Contains("#nope", snippets);
+        Assert.Contains("section", snippets);
+        Assert.DoesNotContain(".card", snippets);
+    }
+
+    [Fact]
+    public async Task AClassUsedButNeverDefinedIsReported()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"),
+            """<div class="hero card"></div>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), ".card { color: red; }");
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "HTML0015", 100, 100));
+        var finding = Assert.Single(json.GetProperty("findings").EnumerateArray());
+
+        Assert.Contains("hero", finding.GetProperty("Message").GetString());
+        Assert.Equal("index.html", finding.GetProperty("File").GetString());
+    }
+
+    [Fact]
+    public async Task SelectorChecksAreSkippedWhenOneSideIsMissing()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """<div class="hero"></div>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), ".missing { color: red; }");
+
+        var htmlOnly = ResultAssert.Json(await service.AnalyzeAsync(root, "html", "info", null, 100, 100));
+        Assert.Equal(0, htmlOnly.GetProperty("findingCount").GetInt32());
+        Assert.Contains("no stylesheet is in scope", htmlOnly.GetProperty("note").GetString());
+
+        var cssOnly = ResultAssert.Json(await service.AnalyzeAsync(root, "css", "info", null, 100, 100));
+        Assert.Equal(0, cssOnly.GetProperty("findingCount").GetInt32());
+        Assert.Contains("no HTML page is in scope", cssOnly.GetProperty("note").GetString());
+    }
 }
