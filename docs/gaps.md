@@ -16,9 +16,8 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (seventh revision: section 3 closes — `custom_inspections` (rules declared in the
-repository), `read_dot_settings`, `find_spelling_issues`, `naming_rules` and the warm loop
-`background_analysis` / `analysis_findings`, 327 → 333). The
+Last updated: 2026-10-31 (eighth revision: the test workflow closes — `debug_test`, `list_tests`,
+`run_affected_tests`, `continuous_testing` and `find_flaky_tests`, 333 → 338). The
 style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -31,7 +30,7 @@ style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection
 | [Language and platform scope](#1-language-and-platform-scope) | ❌ | High if your solution uses them | XAML and EF Core are covered now; a JS/SQL/F# codebase still gets almost nothing beyond text search |
 | [Debugger](#2-debugger) | ✅ | — | Implemented: 16 `debug_*` tools over netcoredbg (DAP). The engine is here; the window is the client's ([section 11](#11-ui-bound-features--not-applicable-by-design)) |
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ✅ | — | Severity, suppression, custom rules, `.DotSettings` reading, naming rules, spelling and a warm analysis loop exist; only the proprietary ReSharper id set is absent |
-| [Test workflow](#4-test-workflow) | ⚠️ | Medium | One test, re-run the failures, which tests reach a symbol, a scaffold class, branch coverage and mutation testing exist; debugging a test and continuous testing do not |
+| [Test workflow](#4-test-workflow) | ✅ | — | Running, discovery, debugging a test, continuous testing, affected tests, flaky detection and mutation testing all exist; only the explorer UI is the client's |
 | [Decompiled code as a workspace](#5-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
 | [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 26 action ids now (guards incl. dictionary/enum/index, wrap, braces, loops incl. invert, if→switch, both interpolation directions, digit separators, argument name); the long tail is still the long tail |
 | [Refactoring gaps](#7-refactoring-gaps) | ⚠️ | Low | 41 of Rider's main set are there (`remove_params` and bidirectional call hierarchy arrived); the remaining names are listed |
@@ -296,18 +295,16 @@ proprietary inspection catalogue itself.
 | Single test / rerun failed | ✅ `run_test` (testName/className/raw filter, TRX result) and `rerun_failed` (the recorded failures of the last run) |
 | Per-class/per-method line coverage | ✅ `get_test_coverage_map` (coverlet) |
 | Branch coverage | ✅ reported from Cobertura (`branch-rate`, per class and overall) |
-| Debug a test / run to a failing assertion | ❌ no first-class tool: launch the test host under `debug_launch` and set a breakpoint |
-| Continuous testing (run on save) | ❌ |
+| Debug a test / run to a failing assertion | ✅ `debug_test`: VSTest starts with `VSTEST_HOST_DEBUG`, the test host pid is read from its output, the DAP adapter attaches and the breakpoints are set before resuming. `debug_test(sessionId: …)` reads what the host printed (the test results) |
+| Continuous testing (run on save) | ✅ `continuous_testing`: action=start watches the source files' write times and runs the tests after a debounce; status is cheap to poll, run-now runs once |
 | "Which tests cover this symbol?" | ✅ `tests_covering_symbol` (direct references from test methods; indirect coverage is not traced) |
 | Which tests a change affects | ✅ `test_impact_analysis` (git diff → the symbols the changed files declare → the tests that reference them) |
 | Test scaffolding (generate a test class for a type) | ✅ `generate_tests` (xUnit, one `[Fact]` per public method, compiler-gated) |
-| Parameterized/data-driven test discovery | ⚠️ what the runner reports; no test-case model |
+| Parameterized/data-driven test discovery | ✅ `list_tests` reads the test attributes from the source and lists the inline `[InlineData]`/`[TestCase]`/`[DataRow]` rows with the framework; `MemberData`/`TestCaseSource`/`DynamicData` are named as dynamic |
 | Mutation testing (Stryker) | ✅ `run_mutation_tests` runs Stryker.NET and returns the mutation score, the killed/survived/timed-out/no-coverage counts, the worst files and the surviving mutants with file and line |
-| Test impact analysis (run only affected tests) | ⚠️ `test_impact_analysis` names the affected tests and a ready filter; running exactly them is the caller's `run_test` call |
-| Test explorer UI, grouping, flaky detection | 💀 / ❌ |
-
-What remains is the part that needs its own engine: continuous testing. Mutation testing now runs through
-`run_mutation_tests` (Stryker.NET; the external runner is a tool dependency, not a bundled engine).
+| Test impact analysis (run only affected tests) | ✅ `run_affected_tests` composes `test_impact_analysis` with the run: the affected tests are executed with the composed filter, or the answer is `no-affected-tests` |
+| Flaky detection | ✅ `find_flaky_tests` runs the selection several times and reports the tests whose outcome changed, apart from the ones that never passed |
+| Test explorer UI, grouping | 💀 the client renders the list `list_tests` returns |
 
 ---
 

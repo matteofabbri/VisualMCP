@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **333 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **338 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -231,6 +231,11 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `tests_covering_symbol` | Which test methods reference this symbol (semantic, `[Fact]`/`[Theory]`/`[Test]`/…), with file:line |
 | `generate_tests` | ✎ preview Scaffold an xUnit test class with one `[Fact]` per public method; compiler-gated, written into the test project |
 | `test_impact_analysis` | Which tests a change can affect: git diff → the symbols the changed files declare → the test methods that reference them, with a ready filter |
+| `run_affected_tests` | The same analysis, then runs exactly those tests with the composed filter (or answers `no-affected-tests`) |
+| `list_tests` | The tests the source declares: class, method, framework, parameterized, inline data rows; dynamic sources named |
+| `debug_test` | ✎ Debug one test: VSTest host under the DAP debugger (`VSTEST_HOST_DEBUG`), breakpoints set before resuming; `sessionId` reads the host output |
+| `continuous_testing` | ✎ start/stop/status/run-now: run the tests after a source save (debounced) and keep the last result |
+| `find_flaky_tests` | Run the selection several times and report the tests whose outcome changed, apart from those that never passed |
 | `run_mutation_tests` | ✎ Run Stryker.NET over a test project: mutation score, killed/survived/timed-out/no-coverage counts, the worst files and the surviving mutants with file and line |
 | `dotnet_publish` | Publish a project (RID, self-contained, single-file, output folder) with a structured result |
 | `add_project_reference` | ✎ Add a `<ProjectReference>` (`dotnet add reference`) and reload the workspace |

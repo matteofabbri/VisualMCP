@@ -15,6 +15,8 @@ public static class DebuggingServiceCollectionExtensions
         configure?.Invoke(options);
         services.AddSingleton(options);
         services.AddSingleton<IDebuggerService, DebuggerService>();
+        // Debug a test: VSTest started with VSTEST_HOST_DEBUG, then a normal session attached to its host.
+        services.AddSingleton<IDebugTestService, DebugTestService>();
         return services;
     }
 }

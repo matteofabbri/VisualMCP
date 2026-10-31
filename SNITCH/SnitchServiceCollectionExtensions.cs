@@ -215,6 +215,11 @@ public static class SnitchServiceCollectionExtensions
         // C# testing services (logic moved from the MCP tool layer).
         services.AddSingleton<Languages.CSharp.Testing.IGetTestCoverageMapService, Languages.CSharp.Testing.GetTestCoverageMapService>();
         services.AddSingleton<Languages.CSharp.Testing.IRunTestsService, Languages.CSharp.Testing.RunTestsService>();
+        // Test workflow extras: discovery from the source, flaky detection and continuous testing. The
+        // affected-tests runner needs ITestWorkflowService, which the host registers.
+        services.AddSingleton<Languages.CSharp.Testing.ITestDiscoveryService, Languages.CSharp.Testing.TestDiscoveryService>();
+        services.AddSingleton<Languages.CSharp.Testing.IFlakyTestsService, Languages.CSharp.Testing.FlakyTestsService>();
+        services.AddSingleton<Languages.CSharp.Testing.IContinuousTestingService, Languages.CSharp.Testing.ContinuousTestingService>();
 
         // Runtime services.
         services.AddSingleton<Runtime.IHttpInvokeService, Runtime.HttpInvokeService>();

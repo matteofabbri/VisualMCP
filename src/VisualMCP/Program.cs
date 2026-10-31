@@ -186,6 +186,10 @@ static async Task RunServerAsync(string[] args)
         "-> tests_covering_symbol; scaffold an xUnit class for a type (one [Fact] per public method, compiler-gated) -> " +
         "generate_tests; what the suite does NOT catch -> run_mutation_tests (Stryker.NET: mutation score, survivors with file and line). " +
         "Coverage maps now include branch coverage.\n" +
+        "- The rest of the test workflow: discover the tests and their inline data rows without running -> list_tests; " +
+        "debug ONE test (VSTest host under the debugger, breakpoints set before resuming) -> debug_test; run exactly the " +
+        "tests a change affects -> run_affected_tests; run again on every save -> continuous_testing; find the tests " +
+        "whose outcome changes between runs -> find_flaky_tests.\n" +
         "- Add/remove projects to/from the solution (.sln/.slnx) -> add_projects_to_solution / remove_projects_from_solution.\n" +
         "- Modernize the solution: add Aspire (status, install the templates if missing, scaffold AppHost + ServiceDefaults, wire and verify) -> aspire; move the projects to a newer target framework with a build gate and rollback -> update_framework; upgrade every outdated NuGet package (Central Package Management aware), optionally with the framework bump, in one gated pass -> update_solution. Prefer update_solution over one update_nuget_package call per package when modernising a whole solution.\n" +
         "- Git: inspect state -> git_status / git_log / git_diff; stage -> git_stage; commit -> git_commit; new branch -> git_create_branch. (No push/force — use run_command for those.)\n" +
@@ -316,6 +320,9 @@ static async Task RunServerAsync(string[] args)
             // symbol, and a compile-gated test class scaffold.
             services.AddSingleton<Snitch.Languages.CSharp.Testing.ITestWorkflowService,
                                   Snitch.Languages.CSharp.Testing.TestWorkflowService>();
+            // Running the tests a change affects: it composes test_impact_analysis with the run.
+            services.AddSingleton<Snitch.Languages.CSharp.Testing.IAffectedTestsService,
+                                  Snitch.Languages.CSharp.Testing.AffectedTestsService>();
 
             // The call hierarchy in both directions (find_callers is one level).
             services.AddSingleton<Snitch.Languages.CSharp.Navigation.ICallHierarchyService,

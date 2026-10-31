@@ -6,7 +6,7 @@ C# punishes guessing. Overloads, overrides, generics, partial types, interface d
 misses all of them, so your AI reads the wrong thing, renames the wrong symbol, and breaks the build two
 hours later. You already know the answer to this problem: it is called an IDE. VisualMCP gives the
 agent the IDE's brain — Roslyn's semantic model, the real MSBuild project graph, a debugger, a profiler,
-a decompiler — as **333 tools in one local process** speaking MCP to Claude Code, ZCode, or any MCP
+a decompiler — as **338 tools in one local process** speaking MCP to Claude Code, ZCode, or any MCP
 client.
 
 **Stop your agent from guessing. Give it a compiler.**
@@ -79,7 +79,7 @@ The one after that joins git history with complexity and says which file a refac
 
 ## Safety is the product
 
-You do not hand write access to an AI because it has 333 tools. You hand it over because of four
+You do not hand write access to an AI because it has 338 tools. You hand it over because of four
 invariants that hold across every one of them:
 
 - **Semantic, not textual.** Every write is a Roslyn operation on the real project, never a regex over
@@ -116,9 +116,9 @@ Your agent can reason about a Ghidra recovery and a Razor page with the same voc
 
 ## The receipts
 
-- **333 tools** — and `capability_report` prints the live count from the running build, so you never
+- **338 tools** — and `capability_report` prints the live count from the running build, so you never
   have to take the README's word for it.
-- **907 tests, all green** — the suite that gates every release.
+- **917 tests, all green** — the suite that gates every release.
 - **97 of 126** Microsoft code-style ids rewritten under the compiler gate; the other 29 are delegated to
   a dedicated tool, not applicable to C#, or a refactoring rather than a rewrite — each named, never
   silently ignored.
