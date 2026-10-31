@@ -72,18 +72,30 @@ so review the diff every dry run returns. `IDE0055` (formatting) stays opt-in an
 
 ## Refactoring
 
-- Refactorings **refuse rather than approximate**. Common refusals: a method group or `nameof` use that a
-  rename would change, an object initializer that a factory cannot express, a member selection that is
-  not self-contained, an interface implementation whose signature must stay identical.
-- Some operations are deliberately **syntax-level** (for example `convert_to_primary_constructor` when
-  the constructor is a pure set of assignments). Anything more complex is refused, not guessed.
-- **Undo is the edit history and Git**, not an in-editor undo stack. `revert_edit` refuses if the file
-  changed after the edit.
-- **Not every operation has a dry run.** The tool schema says whether `dryRun` exists and its default;
-  the write-through family (`apply_rename`, `change_signature`, `safe_delete`, `generate_members`,
-  `optimize_usings`, `reorder_members`, …) changes files immediately.
-- **Parallel edits must be separated by path.** `run_plan` honours `paths`; two tools called concurrently
-  by hand do not.
+The refactorings are semantic, compiler-gated, and refuse what they cannot do safely. What used to be
+listed here as limits are exactly those guarantees, so they are stated as guarantees; operations the
+engine does not offer at all are tracked in
+[What is missing → Refactoring gaps](../../../docs/gaps.md#7-refactoring-gaps), not here.
+
+- **They refuse rather than approximate.** A method group or `nameof` use that a rename would change, an
+  object initializer a factory cannot express, a member selection that is not self-contained, an
+  interface implementation whose signature must stay identical: each is refused with the reason instead
+  of producing a broken build.
+- **A stale or contended write is refused, never lost.** Every write goes through one guarded path: it
+  re-reads the file, refuses when the file on disk no longer matches the solution (an editor, or another
+  tool call with an older plan), and serialises the check-and-write per file path. Two calls that edit
+  the same file cannot lose an update — the second is refused and says why. `run_plan`'s `paths` still
+  keeps overlapping steps apart; the gate is the safety net behind it.
+- **Undo is the edit history and Git.** `edit_history` records every write this server made, `revert_edit`
+  restores one, and it refuses when the file changed after that edit — the guarantee that a revert never
+  silently discards newer work. There is no in-editor undo stack because there is no editor (section 11).
+- **Dry run follows the tool's schema.** The preview-first family (`simplify_code`, `apply_code_fix`,
+  `razor_edit`, most refactorings) defaults to it and returns the diff; the write-through family
+  (`apply_rename`, `change_signature`, `safe_delete`, `generate_members`, `optimize_usings`,
+  `reorder_members`, …) applies immediately and is recorded, so it is still revertible.
+- **Some operations are deliberately syntax-level**, for example `convert_to_primary_constructor` when the
+  constructor is a pure set of assignments. Anything more complex is refused, not guessed — a refactoring
+  that changes behaviour is worse than one that does not run.
 
 ## Razor and Blazor
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using Snitch.Platform;
 using Snitch.Workspace;
@@ -13,15 +14,27 @@ namespace Snitch.Languages.CSharp.Refactoring;
 /// </summary>
 /// <remarks>
 /// Public because the metacoding service (in <c>Snitch.Metacode</c>) writes generated code through the
-/// same guarded path: the stale-file check and the line-ending normalisation must not have a second,
-/// subtly different implementation.
+/// same guarded path: the stale-file check, the per-path serialisation and the line-ending normalisation
+/// must not have a second, subtly different implementation.
 /// </remarks>
 public static class RefactoringFileWriter
 {
+    /// <summary>
+    /// One gate per file path: the check-and-write section is serialised, so two tool calls that edit the
+    /// same file cannot both pass the stale check and then overwrite each other. The second sees the
+    /// first one's text on disk and is refused with the reason — a visible failure, never a lost update.
+    /// <c>run_plan</c>'s <c>paths</c> still keeps overlapping steps apart; this gate is the safety net.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> WriteGates =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static SemaphoreSlim GateFor(string path) =>
+        WriteGates.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+
     /// <summary>Writes the file and replaces the document's text in the active solution.</summary>
     /// <exception cref="InvalidOperationException">
-    /// The file on disk no longer matches the modelled text: someone edited it after the solution was
-    /// loaded, and writing would silently discard that edit.
+    /// The file on disk no longer matches the modelled text: an editor changed it, or a concurrent tool
+    /// call wrote an older plan, and writing would discard that change.
     /// </exception>
     public static async Task WriteAndUpdateAsync(
         IRoslynWorkspace workspace, Document document, string newText, CancellationToken cancellationToken = default)
@@ -31,22 +44,33 @@ public static class RefactoringFileWriter
         // full-file diff — or, on Linux, from injecting CRLF into an LF repository.
         var text = document.FilePath is null ? newText : FileText.NormalizeFor(document.FilePath, newText);
 
-        if (document.FilePath is not null)
+        if (document.FilePath is null)
         {
-            var modelled = (await document.GetTextAsync(cancellationToken)).ToString();
+            var detached = await document.GetTextAsync(cancellationToken);
+            workspace.TryUpdateDocument(document.Id, SourceText.From(text, detached.Encoding ?? Encoding.UTF8));
+            return;
+        }
+
+        var gate = GateFor(Path.GetFullPath(document.FilePath));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var modelledText = await document.GetTextAsync(cancellationToken);
             var onDisk = await File.ReadAllTextAsync(document.FilePath, cancellationToken);
-            if (!string.Equals(modelled, onDisk, StringComparison.Ordinal))
+            if (!string.Equals(modelledText.ToString(), onDisk, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    $"{Path.GetFileName(document.FilePath)} changed on disk after the solution was loaded; " +
-                    "refusing to overwrite it. Call load_solution, then retry.");
+                    $"{Path.GetFileName(document.FilePath)} changed on disk after this edit was planned " +
+                    "(an editor, or a concurrent tool call). Refusing to overwrite it; reload the solution, then retry.");
             }
 
             await FileText.WriteAsync(document.FilePath, text, cancellationToken);
+            workspace.TryUpdateDocument(document.Id, SourceText.From(text, modelledText.Encoding ?? Encoding.UTF8));
         }
-
-        var previous = await document.GetTextAsync(cancellationToken);
-        workspace.TryUpdateDocument(document.Id, SourceText.From(text, previous.Encoding ?? Encoding.UTF8));
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>
