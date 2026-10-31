@@ -2,9 +2,9 @@
 
 # Contributing
 
-VisualMCP is **source-available** under the [PolyForm Noncommercial License 1.0.0](../../LICENSE): free for
+VisualMCP is **source-available** under the [PolyForm Noncommercial License 1.0.0](../LICENSE): free for
 noncommercial use, with commercial use requiring a separate paid license. Contributions are welcome
-under the terms in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+under the terms in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Before you start
 
@@ -33,8 +33,7 @@ platform.
 | `SNITCH/Libraries/Snitch.Metacode` | The metacode model, frontends, renderers, decompilation |
 | `SNITCH/Libraries/Snitch.Profiling` | EventPipe/ClrMD profiling |
 | `src/VisualMCP.Tests` | xunit suite (300+ test methods) |
-| `docs/public` | This user-facing documentation |
-| `docs/` | Deeper engine notes for contributors |
+| `docs/` | This documentation: the user guide (`guides/`, `reference/`) and the engineering notes |
 
 ## Architecture rules
 
@@ -100,7 +99,7 @@ you agree that:
 4. the contribution is provided "as is", without warranty.
 
 If you do not agree, do not submit a contribution. The full text is in
-[CONTRIBUTING.md](../../CONTRIBUTING.md); it is provided for convenience and is not legal advice.
+[CONTRIBUTING.md](../CONTRIBUTING.md); it is provided for convenience and is not legal advice.
 
 ---
 

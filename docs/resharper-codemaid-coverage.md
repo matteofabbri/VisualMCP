@@ -246,7 +246,8 @@ This revision added the last of each open family: `js_files`/`analyze_js`, `mark
 `analyze_markup`, `yaml_files`/`analyze_yaml`, `fsharp_files`/`analyze_fsharp`, `trace_data_flow` and
 `find_throw_sites` (ten tools, 387 → 397), the five context-action ids above and CS1729 in
 `create_from_usage`; then `commit_lint` (Conventional Commits as data, and the gate on
-`git_commit conventional=true`) brought the count to **398**.
+`git_commit conventional=true`) brought the count to **398**, and `disk_usage` — the disk report, safe
+cleanup and redirect policy of `CAPABILITY_MAP.md` §21 — to **399**.
 
 The VCS row that used to be here closed on 2026-10-31: `git_conflicts` is the 3-way merge assistant
 (the hunks as data, resolved per side and staged), `git_rebase action=plan` is the interactive rebase

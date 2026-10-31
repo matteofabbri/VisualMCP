@@ -16,72 +16,9 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (twentieth revision: **section 9 gains its two remaining points**). `commit_lint`
-lints a message, one revision or a whole range against Conventional Commits (type, scope, description,
-breaking marker, footers; nine rule ids) and `git_commit conventional=true` refuses a non-conforming
-message instead of writing it. `git_host` now reviews (`approve`/`request-changes`/`comment`, with
-GitLab's missing request-changes vote stated instead of faked), closes, reopens and edits merge/pull
-requests on GitLab, Azure DevOps and Bitbucket Cloud, so the review workflow is no longer GitHub-only.
-**397 → 398 tools.** The nineteenth revision: **the last four open points of the ReSharper & CodeMaid
-coverage page close**. JavaScript/TypeScript, HTML/CSS and YAML gain the scanned layer SQL already had —
-`js_files`/`analyze_js` (JS0001–JS0016, modules and exports), `markup_files`/`analyze_markup`
-(HTML0001–HTML0014, CSS0001–CSS0008), `yaml_files`/`analyze_yaml` (YAML0001–YAML0008, plus the
-`kind`/`apiVersion`/`name` of a manifest) — and F# a declaration scanner (`fsharp_files`/
-`analyze_fsharp`, FS0001–FS0010). `trace_data_flow` is a taint walk from request sources to the SQL,
-process, file, redirect, XSS and SSRF sinks across call levels; `find_throw_sites` answers the
-"methods that throw X" query with direct throwers, transitive callers and catching boundaries.
-`context_action` gained `merge_patterns`, `concat_to_stringbuilder`, `linq_query_to_method`,
-`linq_method_to_query` and `convert_to_extension_block` (41 ids), and `create_from_usage` CS1729.
-**387 → 397 tools.** The eighteenth revision:
-**the build settings close the last section 10 rows**.
-New tools: `analyze_binlog` (an MSBuild `.binlog` — or `dotnet build -bl` and then its analysis — with
-errors/warnings by project and line, per-project and per-target durations, the target that dominates the
-wall clock and the project graph), `project_properties` (the **evaluated** MSBuild view through
-`dotnet msbuild -getProperty`/`-getItem`, plus `set`/`unset` of one property in the project or the nearest
-`Directory.Build.props`, build-gated), `run_config` (launch shapes stored in `.visualMCP/run-configs.json`,
-applied by `run_project configName=…`), `launch_settings` and `publish_profile` (`launchSettings.json` and
-`*.pubxml` as data, previewed, preserving what nobody touched) and `nuget_sources` (package sources and
-credentials through `dotnet nuget`, never echoed back). **381 → 387 tools.** The seventeenth revision:
-**profiling closes the four Visual Studio gaps and joins
-the measurements with the metacode AST**. New tools: `profile_root_cause` (a CPU/allocation/blocked/
-exception site matched to the declaration the AST holds for that line, with the loop chain and nesting,
-the LINQ materialiser per iteration, the allocation or string concatenation inside the loop, the
-`Task.Result`/`.Wait()`; the file is translated from disk by the same frontends as the solution index),
-`profile_async` (`System.Threading.Tasks.TplEventSource`: exact await durations, exceptional tasks,
-`IncompleteAsyncMethod`), `profile_database` (EF Core/SqlClient/Npgsql/MySql/SQLite/Oracle/Db2 commands,
-durations, normalised shapes and the N+1 signal), `profile_events` (Events Viewer for any provider) and
-`profile_instrumentation` (Mono.Cecil IL rewrite with an injected EventSource probe, then exact
-inclusive/exclusive times; `action=instrument|analyze`). New presets `async`, `database` and
-`instrumentation`; a new `Snitch.Profiling.Probe` project. **376 → 381 tools.** The sixteenth revision closed the
-2026-06-03 analysis backlog: `get_quality_trend` compares two revisions — or `to=worktree` — measured with one syntactic rule set
-(average complexity per method, methods over 10/20, long methods, TODO markers, with size as context) and
-answers improved/regressed/unchanged with the files that moved; nothing is compiled, so a revision that no
-longer builds is still comparable. `find_missing_validation` gained the DTO half: a public class or record
-with no behaviour and at least two settable properties whose properties carry no
-`System.ComponentModel.DataAnnotations` attribute. **375 → 376 tools.** The fifteenth revision closed the last ReSharper/CodeMaid rows in the coverage
-page. `templates` (18 live, 10 postfix and 8 file templates, plus a team store in
-`.visualMCP/templates.json`) and `layout_code` (CodeMaid's comment reflow, line joining and blank-line
-rules) are new tools; `code_cleanup` takes a named **profile** (built-in and team, `saveProfileAs`
-writes one), `find_symbol` falls back to a fuzzy subsequence, `create_from_usage` covers CS0117 and
-CS1501/CS7036 next to the original three, and `context_action` gained ten ids (merge/split conditions,
-join a null check with its use, `var` and back, split declaration, remove braces, nullable migration,
-digit separators, `ConfigureAwait(false)`). **373 → 375 tools.** The fourteenth revision closed section
-13 — the workaround table is gone because each of its rows became either a tool or a documented
-boundary. New families: **Kubernetes and Helm** (`k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`,
-`k8s_logs`, `k8s_apply`, `k8s_delete`, `k8s_rollout`, `k8s_helm` — 9), **Node / JavaScript / TypeScript**
-(`node_info`, `node_install`, `node_script`, `node_typecheck`, `node_lint`, `node_outdated`,
-`node_audit` — 7, with `tsc` and `eslint` parsed into diagnostics) and **SQL** (`sql_files`,
-`analyze_sql` with SQL0001–SQL0010 — 2). The thirteenth revision closed section 1.2 — Visual Basic is no
-longer only a style layer. The symbol index, `structural_search`,
-`format_code`/`optimize_usings`/`code_cleanup`, the inspection packs that ship VB analyzers, dead code /
-code smells / async / performance / complexity and the refactorings that are not C#-idiom-specific now
-read `.vb`; no new tools there, the same build covers both languages, and that batch also closed
-section 9 — `git_conflicts` (the conflict model), `git_rebase action=plan` (interactive rebase as data),
-`git_patch` (named shelves), `git_host` (GitLab / Azure DevOps / Bitbucket), `gh_pr action=review` with
-line-anchored comments + `action=checks`, `gh_branch_protection` and `code_review` — and section 7
-closed `make_non_static`, `transform_parameters`, `move_type_to_nested_scope` and `generify`
-(346 → 355). The style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection
-figure is the documented ~800 from five packs.
+Last updated: 2026-10-31 — **399 tools** in the running build (`capability_report` prints the live
+count). The batches that closed rows on this page, each with the count it produced, are in
+[§15 Revision log](#15-revision-log); anything older is in `git log`.
 
 ---
 
@@ -130,7 +67,7 @@ this section keeps.
 
 | Language / platform | What works today | What is missing |
 |---|---|---|
-| **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](public/reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
+| **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
 | **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup` including member reordering); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`, `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`); **refactorings and generation** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `generate_docs`, `implement_members`, `reduce_complexity`/`fix_complexity`); `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; the context actions are C#-shaped and have no VB matcher; `reduce_complexity` reports extract-method as a hand edit |
 | **F#** | `fsharp_files` — the declaration inventory F# has no symbol index for (modules, types, top-level functions, opens); `analyze_fsharp` — FS0001–FS0010 over masked source (tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open`); `build_project` returns the F# compiler's own diagnostics (FS####); `run_tests` runs F# tests | No semantic model: F# is not a Roslyn language, so no symbols, references, refactorings, inspections or complexity. The scanner resolves nothing |
 | **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `xaml_pages` (inventory), `analyze_xaml` (XAML0001–XAML0009), `xaml_navigate` (names, resources, styles, handlers); the C# code-behind is fully analysed | No compiled-XAML validation: binding paths, styles and tag helpers are not proved; no refactoring across markup and C#; no designer or preview |
@@ -148,7 +85,7 @@ this section keeps.
 
 C# is the only language with a complete tool surface, and it is where every other documentation page
 applies. Its own limits are not language gaps and live in
-[Limits → Analysis](public/reference/limits.md#analysis): reflection-only code looks dead, source
+[Limits → Analysis](reference/limits.md#analysis): reflection-only code looks dead, source
 generators are outside the model, generated files may or may not appear, and anything that crosses the
 solution boundary is metadata rather than analysed source.
 
@@ -223,7 +160,7 @@ What is still missing:
 | `simplify_code` | ⚠️ VB has its own `simplify_vb_code` with 15 ids; the other 34 are returned with a reason |
 | `structural_search`, `format_code`, `optimize_usings` | ✅ both languages; `code_cleanup` covers VB for style/usings/regions/format/reorder |
 | `inspect_code` packs, `inspection_baseline` | ⚠️ the packs that ship VB analyzers run (netanalyzers, house); the C#-only packs report that they do not cover the project, and there is no VB fixer surface: no analyzer in those packs ships a Visual Basic `CodeFixProvider`, so `apply_code_fix` has nothing to run |
-| Context actions (`context_action`) | ❌ the ~45 actions are C#-shaped (`add_braces`, `foreach_to_for`, `invert_loop`, `if_to_switch`, `string_to_raw`, …): VB spells each of them differently, and each one needs its own matcher, so none is written |
+| Context actions (`context_action`) | ❌ the 41 action ids are C#-shaped (`add_braces`, `foreach_to_for`, `invert_loop`, `if_to_switch`, `string_to_raw`, …): VB spells each of them differently, and each one needs its own matcher, so none is written |
 | Symbol index (`reference_index`) | ✅ |
 | Dead code, code smells, async/performance patterns, complexity report | ✅ |
 | Metrics, cohesion, clones, Big-O (`get_metrics`, `get_cohesion_metrics`, `find_duplicate_code`, `analyze_complexity`) | ✅ |
@@ -282,7 +219,9 @@ Still missing, because it needs a JavaScript/TypeScript frontend:
 
 - no parser or module graph, so no `find_symbol`, references, callers, rename or refactoring *in* the JS/TS;
 - no JSX/TSX component analysis, props/state checks or bundler configuration understanding;
-- no CSS/HTML analysis (those files remain full-text);
+- no DOM for HTML/CSS: `markup_files`/`analyze_markup` scan tags and apply HTML0001–HTML0014 and
+  CSS0001–CSS0008 (section 1's table), but selectors are not matched against a document and CSS-in-JS,
+  CSS isolation and formatting are not analysed;
 - no browser preview or DOM inspection — the `signal_r_*` tools exercise a SignalR hub at runtime, which
   is not JavaScript analysis.
 
@@ -296,7 +235,8 @@ a fix.
 
 What it deliberately does not do, because it is a pattern scanner and not a dialect parser: no schema
 object model, no validation against a database, no formatting, no execution, no query-plan capture, no
-schema comparison, and no language-injection analysis for SQL embedded in C# strings.
+schema comparison, and no language injection — SQL embedded in a C# string is reached by `trace_data_flow`
+as a sink, but its text is not parsed or highlighted as SQL.
 
 EF Core is visible only from the C# side: `DbContext`, `DbSet<>`, entity classes and configuration
 classes are ordinary C# and get the full C# tool surface. **Implemented** (2026-10-30): `ef_migrations`
@@ -327,7 +267,8 @@ Missing:
 - Kubernetes: `k8s_*` wraps kubectl (status, context, get as rows, describe, logs, apply/delete/rollout
   with `confirm`) and `k8s_helm` wraps releases; still missing are manifest/chart schema validation,
   kustomize, and exec/port-forward;
-- YAML schema validation for compose/k8s manifests (YAML is only full-text indexed).
+- YAML schema validation for compose/k8s manifests: `yaml_files`/`analyze_yaml` read the structure
+  (YAML0001–YAML0008) and a manifest's `kind`/`apiVersion`/`name`, but no schema is applied.
 
 ### 1.8 Razor and Blazor
 
@@ -355,12 +296,12 @@ workaround: put logic in the code-behind and it is analysed.
 |---|---|
 | ASP.NET Core (MVC, Razor Pages, Minimal APIs, Web API) | ✅ C# at source level; Razor markup by scanner. No runtime request tracing (profiling is process-level) |
 | WinForms | ⚠️ C# is analysed; `.Designer.cs` is generated code and several analyses skip it; no designer |
-| WPF / WinUI 3 / MAUI / Avalonia / UWP | ⚠️ C# analysed; XAML is text (section 1.4) |
+| WPF / WinUI 3 / MAUI / Avalonia / UWP | ⚠️ C# analysed; XAML by the markup layer (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) — bindings, styles and tag helpers are not compiled (section 1.4) |
 | gRPC | ⚠️ generated C# analysed; `.proto` files are not parsed |
 | SignalR | ⚠️ hubs are C#; no hub-contract analysis. Runtime client tools (`signal_r_*`) exist to exercise a hub |
 | Unity / Godot / MAUI workloads | ⚠️ whatever MSBuild can restore is loaded; no specialist project support |
 | Legacy non-SDK projects | ⚠️ loaded through MSBuild; `update_framework` deliberately leaves `net4x`/`netstandard` alone |
-| Solution/project creation | ❌ no `dotnet new`-style templates; `aspire` is the only scaffolder, `add_projects_to_solution` adds existing projects |
+| Solution/project creation | ❌ no project templates: `templates` creates a file inside an existing project, `aspire` is the only project scaffolder, and `add_projects_to_solution` adds existing projects |
 
 ---
 
@@ -499,7 +440,7 @@ What that does not cover:
 | Editor policy | naming rules, and `use_var`/`use_explicit_type` as explicit actions (`IDE0007`/`IDE0008` are deliberately not style rewrites), are covered; still missing code-style enforcement on save and licence-header insertion (`IDE0073` needs the repository's template) |
 | Regex and injections | regex completion/validation, and language injections (SQL/HTML/CSS/JSON embedded in a C# string is just text) |
 
-The split matters when comparing numbers with ReSharper: **87 style ids ≠ 87 context actions**, and
+The split matters when comparing numbers with ReSharper: **97 style ids ≠ 41 context actions**, and
 **~800 inspection ids ≠ 800 fixes**. Four families exist (style rewrites, analyzer code fixes, the
 hand-written context-action ids, and the eight mechanical compiler fixes in `fix_diagnostics`). The
 compiler family is the one that had **no** automatic fix until 2026-10-30; it now covers the shapes that
@@ -634,7 +575,8 @@ as data; `nuget_sources` manages the package sources and their credentials throu
 remains:
 
 - MSIX, ClickOnce, WiX/installer authoring;
-- a `.http` request file runs through `run_http_file`, and `.http` files edited elsewhere are text;
+- no `.http` request authoring: `run_http_file` sends the requests a `.http`/`.rest` file contains, but
+  the file itself is edited as text and no schema validates it;
 - no deployment targets (IIS, Azure, containers, Kubernetes);
 - **no standalone command-line tool** for a pipeline (the equivalents of ReSharper's `inspectcode`,
   `dupfinder`, `cleanupcode`): the MCP server must be driven by an MCP client, so CI needs a harness;
@@ -667,19 +609,16 @@ comparison with an IDE is honest.
 
 ## 12. Beyond ReSharper: SonarQube, CodeScene and the profiling IDEs
 
-The [capability map](../CAPABILITY_MAP.md#priority-gaps-vs-sonarqubecodescene) tracks these separately;
-they are repeated here because they are also "what is missing" for a .NET team:
+These families are covered, so what this section keeps is the **residual boundary** of each one — the
+part of the SonarQube/CodeScene/IDE feature that is still absent. The
+[capability map](../CAPABILITY_MAP.md#priority-gaps-vs-sonarqubecodescene) tracks them separately.
 
-| Gap | What it would need |
-|---|---|
-| Taint analysis (SQL injection/XSS across the data flow) | ✅ `trace_data_flow` (2026-10-31): request sources — query/form/header/cookie/body/route data, console and environment input, model-bound action parameters — followed through assignments and call arguments to the SQL, process, file, redirect, XSS and SSRF sinks, with the CWE and the path. The sanitizer list is explicit and the reach (locals, parameters, call arguments to a caller-set depth) is stated in every answer |
-| Mutation testing | ✅ `run_mutation_tests` (Stryker.NET) returns the mutation score and the survivors; the runner itself is an external tool the user installs |
-| Database profiling, async/event-source viewers, instrumentation profiling | ✅ Closed 2026-10-31: `profile_database` (EF Core/SqlClient/… commands, durations, N+1 shapes), `profile_async` (TplEventSource await durations, incomplete state machines), `profile_events` (any provider's inventory, the Events Viewer) and `profile_instrumentation` (IL rewrite with an injected probe: exact call counts and inclusive/exclusive times). `profile_root_cause` then joins the measurements with the solution's metacode AST to name the loop/LINQ/allocation that produced them. |
-
-The **Git-aware churn hotspot** row closed on 2026-10-30: `git_churn_hotspots` joins
-`git log --numstat` over a bounded window with the Roslyn complexity ranking and scores each file as
-commits × the cyclomatic complexity of its worst method. It is static (static model + history), not a
-runtime measurement.
+| Family | Covered by | What is still outside |
+|---|---|---|
+| Taint analysis (SQL injection/XSS across the data flow) | `trace_data_flow` (2026-10-31): request sources — query/form/header/cookie/body/route data, console and environment input, model-bound action parameters — followed through assignments and call arguments to the SQL, process, file, redirect, XSS and SSRF sinks, with the CWE and the path | A value parked in a field, a database or a queue is not followed; the sanitizer list is explicit, so a sanitizer it does not name is a false positive to review; the answer is candidates with their path, not proofs |
+| Mutation testing | `run_mutation_tests` (Stryker.NET): mutation score, killed/survived/timed-out/no-coverage counts and the surviving mutants with file and line | The runner is an external tool the user installs; the product drives it, it does not replace it |
+| Database profiling, async/event-source viewers, instrumentation profiling | `profile_database` (EF Core/SqlClient/… commands, durations, N+1 shapes), `profile_async` (TplEventSource await durations, incomplete state machines), `profile_events` (any provider's inventory, the Events Viewer) and `profile_instrumentation` (IL rewrite with an injected probe: exact call counts and inclusive/exclusive times); `profile_root_cause` joins the measurements with the solution's metacode AST | Process-level only: no request tracing and no distributed trace across services; the root-cause join needs the PDB and the source on disk |
+| Git-aware churn hotspots | `git_churn_hotspots` (2026-10-30): `git log --numstat` over a bounded window × the cyclomatic complexity of the file's worst method | Static (model + history), not a runtime measurement |
 
 ---
 
@@ -692,8 +631,8 @@ where the answer stops and why.
 
 | You need | The tool — or where the boundary is |
 |---|---|
-| Read, search or edit a file no frontend reads (YAML, JSON, config, Markdown, C/C++, Python, an OData/XML manifest) | `read_file`/`read_files`, `search_text`, `text_index`. The text layer **is** the design for a file with no syntax model; it is not a missing parser. Python and C/C++ can also be lowered with `translate_python_file`/`translate_cpp_file` for comparison, not for analysis |
-| HTML/CSS/SCSS diagnostics | `markup_files` and `analyze_markup` (HTML0001–HTML0014, CSS0001–CSS0008). Tags are scanned with a quote-aware reader and CSS is masked; no DOM and no selector resolution (§1.6) |
+| Read, search or edit a file no frontend reads (JSON, config, Markdown, C/C++, Python, an OData/XML manifest) | `read_file`/`read_files`, `search_text`, `text_index`. The text layer **is** the design for a file with no syntax model; it is not a missing parser. Python and C/C++ can also be lowered with `translate_python_file`/`translate_cpp_file` for comparison, not for analysis |
+| HTML/CSS/SCSS diagnostics | `markup_files` and `analyze_markup` (HTML0001–HTML0014, CSS0001–CSS0008). Tags are scanned with a quote-aware reader and CSS is masked; no DOM and no selector resolution (§1.5) |
 | XAML diagnostics and navigation | `xaml_pages`, `analyze_xaml` (XAML0001–XAML0009), `xaml_navigate`. Bindings, styles and tag helpers are not compiled, so they are not proved |
 | SQL diagnostics | `sql_files` and `analyze_sql` (SQL0001–SQL0010). A pattern scanner, not a dialect parser: no schema, no execution, no query plan (§1.6) |
 | JS/TS diagnostics and build | `node_info`/`node_install`/`node_script` for the toolchain; `node_typecheck` (tsc → `TSxxxx`) and `node_lint` (eslint → findings) for the diagnostics; `node_outdated`/`node_audit` for the dependency health; `js_files` and `analyze_js` (JS0001–JS0016) for the source itself. No module graph or type model (§1.5) |
@@ -719,3 +658,23 @@ where the answer stops and why.
 - When a new tool ships, check whether it removes a row here — the two pages are meant to sum to the same
   product, not to be two independent claims.
 - "Not applicable" rows stay: they are the boundary of the product, not a backlog.
+
+---
+
+## 15. Revision log
+
+The batches that closed rows on this page, newest first. A count is the live inventory at the end of the
+batch (`capability_report` prints the current one); the per-feature record of each batch is in
+[CAPABILITY_MAP.md](../CAPABILITY_MAP.md).
+
+| # | Date | What closed | Tools |
+|---:|---|---|---|
+| 21 | 2026-10-31 | **Disk hygiene**: `disk_usage` — the report of every folder a .NET session grows, safe cleanup per target, and a redirect guard persisted in `.visualMCP/disk-policy.json` | 398 → 399 |
+| 20 | 2026-10-31 | **Section 9's last points**: `commit_lint` (Conventional Commits as data) and `git_commit conventional=true`; `git_host` gains `review-pr`, `close-pr`, `reopen-pr` and `update-pr` on GitLab, Azure DevOps and Bitbucket | 397 → 398 |
+| 19 | 2026-10-31 | **The last four open points of the coverage page**: the scanned layers for JS/TS, HTML/CSS, YAML and F# (`js_files`/`analyze_js`, `markup_files`/`analyze_markup`, `yaml_files`/`analyze_yaml`, `fsharp_files`/`analyze_fsharp`), `trace_data_flow`, `find_throw_sites`, five context actions and CS1729 | 387 → 397 |
+| 18 | 2026-10-31 | **The last section 10 rows** — the build settings: `analyze_binlog`, `project_properties`, `run_config`, `launch_settings`, `publish_profile`, `nuget_sources` | 381 → 387 |
+| 17 | 2026-10-31 | **Profiling**: `profile_root_cause` joined to the metacode AST, `profile_async`, `profile_database`, `profile_events`, `profile_instrumentation` | 376 → 381 |
+| 16 | 2026-10-31 | `get_quality_trend`; the DTO half of `find_missing_validation` | 375 → 376 |
+| 15 | 2026-10-31 | `templates` and `layout_code`, `code_cleanup profile=`, the fuzzy `find_symbol` fallback, ten context actions, CS0117/CS1501/CS7036 in `create_from_usage` | 373 → 375 |
+| 14 | 2026-10-31 | **Section 13**: the `k8s_*` family (9), the `node_*` family (7), `sql_files`/`analyze_sql` | 355 → 373 |
+| 13 | 2026-10-31 | **Section 1.2** (Visual Basic as a language surface), **section 7** (`make_non_static`, `transform_parameters`, `move_type_to_nested_scope`, `generify`) and most of **section 9** (`git_conflicts`, `git_rebase action=plan`, `git_patch`, `git_host`, `gh_pr` review/checks, `gh_branch_protection`, `code_review`) | 346 → 355 |

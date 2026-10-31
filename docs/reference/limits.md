@@ -75,7 +75,7 @@ so review the diff every dry run returns. `IDE0055` (formatting) stays opt-in an
 The refactorings are semantic, compiler-gated, and refuse what they cannot do safely. What used to be
 listed here as limits are exactly those guarantees, so they are stated as guarantees; operations the
 engine does not offer at all are tracked in
-[What is missing → Refactoring gaps](../../../docs/gaps.md#7-refactoring-gaps), not here.
+[What is missing → Refactoring gaps](../gaps.md#7-refactoring-gaps), not here.
 
 - **They refuse rather than approximate.** A method group or `nameof` use that a rename would change, an
   object initializer a factory cannot express, a member selection that is not self-contained, an
@@ -171,7 +171,7 @@ indexing, and the non-.NET toolchains are wrapped rather than reimplemented. Thi
 | Language / platform | Coverage |
 |---|---|
 | **C#** | The full surface: navigation, references, refactorings, style, inspections, complexity, profiling, decompilation |
-| **Visual Basic** | The **symbol index** (`find_symbol`-style queries over `reference_index`: declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); `structural_search` with VB patterns (`language=auto|cs|vb`); `format_code`, `optimize_usings` (for `Imports`) and `code_cleanup`; **inspections** through the packs that ship VB analyzers (the .NET analyzers' `vb` set and the VMC0001 house rule — the C#-only packs say they do not cover the project); **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`); **refactorings** `apply_rename`, `encapsulate_field`, `add_params`/`remove_params`; `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`, `text_index`. The refactorings that are C# syntax or C# idiom refuse with that reason; `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`, `fix_complexity` and the generation tools remain C#-only. A solution with **no C# project** is a supported workspace: `check_solution` reports its Visual Basic projects and names the tools that apply. A runnable sample is [samples/VbDemo](../../../samples/VbDemo/README.md) |
+| **Visual Basic** | The **symbol index** (`find_symbol`-style queries over `reference_index`: declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); `structural_search` with VB patterns (`language=auto|cs|vb`); `format_code`, `optimize_usings` (for `Imports`) and `code_cleanup`; **inspections** through the packs that ship VB analyzers (the .NET analyzers' `vb` set and the VMC0001 house rule — the C#-only packs say they do not cover the project); **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`); **refactorings** `apply_rename`, `encapsulate_field`, `add_params`/`remove_params`; `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`, `text_index`. The refactorings that are C# syntax or C# idiom refuse with that reason; `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`, `fix_complexity` and the generation tools remain C#-only. A solution with **no C# project** is a supported workspace: `check_solution` reports its Visual Basic projects and names the tools that apply. A runnable sample is [samples/VbDemo](../../samples/VbDemo/README.md) |
 | **Razor / Blazor** | A heuristic markup scanner (28 rules) and verified edits. It is not a Razor compiler: `@model` members, tag helpers, component parameters, cascading values, `@bind` types and CSS isolation are not type-checked |
 | **F#** | `fsharp_files` lists the declarations (modules, types, top-level functions, opens) and `analyze_fsharp` applies FS0001–FS0010 over masked source; `build_project` returns the F# compiler's own `FS####` diagnostics and `run_tests` runs an F# test project. There is no semantic model (F# is not a Roslyn language), so no symbols, references, refactorings or inspections — the scanner resolves nothing |
 | **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | A heuristic markup layer: inventory, nine rules (`x:Name`/`x:Key` duplicates, `x:Class`, event handlers, resource keys, `DataTemplate`, name collisions, XML) and navigation (`x:Name` ↔ field, key ↔ uses, `BasedOn` chain). The XAML is not compiled, so bindings, tag helpers and styles are not type-checked; no designer, no XAML refactorings. The C# code-behind is fully analysed |
@@ -182,7 +182,7 @@ indexing, and the non-.NET toolchains are wrapped rather than reimplemented. Thi
 | **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases; `yaml_files`/`analyze_yaml` read a manifest's identity and structure. No manifest/chart schema validation, no kustomize, no exec/port-forward |
 | **Python / C++ / Java / Go / Rust** | `translate_python_file` / `translate_cpp_file` lower a file to pseudocode through its AST dump (no type checker, no navigation); Java, Go and Rust have labels in the model, not frontends |
 
-Full inventory, with the exact boundary for each gap: [docs/gaps.md](../../../docs/gaps.md).
+Full inventory, with the exact boundary for each gap: [docs/gaps.md](../gaps.md).
 
 Beyond languages, the same page records what is absent from the .NET workflow itself: the debugger is
 engine-level (16 `debug_*` tools, `debug_test` included; edit-and-continue and hot reload are not
@@ -209,8 +209,8 @@ VisualMCP is not:
 ## Licensing
 
 The source is available under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use is free;
-commercial or company use requires a separate paid license. See [LICENSE](../../../LICENSE) and
-[CONTRIBUTING.md](../../../CONTRIBUTING.md).
+commercial or company use requires a separate paid license. See [LICENSE](../../LICENSE) and
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ---
 

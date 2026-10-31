@@ -146,7 +146,7 @@ C# and Visual Basic get the semantic model; XAML, Razor, SQL, JavaScript/TypeScr
 and F# get a scanner (they are not compilers), each with a rule set that states what it proves; the
 Node, Docker and Kubernetes toolchains are wrapped rather than reimplemented. HTML and CSS are scanned,
 not rendered, and F# has no symbol navigation — on purpose, and stated in the
-[limits](docs/public/reference/limits.md). Everything is static analysis or process instrumentation: no
+[limits](docs/reference/limits.md). Everything is static analysis or process instrumentation: no
 tool proves a change preserves behaviour, and none replaces your test suite.
 And it runs on your machine, locally — no hosted service, no account, no daemon. Your code leaves the
 box only in the conversation your client already sends to its model provider.
@@ -155,18 +155,18 @@ box only in the conversation your client already sends to its model provider.
 
 | If you want to… | Read |
 |---|---|
-| install, verify, upgrade, uninstall | [Getting started](docs/public/getting-started.md) |
-| understand the process, the store, the dashboard, privacy | [How it works](docs/public/how-it-works.md) |
-| look up a tool | [Tool catalogue](docs/public/tools.md) · [Tool arguments](docs/public/reference/tool-arguments.md) |
-| read and analyse code | [Reading and analysing code](docs/public/guides/code.md) |
-| refactor safely, apply style fixes | [Refactoring and style](docs/public/guides/refactoring.md) |
-| work on Razor, metacode or decompilation | [Razor, metacode and decompilation](docs/public/guides/razor-metacode.md) |
-| build, test, manage NuGet, modernize | [Build, test, packages and modernization](docs/public/guides/runtime.md) |
-| profile a live process | [Profiling](docs/public/guides/profiling.md) |
-| use `run_plan`, planning, Git, GitHub, Docker | [Workflow and integrations](docs/public/guides/workflow.md) |
-| configure ports, paths and environment variables | [Configuration reference](docs/public/reference/configuration.md) |
-| know what it does **not** do | [Limits](docs/public/reference/limits.md) |
-| troubleshoot | [Help and FAQ](docs/public/help.md) |
+| install, verify, upgrade, uninstall | [Getting started](docs/getting-started.md) |
+| understand the process, the store, the dashboard, privacy | [How it works](docs/how-it-works.md) |
+| look up a tool | [Tool catalogue](docs/tools.md) · [Tool arguments](docs/reference/tool-arguments.md) |
+| read and analyse code | [Reading and analysing code](docs/guides/code.md) |
+| refactor safely, apply style fixes | [Refactoring and style](docs/guides/refactoring.md) |
+| work on Razor, metacode or decompilation | [Razor, metacode and decompilation](docs/guides/razor-metacode.md) |
+| build, test, manage NuGet, modernize | [Build, test, packages and modernization](docs/guides/runtime.md) |
+| profile a live process | [Profiling](docs/guides/profiling.md) |
+| use `run_plan`, planning, Git, GitHub, Docker | [Workflow and integrations](docs/guides/workflow.md) |
+| configure ports, paths and environment variables | [Configuration reference](docs/reference/configuration.md) |
+| know what it does **not** do | [Limits](docs/reference/limits.md) |
+| troubleshoot | [Help and FAQ](docs/help.md) |
 | contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 The engineering notes behind these pages are indexed in [docs/README.md](docs/README.md). Every folder

@@ -256,7 +256,7 @@ without a frontend joins by emitting it. `language` is required for text and, wi
 overrides the extension — an unknown extension alone has no frontend. Visual Basic is a source
 language (`language=vb`, or a `.vb` file, which `metacode_translate`, `metacode_compare`,
 `metacode_index` and `metacode_generate` read through Roslyn). Grammar and limits:
-[`../../metacode.md`](../../metacode.md).
+[`../metacode.md`](../metacode.md).
 
 ## Build, run and publish settings
 
@@ -348,7 +348,7 @@ arbitrary path), and `all-safe` / `all-reclaimable` expand the ids instead of na
 `aspire` installs and scaffolds Aspire on demand; `update_framework` and `update_solution` move
 the solution forward and put every edited file back when the build fails. The full guide is
 [Build, test, packages and modernization](../guides/runtime.md); the engineering detail is
-[`../../modernization.md`](../../modernization.md).
+[`../modernization.md`](../modernization.md).
 
 ```
 aspire(action=status|install|add, appHostName?, projects[]?,

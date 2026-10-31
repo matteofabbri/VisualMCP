@@ -219,7 +219,7 @@ be used in a pipeline if you have a client harness. Nothing requires an account 
 **Is it free?**
 
 Source-available under the PolyForm Noncommercial License 1.0.0: free for noncommercial use. Commercial
-or company use requires a separate paid license. See [LICENSE](../../LICENSE).
+or company use requires a separate paid license. See [LICENSE](../LICENSE).
 
 **How do I report a bug?**
 

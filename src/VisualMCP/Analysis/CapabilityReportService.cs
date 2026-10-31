@@ -1,6 +1,8 @@
 using System.Reflection;
 using ModelContextProtocol.Server;
 using Snitch.Languages.CSharp.ContextActions;
+using Snitch.Languages.CSharp.Style;
+using Snitch.Languages.VB.Style;
 using Snitch.Languages.Xaml;
 
 namespace VisualMCP.Analysis;
@@ -58,7 +60,9 @@ public sealed class CapabilityReportService : ICapabilityReportService
                     markup = 17,
                     range = "RZ1001-RZ1011 security (CWE), RZ2001-RZ2017 markup",
                 },
-                styleRewrites = "87 C# ids + 15 VB ids (simplify_code / simplify_vb_code)",
+                styleRewrites = $"{SimplifyCodeService.Rules.Select(rule => rule.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count()} C# ids + " +
+                                $"{VbSimplifyCodeService.Rules.Select(rule => rule.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count()} VB ids " +
+                                "(simplify_code / simplify_vb_code)",
                 inspections = "~800 ids from five analyzer packs (inspect_code)",
                 javascriptRules = new
                 {
@@ -109,7 +113,7 @@ public sealed class CapabilityReportService : ICapabilityReportService
 
             docs = new
             {
-                note = "The public catalogue lives in docs/public/tools.md; docs/gaps.md is the inventory " +
+                note = "The public catalogue lives in docs/tools.md; docs/gaps.md is the inventory " +
                        "of what is absent. The counts above are the live ones — compare them with the " +
                        "documented figures when either changes.",
             },

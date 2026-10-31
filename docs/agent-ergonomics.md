@@ -217,7 +217,7 @@ carries the symbol that proves each row.
 ### W8 — Coverage numbers in the docs generated from W7
 
 **Change.** The counts in [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md),
-[reference/limits.md](public/reference/limits.md), [gaps.md](gaps.md) and
+[reference/limits.md](reference/limits.md), [gaps.md](gaps.md) and
 [CAPABILITY_MAP.md](../CAPABILITY_MAP.md) are generated from W7 instead of typed. The corrections
 already made to those pages were made by hand, one line at a time, and nothing keeps them in step
 with the catalogues: the next rule added to `StyleRewriteCatalog` re-opens the same drift.
