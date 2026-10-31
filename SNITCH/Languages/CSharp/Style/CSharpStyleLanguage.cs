@@ -80,7 +80,44 @@ public sealed class CSharpStyleLanguage : IStyleLanguage
             "omit_if_default" => AccessibilityPreference.OmitIfDefault,
             _ => AccessibilityPreference.None,
         },
+        Var = new VarStyle
+        {
+            ForBuiltInTypes = ReadVarPreference(option("csharp_style_var_for_built_in_types")),
+            WhenTypeIsApparent = ReadVarPreference(option("csharp_style_var_when_type_is_apparent")),
+            Elsewhere = ReadVarPreference(option("csharp_style_var_elsewhere")),
+        },
+        Parentheses = new ParenthesesStyle
+        {
+            Arithmetic = Clarity(option("dotnet_style_parentheses_in_arithmetic_binary_operators")),
+            Relational = Clarity(option("dotnet_style_parentheses_in_relational_binary_operators")),
+            OtherBinary = Clarity(option("dotnet_style_parentheses_in_other_binary_operators")),
+        },
+        AllowMultipleBlankLines = Boolean(option("dotnet_style_allow_multiple_blank_lines_experimental")),
+        AllowEmbeddedStatementsOnSameLine = Boolean(option("dotnet_style_allow_embedded_statements_on_same_line_experimental")),
+        AllowBlankLinesBetweenConsecutiveBraces = Boolean(option("dotnet_style_allow_blank_lines_between_consecutive_braces_experimental")),
+        AllowStatementImmediatelyAfterBlock = Boolean(option("dotnet_style_allow_statement_immediately_after_block_experimental")),
+        AllowBlankLineAfterColonInConstructorInitializer = Boolean(option("dotnet_style_allow_blank_line_after_colon_in_constructor_initializer_experimental")),
+        AllowBlankLineAfterTokenInConditionalExpression = Boolean(option("dotnet_style_allow_blank_line_after_token_in_conditional_expression_experimental")),
+        AllowBlankLineAfterTokenInArrowExpressionClause = Boolean(option("dotnet_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental")),
         FileHeader = ResolveHeader(option("file_header_template"), fileName, projectName),
+    };
+
+    /// <summary><c>true</c> prefers <c>var</c>, <c>false</c> the explicit type; anything else is unset.</summary>
+    private static VarPreference ReadVarPreference(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "true" => VarPreference.PreferVar,
+        "false" => VarPreference.PreferExplicit,
+        _ => VarPreference.None,
+    };
+
+    private static bool Clarity(string? value) =>
+        string.Equals(value?.Trim(), "always_for_clarity", StringComparison.OrdinalIgnoreCase);
+
+    private static bool? Boolean(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "true" => true,
+        "false" => false,
+        _ => null,
     };
 
     /// <summary>

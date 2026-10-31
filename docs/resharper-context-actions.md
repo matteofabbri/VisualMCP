@@ -18,7 +18,8 @@ So the "1000+ context actions" is precise: **307 context actions + 869 quick fix
 A quick fix is attached to an inspection (ReSharper ships ~2500 proprietary inspections);
 a context action is the Alt+Enter menu on a code construct. Our coverage of the two is different:
 
-- The IDE-style ones are `simplify_code`: 87 of the 126 ids of Microsoft's table, 39 refused with a reason.
+- The IDE-style ones are `simplify_code`: 97 of the 126 ids of Microsoft's table, the other 29 delegated,
+  not applicable to C#, or not a rewrite.
 - The refactoring-shaped ones are the Refactoring tools (~38 of Rider's ~46 main refactorings).
 - The analyzer-shaped ones are `apply_code_fix`, which runs the CodeFixProvider of the bundled packs.
 - **The 14 rows marked below are `context_action`** (13 action ids: two ReSharper names share a raw-string

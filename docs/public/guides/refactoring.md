@@ -134,11 +134,16 @@ IDE. It is a rewrite engine over Roslyn syntax trees, not a formatter.
 
 ### Coverage
 
-- **87 of the 126 rule ids** in Microsoft's code-style table are rewritten.
-- The other **39 answer with the reason**, per id, in the result's `notRewritten` list — never silently.
-- Three of the 39 are answered by another tool: `IDE0005`, `IDE0032` and `IDE0290` are accepted by
-  `simplify_code` and delegated to `optimize_usings`, `property_to_auto` and
-  `convert_to_primary_constructor`, one report per id under `delegated`.
+- **97 of the 126 rule ids** in Microsoft's code-style table are rewritten.
+- The other **29 answer with their category**, per id, in the result's `notRewritten` list — never
+  silently: 3 delegated (`IDE0005`, `IDE0032`, `IDE0290` are accepted by `simplify_code` and answered by
+  `optimize_usings`, `property_to_auto` and `convert_to_primary_constructor`, one report per id under
+  `delegated`), 5 not applicable to C# (three Visual Basic ids, a compiler diagnostic, one id Microsoft
+  split into two that are rewritten here), and 21 that are refactorings, policy or semantic decisions
+  rather than rewrites.
+- **Team preferences are option-driven**: `csharp_style_var_*` (`IDE0007`/`IDE0008`),
+  `dotnet_style_parentheses_in_*` (`IDE0048`) and the blank-line family `IDE2000`–`IDE2006` act only when
+  the repository sets the option; the result names the id and the option it waited for.
 - Visual Basic is a separate layer with **15 rewritten ids** and 34 with a reason, exposed by
   `simplify_vb_code`.
 

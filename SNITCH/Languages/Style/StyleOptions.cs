@@ -54,6 +54,43 @@ public enum AccessibilityPreference
     OmitIfDefault,
 }
 
+/// <summary>What <c>csharp_style_var_*</c> asks for in one declaration category.</summary>
+public enum VarPreference
+{
+    /// <summary>Not configured: the engine leaves the declaration alone.</summary>
+    None,
+    /// <summary>Prefer <c>var</c> (the option is true): IDE0007.</summary>
+    PreferVar,
+    /// <summary>Prefer the explicit type (the option is false): IDE0008.</summary>
+    PreferExplicit,
+}
+
+/// <summary>The three <c>csharp_style_var_*</c> categories, in Microsoft's own precedence.</summary>
+public sealed record VarStyle
+{
+    public VarPreference ForBuiltInTypes { get; init; } = VarPreference.None;
+
+    public VarPreference WhenTypeIsApparent { get; init; } = VarPreference.None;
+
+    public VarPreference Elsewhere { get; init; } = VarPreference.None;
+}
+
+/// <summary>
+/// Whether <c>dotnet_style_parentheses_in_*</c> asks for parentheses for clarity around a binary
+/// operator family. Only <c>always_for_clarity</c> is a rewrite; <c>never_if_unnecessary</c> is what
+/// IDE0047 already does.
+/// </summary>
+public sealed record ParenthesesStyle
+{
+    public bool Arithmetic { get; init; }
+
+    public bool Relational { get; init; }
+
+    public bool OtherBinary { get; init; }
+
+    public bool Any => Arithmetic || Relational || OtherBinary;
+}
+
 /// <summary>
 /// The repository's style options, already mapped out of a language's key names. Each language maps its
 /// own <c>.editorconfig</c> keys onto these fields (<c>csharp_prefer_braces</c>, <c>visual_basic_…</c>),
@@ -77,6 +114,30 @@ public sealed record StyleOptions
     /// <summary>The <c>IsNot</c> preference of a Visual Basic repository.</summary>
     public IsNotPreference PreferIsNot { get; init; } = IsNotPreference.None;
 
+    /// <summary>The <c>csharp_style_var_*</c> preferences (IDE0007/IDE0008).</summary>
+    public VarStyle Var { get; init; } = new();
+
+    /// <summary>The <c>dotnet_style_parentheses_in_*</c> preferences (IDE0048).</summary>
+    public ParenthesesStyle Parentheses { get; init; } = new();
+
+    /// <summary>
+    /// The <c>dotnet_style_allow_*_experimental</c> layout options (IDE2000–IDE2006): null when the
+    /// repository did not configure the option, true when it allows the shape, false when it forbids it.
+    /// </summary>
+    public bool? AllowMultipleBlankLines { get; init; }
+
+    public bool? AllowEmbeddedStatementsOnSameLine { get; init; }
+
+    public bool? AllowBlankLinesBetweenConsecutiveBraces { get; init; }
+
+    public bool? AllowStatementImmediatelyAfterBlock { get; init; }
+
+    public bool? AllowBlankLineAfterColonInConstructorInitializer { get; init; }
+
+    public bool? AllowBlankLineAfterTokenInConditionalExpression { get; init; }
+
+    public bool? AllowBlankLineAfterTokenInArrowExpressionClause { get; init; }
+
     /// <summary>
     /// The file header the repository wants (<c>file_header_template</c>), already resolved: the
     /// placeholders a language supports are substituted when the option is read, because the rewrite
@@ -88,7 +149,14 @@ public sealed record StyleOptions
     public bool AnyConfigured =>
         Braces != BracePreference.None || ModifierOrder.Count > 0 || Namespaces != NamespacePreference.None ||
         ForeachExplicitCast != ForeachCastPreference.None || Accessibility != AccessibilityPreference.None ||
-        PreferIsNot != IsNotPreference.None || !string.IsNullOrWhiteSpace(FileHeader);
+        PreferIsNot != IsNotPreference.None || !string.IsNullOrWhiteSpace(FileHeader) ||
+        Var.ForBuiltInTypes != VarPreference.None || Var.WhenTypeIsApparent != VarPreference.None ||
+        Var.Elsewhere != VarPreference.None || Parentheses.Any ||
+        AllowMultipleBlankLines is not null || AllowEmbeddedStatementsOnSameLine is not null ||
+        AllowBlankLinesBetweenConsecutiveBraces is not null || AllowStatementImmediatelyAfterBlock is not null ||
+        AllowBlankLineAfterColonInConstructorInitializer is not null ||
+        AllowBlankLineAfterTokenInConditionalExpression is not null ||
+        AllowBlankLineAfterTokenInArrowExpressionClause is not null;
 }
 
 /// <summary>

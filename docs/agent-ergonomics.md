@@ -191,7 +191,7 @@ analysis, and `find_implementations`/`reference_index` use rises above zero.
 
 | Language | Area | State | Proof | Documented in |
 |---|---|---|---|---|
-| C# | style | 87 ids, 39 with a reason | `StyleRewriteCatalog` | guides/refactoring.md |
+| C# | style | 97 ids, 29 explained by category | `StyleRewriteCatalog` | guides/refactoring.md |
 | Visual Basic | style | 15 ids, 34 with a reason | `VbStyleRewriteCatalog` | reference/limits.md |
 | Razor | markup analysis | 28 rules | `RazorRuleCatalog` | razor.md |
 | … | … | … | … | … |

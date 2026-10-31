@@ -21,7 +21,7 @@ Last updated: 2026-10-31 (sixth revision: six context actions close the literal/
 `check_enum_defined`, `invert_loop`, 20 → 26 action ids — `translate_python_file` / `translate_cpp_file`
 make the two opt-in metacode readers reachable, `run_mutation_tests` runs Stryker.NET, and `run_http_file`
 executes a request file: 318 → 322). The
-style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
+style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
 ---
@@ -337,7 +337,8 @@ ReSharper's C# layer ships **1176 actions** — 869 quick fixes attached to its 
 context actions (the census is [resharper-context-actions.md](resharper-context-actions.md)). VisualMCP
 has:
 
-- **87 C# style ids** (`simplify_code`, with 39 refused and a reason) and **15 VB ids**;
+- **97 C# style ids** (`simplify_code`; the other 29 ids are delegated, not applicable to C#, or not a
+  rewrite — each named with its category) and **15 VB ids**;
 - **~800 inspection ids**; a fix exists only where the analyzer ships a `CodeFixProvider`
   (`apply_code_fix`);
 - **26 context-action ids** through `context_action`: `import_type`, the argument guards

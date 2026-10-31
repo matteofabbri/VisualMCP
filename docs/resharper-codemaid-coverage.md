@@ -53,7 +53,7 @@ baseline and the seven architecture/quality analyses).
 
 Of Rider's "main set" (~46 refactorings) about 38 are implemented; the missing ones are listed above.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
-`simplify_code` (87 IDE ids) and `simplify_vb_code` (15 VB ids), the fixes come from `apply_code_fix`.
+`simplify_code` (97 IDE ids) and `simplify_vb_code` (15 VB ids), the fixes come from `apply_code_fix`.
 
 ### Code generation / "create" family
 

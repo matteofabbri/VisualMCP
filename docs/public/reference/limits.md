@@ -45,26 +45,30 @@ pattern matched", which `inspection_baseline` makes meaningful by comparing agai
 
 ## The style engine (`simplify_code`)
 
-- **87 of the 126 rule ids** in Microsoft's code-style table are rewritten. The other 39 are returned in
-  `notRewritten` with a written reason — none is silently ignored, and three of them (`IDE0005`,
-  `IDE0032`, `IDE0290`) are accepted by `simplify_code` and delegated to their own tools.
-- Visual Basic: **15 rewritten ids**, 34 with a reason. The VB layer is separate; `simplify_code` does
-  not touch `.vb` files.
-- **A rule rewrites one region and may edit several documents.** A suggestion whose edits name other files
-  is planned against the whole solution and applied all-or-nothing: if any file it touches is refused by
-  the compiler gate, none of it is written.
-- **Rules that claim equivalence are proved, not assumed.** They are compared operation-by-operation
-  against the code they replace; a difference refuses the file. The result reports it under `semantics`.
-- **The gate is per document, not per edit.** A document whose change would add errors is refused as a
-  whole; other documents in the same run still apply.
-- **For rules that do not claim equivalence, the gate is compilation, not equivalence.** Such a rewrite
-  can compile and still change meaning. Review the diff, which every dry run returns.
-- **Only a small set of `.editorconfig` keys is read** (five for C#, three for VB). Preferences outside
-  that set — most importantly the `csharp_style_var_*` family and naming rules — are not applied.
-- **`IDE0055` (formatting) is opt-in.** It is not part of `rules=all`, because formatting a whole
-  project is a deliberate act.
-- **Naming rules are not rewrites.** `IDE1006` and similar require a rename, which is a different
-  operation.
+No id in Microsoft's code-style table is left unanswered, and none of the answers is a limitation of a
+rewriter:
+
+| Category | Ids | What it means |
+|---|:---:|---|
+| **Rewritten** | 97 of 126 | `simplify_code` applies the rewrite, under the compiler gate and (for the rules that claim equivalence) the operation-level check. |
+| **Delegated** | 3 | `IDE0005`, `IDE0032`, `IDE0290`: `simplify_code` accepts the id and answers with the dedicated engine — `optimize_usings`, `property_to_auto`, `convert_to_primary_constructor`. |
+| **Not applicable to C#** | 5 | `IDE0081`/`IDE0084`/`IDE0140` are Visual Basic's (`simplify_vb_code` owns them); `IDE1007` is a compiler diagnostic; `IDE0370` was split by Microsoft into `IDE0240`/`IDE0241`, both rewritten here. |
+| **Not a rewrite** | 21 | Refactorings (`IDE0050` anonymous type→tuple, `IDE0210`/`IDE0211` top-level statements, `IDE0303`–`IDE0305` collection expressions for builders, `IDE0330` `System.Threading.Lock`, `IDE0410` labeled jumps), changes of contract (`IDE0064`), a rename policy (`IDE1006`, which needs `apply_rename`), layout owned elsewhere (`IDE0065`, `IDE0360`), a suppression audit (`IDE0076`/`IDE0077`), semantic decisions (`IDE0110`, `IDE1005`, `IDE0221`, `IDE0350`), and a Copilot suggestion (`IDE3000`). Each one is named, with its category, in `simplify_code`'s own answer for that id. |
+
+**Team preferences are option-driven, not assumed.** `csharp_style_var_*` (`IDE0007`/`IDE0008`),
+`dotnet_style_parentheses_in_*` (`IDE0048`) and the seven blank-line options (`IDE2000`–`IDE2006`)
+apply only when the repository configures them; without the option the rule does nothing and the result
+says which id waited for which option. `csharp_prefer_braces`, the modifier order, accessibility, the
+namespace form, the foreach cast and the file header work the same way. Visual Basic is a separate
+layer with its own catalogue (`simplify_vb_code`); the C# engine does not touch `.vb` files.
+
+**What every write guarantees.** A rule rewrites one region and may edit several documents — the
+suggestion is planned against the whole solution and applied all-or-nothing. Rules that claim
+equivalence are compared operation-by-operation and refused on a difference (reported under
+`semantics`). The gate is per document: one that would gain compiler errors is refused while the other
+documents of the run still apply. For the rules that do not claim equivalence the gate is compilation,
+so review the diff every dry run returns. `IDE0055` (formatting) stays opt-in and is not part of
+`rules=all`.
 
 ## Refactoring
 

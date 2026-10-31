@@ -118,9 +118,10 @@ Your agent can reason about a Ghidra recovery and a Razor page with the same voc
 
 - **327 tools** — and `capability_report` prints the live count from the running build, so you never
   have to take the README's word for it.
-- **838 tests, all green** — the suite that gates every release.
-- **87 of 126** Microsoft code-style ids rewritten under the compiler gate; the other 39 are refused
-  with a written reason, never silently ignored.
+- **896 tests, all green** — the suite that gates every release.
+- **97 of 126** Microsoft code-style ids rewritten under the compiler gate; the other 29 are delegated to
+  a dedicated tool, not applicable to C#, or a refactoring rather than a rewrite — each named, never
+  silently ignored.
 - **~800 inspection ids** from five analyzer packs, each with its own code fix where the analyzer
   ships one.
 - **28 Razor rules** and **9 XAML rules** with CWE ids, file:line and a fix.
