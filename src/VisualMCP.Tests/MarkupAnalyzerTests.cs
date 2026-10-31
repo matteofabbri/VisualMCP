@@ -310,6 +310,45 @@ public sealed class MarkupAnalyzerTests
     }
 
     [Fact]
+    public async Task AStyleBlockIsAnalysedWithTheRulesOfAnExternalSheet()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """
+            <html lang="en">
+            <head>
+              <style>
+                .card { color: red !important; }
+                .missing { color: blue; }
+              </style>
+            </head>
+            <body><div class="card hero"></div></body>
+            </html>
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "html", "info", null, 100, 100));
+        var findings = json.GetProperty("findings").EnumerateArray().ToList();
+
+        var important = Assert.Single(findings, finding => finding.GetProperty("RuleId").GetString() == "CSS0001");
+        Assert.Equal("index.html", important.GetProperty("File").GetString());
+        Assert.Equal(4, important.GetProperty("Line").GetInt32());
+
+        Assert.Single(findings, finding => finding.GetProperty("RuleId").GetString() == "CSS0009");
+        Assert.Single(findings, finding => finding.GetProperty("RuleId").GetString() == "HTML0015");
+    }
+
+    [Fact]
+    public void AnInlineStyleAttributeIsCheckedForTheCssSafetyRules()
+    {
+        Assert.Contains("CSS0001", HtmlRules("""<div style="color: red !important"></div>"""));
+        Assert.Contains("CSS0007", HtmlRules("""<div style="background: url(javascript:alert(1))"></div>"""));
+        Assert.Contains("CSS0008", HtmlRules("""<div style="width: expression(alert(1))"></div>"""));
+        Assert.DoesNotContain("CSS0001", HtmlRules("""<div style="color: red"></div>"""));
+    }
+
+    [Fact]
     public async Task SelectorChecksAreSkippedWhenOneSideIsMissing()
     {
         using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));

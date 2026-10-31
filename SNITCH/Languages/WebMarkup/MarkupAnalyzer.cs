@@ -192,6 +192,24 @@ public static class MarkupAnalyzer
 
             if (attributes.TryGetValue("id", out var id))
                 ids.Add(id);
+
+            // An inline style is CSS the browser applies too: the three safety rules that need no
+            // selector are checked on the attribute value.
+            if (attributes.TryGetValue("style", out var inlineStyle))
+            {
+                if (ImportantRule.IsMatch(inlineStyle))
+                    Add("CSS0001", "info", "Maintainability",
+                        "!important overrides the cascade and makes the next override a fight.", tag.Offset,
+                        "Move the declaration to a rule and raise its specificity instead.");
+                if (ScriptUrl.IsMatch(inlineStyle))
+                    Add("CSS0007", "error", "Security",
+                        "A javascript: URL in an inline style executes script.", tag.Offset,
+                        "Remove it: CSS never needs a script URL.");
+                if (ExpressionRule.IsMatch(inlineStyle))
+                    Add("CSS0008", "warning", "Security",
+                        "IE expression() evaluates script inside a style.", tag.Offset,
+                        "Remove it; no supported browser runs it.");
+            }
         }
 
         foreach (var duplicate in ids.GroupBy(id => id, StringComparer.Ordinal).Where(group => group.Count() > 1))
@@ -223,10 +241,65 @@ public static class MarkupAnalyzer
 
         findings.AddRange(Balance(tags, masked, filePath, lineStarts));
 
+        // A <style> block is real CSS the browser applies, so its rules run through the same analyzer as
+        // an external sheet; the positions are remapped to the page. A stylesheet built in JavaScript
+        // (CSS-in-JS) stays outside this scan.
+        var inline = AnalyzeInlineStyles(text, filePath, lineStarts, tags);
+        findings.AddRange(inline.Findings);
+
         return new MarkupAnalysis(
             "html", lineStarts.Length, tags.Count(tag => !tag.Closing), ids,
             findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList(),
-            nodes);
+            nodes,
+            inline.Selectors,
+            inline.Classes);
+    }
+
+    /// <summary>The CSS of every &lt;style&gt; block, with findings and selectors moved onto the page's lines.</summary>
+    private static (List<MarkupFinding> Findings, List<CssSimpleSelector> Selectors, List<string> Classes)
+        AnalyzeInlineStyles(string text, string filePath, int[] lineStarts, List<HtmlTag> tags)
+    {
+        var findings = new List<MarkupFinding>();
+        var selectors = new List<CssSimpleSelector>();
+        var classes = new List<string>();
+
+        foreach (var tag in tags)
+        {
+            if (tag.Closing || !tag.Name.Equals("style", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var close = text.IndexOf("</style", tag.End, StringComparison.OrdinalIgnoreCase);
+            var bodyStart = tag.End + 1;
+            var bodyEnd = close < 0 ? text.Length : close;
+            if (bodyEnd <= bodyStart) continue;
+
+            var body = text[bodyStart..bodyEnd];
+            var analysis = AnalyzeCss(body, filePath);
+            var (startLine, startColumn) = Position(lineStarts, bodyStart);
+
+            (int Line, int Column) Remap(int line, int column) =>
+                (startLine + line - 1, line == 1 ? startColumn + column - 1 : column);
+
+            foreach (var finding in analysis.Findings)
+            {
+                var (line, column) = Remap(finding.Line, finding.Column);
+                findings.Add(finding with
+                {
+                    Line = line,
+                    Column = column,
+                    Snippet = Snippet(text, lineStarts, line),
+                });
+            }
+
+            foreach (var selector in analysis.Selectors ?? [])
+            {
+                var (line, column) = Remap(selector.Line, selector.Column);
+                selectors.Add(selector with { Line = line, Column = column });
+            }
+
+            classes.AddRange(analysis.Classes ?? []);
+        }
+
+        return (findings, selectors, classes);
     }
 
     /// <summary>The tag scanner's balance: an unclosed element or a close that does not match.</summary>

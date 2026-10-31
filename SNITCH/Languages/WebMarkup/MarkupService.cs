@@ -122,25 +122,27 @@ public sealed class MarkupService : IMarkupService
         };
 
         var pages = analyses.Where(entry => entry.Analysis.Kind == "html").ToList();
-        var stylesheets = analyses.Where(entry => entry.Analysis.Kind == "css").ToList();
         var nodes = pages.SelectMany(entry => entry.Analysis.Nodes ?? []).ToList();
 
-        if (pages.Count > 0 && stylesheets.Count > 0)
+        // A <style> block inside a page is a stylesheet too: its selectors and classes are attached to the
+        // page's analysis, so they take part in the same match and the finding keeps the page's file.
+        var selectorSources = analyses
+            .SelectMany(entry => (entry.Analysis.Selectors ?? []).Select(selector => (entry.File, Selector: selector)))
+            .ToList();
+
+        if (pages.Count > 0 && selectorSources.Count > 0)
         {
             notes.Add("CSS0009 resolves only simple selectors (tag, .class, #id, tag.class) against the tag/class/id " +
-                      "index of the scanned pages; a combinator, an attribute, a pseudo-class and the cascade are " +
-                      "not resolved.");
+                      "index of the scanned pages, <style> blocks included; a combinator, an attribute, a " +
+                      "pseudo-class and the cascade are not resolved.");
 
-            foreach (var (file, analysis) in stylesheets)
+            foreach (var (file, selector) in selectorSources)
             {
-                foreach (var selector in analysis.Selectors ?? [])
-                {
-                    if (nodes.Any(node => MarkupAnalyzer.Matches(node, selector))) continue;
-                    AddIfSelected(UnmatchedSelector(file, selector));
-                }
+                if (nodes.Any(node => MarkupAnalyzer.Matches(node, selector))) continue;
+                AddIfSelected(UnmatchedSelector(file, selector));
             }
 
-            var defined = stylesheets
+            var defined = analyses
                 .SelectMany(entry => entry.Analysis.Classes ?? [])
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var reported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -169,7 +171,8 @@ public sealed class MarkupService : IMarkupService
         }
         else
         {
-            notes.Add("Selector matching was skipped: no stylesheet is in scope, so CSS0009 and HTML0015 cannot be judged.");
+            notes.Add("Selector matching was skipped: no stylesheet is in scope (no .css/.scss file and no <style> " +
+                      "block), so CSS0009 and HTML0015 cannot be judged.");
         }
 
         var shown = findings.Take(maxFindings).ToList();

@@ -30,9 +30,12 @@ public static class MarkupTools
         "!important, CSS0002 ID selector, CSS0003 empty rule, CSS0004 @import, CSS0005 a selector declared twice, " +
         "CSS0006 unbalanced braces, CSS0007 javascript: URL, CSS0008 expression(), CSS0009 a simple selector that " +
         "matches no element in the scanned pages. It reads tags with a quote-aware scanner and both languages with " +
-        "comments masked. Selector matching is lexical: only tag, .class, #id and tag.class are resolved against " +
-        "the tag/class/id index of the scanned pages — no specificity, pseudo-classes, combinators or cascade, and " +
-        "it does not render the page. Read-only.")]
+        "comments masked, the CSS rules also run on the content of <style> blocks (a finding there is reported " +
+        "on the page's line), and an inline style attribute is checked for !important, a javascript: URL and " +
+        "expression(). Selector matching is lexical: only tag, .class, #id and tag.class are resolved " +
+        "against the tag/class/id index of the scanned pages, <style> blocks included — no specificity, " +
+        "pseudo-classes, combinators or cascade, CSS created in JavaScript is outside, and it does not render the " +
+        "page. Read-only.")]
     public static Task<object> AnalyzeMarkup(
         IMarkupService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,
