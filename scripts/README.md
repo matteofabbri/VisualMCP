@@ -1,13 +1,14 @@
 # scripts — install, reload, guard and analysis
 
-PowerShell scripts and three Python analysers. Nothing here runs as part of the server; they are
-developer and operator tools.
+The installers (PowerShell on Windows, POSIX shell on Linux/macOS), the reload helper, and three
+Python analysers. Nothing here runs as part of the server; they are developer and operator tools.
 
 | Script | What it does |
 |---|---|
-| `install.ps1` | Builds a Release binary, publishes it under the user profile and registers the server in ZCode and/or Claude Code at the chosen scope. Also installs the routing guard unless `-NoHooks` |
+| `install.ps1` | Windows: builds a Release binary, publishes it under the user profile and registers the server in ZCode and/or Claude Code at the chosen scope. Also installs the routing guard unless `-NoHooks` |
+| `install.sh` | The same for Linux and macOS (POSIX sh): publish, register, routing guard; `--hooks-only` refreshes the guard without publishing |
 | `install-global.ps1` | One-line wrapper for `install.ps1 -Scope all` |
-| `install-hooks.ps1` | Installs or removes the `PreToolUse` guard and the `AGENTS.md` block — see [`../hooks/README.md`](../hooks/README.md) |
+| `install-hooks.ps1` | Windows: installs or removes the `PreToolUse` guard and the `AGENTS.md` block — see [`../hooks/README.md`](../hooks/README.md) |
 | `reload.ps1` | Stops every running server, rebuilds Debug and republishes Release, so the next tool call spawns the new build |
 | `audit-mcp-usage.py` | Reads ZCode's `model-io-*.jsonl` and lists the turns where C# work used Read/Grep/Bash while VisualMCP was never called |
 | `analyze-tool-sequences.py` | Measures call bursts in a session store: which calls chain and which could have been one call |
@@ -43,11 +44,39 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope all -Uninsta
 | `-StopRunning` | stops a running server first, so the published files are not locked |
 | `-NoHooks` | skips the routing guard |
 
-Published copies: `%USERPROFILE%\.zcode\mcp-servers\VisualMCP\app\` for ZCode and
-`%USERPROFILE%\.claude\mcp-servers\VisualMCP\app\` for Claude Code (one build, copied). The root
-`install.ps1` / `install.bat` are thin wrappers; the root `install.ps1` additionally supports
-`-SetupProject`, which writes the "use the MCP tools, not grep" block into a target project's
-`CLAUDE.md` and `AGENTS.md`.
+Published copies: `~/.zcode/mcp-servers/VisualMCP/app/` for ZCode and
+`~/.claude/mcp-servers/VisualMCP/app/` for Claude Code (one build, copied) — `%USERPROFILE%` on
+Windows, `$HOME` elsewhere. The root `install.ps1` / `install.bat` are thin wrappers; the root
+`install.ps1` additionally supports `-SetupProject`, which writes the "use the MCP tools, not grep"
+block into a target project's `CLAUDE.md` and `AGENTS.md`.
+
+## install.sh (Linux, macOS)
+
+The POSIX counterpart: same scopes, same config shapes, same routing guard.
+
+```sh
+./scripts/install.sh                         # ZCode + Claude Code (default)
+./scripts/install.sh --scope zcode           # ZCode only
+./scripts/install.sh --scope user            # Claude Code, global
+./scripts/install.sh --scope local  --project-dir ~/repo/MyApp
+./scripts/install.sh --scope project --project-dir ~/repo/MyApp
+./scripts/install.sh --uninstall --scope zcode
+./scripts/install.sh --hooks-only            # refresh the guard, no publish
+```
+
+| Flag | Effect |
+|---|---|
+| `-s, --scope all\|zcode\|user\|local\|project` | where the registration goes; `all` is ZCode (user) + Claude Code (user) |
+| `-p, --project-dir` | the project folder for `local` / `project` |
+| `-u, --uninstall` | removes the registration instead of adding it |
+| `--stop-running` | stops a running server first (`pkill -f`), so the published files are not locked |
+| `--no-hooks` | skips the routing guard |
+| `--hooks-only` | installs or removes only the guard |
+
+It needs `dotnet` (to publish) and, for the ZCode configuration and the routing hook, Python 3: the
+config is edited with `json`/`json.dump` so every existing key survives, and the POSIX hook
+(`hooks/pre-tool-use.py`) parses the JSON payload it receives. Claude Code is registered through its
+own CLI (`claude mcp add`), so that half needs no JSON editing.
 
 **Restart the client after any install or uninstall.** Hooks are read at session start, and the
 tool list is cached for the session — a client relaunches the server on the next tool call, but a

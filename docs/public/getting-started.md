@@ -11,8 +11,8 @@ families of tools.
 | Requirement | Why |
 |---|---|
 | **.NET 10 SDK** | The server targets `net10.0` and uses MSBuild/Roslyn to load solutions. |
-| **Windows 10/11, Linux or macOS** | The server is platform-independent; the installer script is PowerShell (Windows). On Linux/macOS, [register it manually](#manual-installation). |
-| **PowerShell 5.1+** | Runs `scripts\install.ps1` (Windows only). |
+| **Windows 10/11, Linux or macOS** | The server and its installers run on all three: `scripts/install.ps1` on Windows, `scripts/install.sh` on Linux/macOS. |
+| **PowerShell 5.1+** (Windows) or **POSIX sh + Python 3** (Linux/macOS) | Runs the installer; on Linux/macOS Python 3 is also what the routing hook uses. |
 | An AI client with MCP support | ZCode, Claude Code, or any client that can start a stdio MCP server. |
 
 Visual Studio is **not** required. Optional integrations light up only when their tool is present:
@@ -20,18 +20,22 @@ Docker for the `docker_*` tools, the GitHub CLI (`gh`) for `gh_*`, a JDK 21+ for
 `analyze_native_binary` (Ghidra itself is downloaded into the per-user tools folder on first use),
 and `coverlet.collector` in your test projects for `get_test_coverage_map`.
 
-CI builds and tests on Windows x64, Linux x64 and macOS arm64. The server behaves the same on all
-three: `run_command` defaults to PowerShell on Windows and bash elsewhere, and `self_update` downloads
-the build for the platform it runs on. The PowerShell installer and routing guard are the Windows part
-of the setup.
+The server behaves the same on all three platforms: `run_command` defaults to PowerShell on Windows
+and bash elsewhere, `self_update` downloads the build for the platform it runs on, and the debugger and
+profiler pick their platform's tools. Both installers take the same scopes and write the same config.
 
 ## Install
 
 From a checkout of the repository:
 
 ```powershell
-# ZCode + Claude Code (default)
+# Windows: ZCode + Claude Code (default)
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+```sh
+# Linux / macOS: the same, with the POSIX installer
+./scripts/install.sh            # or: sh scripts/install.sh
 ```
 
 ### Choose a scope
@@ -39,9 +43,9 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 | Scope | Availability | Configuration written | Use when |
 |---|---|---|---|
 | `all` *(default)* | ZCode + Claude Code + the Claude desktop app | both client configs | You use more than one client |
-| `zcode` | Every ZCode session on this machine | `%USERPROFILE%\.zcode\cli\config.json` → `mcp.servers.VisualMCP` | You only use ZCode |
-| `user` | Every folder, global | `%USERPROFILE%\.claude.json` | Claude Code only, everywhere |
-| `local` | Only the chosen project folder | `%USERPROFILE%\.claude.json`, keyed to that folder | One project, without affecting others |
+| `zcode` | Every ZCode session on this machine | `~/.zcode/cli/config.json` → `mcp.servers.VisualMCP` | You only use ZCode |
+| `user` | Every folder, global | Claude Code user configuration | Claude Code only, everywhere |
+| `local` | Only the chosen project folder | Claude Code, keyed to that folder | One project, without affecting others |
 | `project` | The chosen project, shared | `.mcp.json` committed in the project | You want teammates to get it |
 
 ```powershell
@@ -58,18 +62,26 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope local -Proje
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope project -ProjectDir C:\REPOSITORY\MyApp
 ```
 
+```sh
+# The same four scopes, on Linux / macOS
+./scripts/install.sh --scope zcode
+./scripts/install.sh --scope user
+./scripts/install.sh --scope local --project-dir ~/repo/MyApp
+./scripts/install.sh --scope project --project-dir ~/repo/MyApp
+```
+
 ### What the installer does
 
 1. Publishes a **Release** build of `src/VisualMCP/VisualMCP.csproj`.
-2. Copies it to `%USERPROFILE%\.zcode\mcp-servers\VisualMCP\app\` for ZCode and
-   `%USERPROFILE%\.claude\mcp-servers\VisualMCP\app\` for Claude Code (one build, copied).
+2. Copies it to `~/.zcode/mcp-servers/VisualMCP/app/` for ZCode and
+   `~/.claude/mcp-servers/VisualMCP/app/` for Claude Code (one build, copied).
 3. Registers the server in the configuration files of the chosen scope.
-4. Installs the **routing guard** (see below); skip it with `-NoHooks`.
+4. Installs the **routing guard** (see below); skip it with `-NoHooks` / `--no-hooks`.
 5. Does **not** restart your client — MCP configuration is read at session start, so restart it yourself.
 
-> **ZCode specifics:** ZCode reads `mcp.servers` from `%USERPROFILE%\.zcode\cli\config.json` (user) or
-> `<repo>\.zcode\config.json` (workspace). Its schema is strict — unknown keys drop the server — and the
-> file must be **BOM-free**; the script writes it that way. Verify the connection in **Settings → MCP**.
+> **ZCode specifics:** ZCode reads `mcp.servers` from `~/.zcode/cli/config.json` (user) or
+> `<repo>/.zcode/config.json` (workspace). Its schema is strict — unknown keys drop the server — and the
+> file must be **BOM-free**; the scripts write it that way. Verify the connection in **Settings → MCP**.
 > Tools surface as `mcp__VisualMCP__<tool>`.
 
 > **`project` scope and teams:** the generated `.mcp.json` records this machine's absolute path to the
@@ -84,12 +96,13 @@ that close that gap:
 
 | Piece | What it does | Where it goes |
 |---|---|---|
-| `hooks\pre-tool-use.ps1` | Denies read-only shell probes (`grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `Select-String`, `Get-Content`, `Get-ChildItem`) and shell file writes in a folder with a visible `.sln`/`.slnx`. Replies with the tool to use instead. | ZCode `hooks.events.PreToolUse`; Claude Code `hooks.PreToolUse` |
-| `hooks\agents-block.md` | States the routing rules up front, and why C# semantics need Roslyn rather than text matching. | `%USERPROFILE%\.zcode\AGENTS.md` (user scope) |
+| `hooks\pre-tool-use.ps1` (Windows) / `hooks/pre-tool-use.py` (Linux/macOS) | Denies read-only shell probes (`grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `Select-String`, `Get-Content`, `Get-ChildItem`) and shell file writes in a folder with a visible `.sln`/`.slnx`. Replies with the tool to use instead. | ZCode `hooks.events.PreToolUse`; Claude Code `hooks.PreToolUse` |
+| `hooks\agents-block.md` | States the routing rules up front, and why C# semantics need Roslyn rather than text matching. | `~/.zcode/AGENTS.md` (user scope) |
 
-Build, test, git and non-.NET trees are never touched. Two escape hatches exist for genuine shell
-cases: the MCP tool `run_command` (same command, still logged) and the literal token `vmcp-allow` in the
-command.
+The POSIX hook is a small Python 3 script (it reads a JSON payload); the installer registers it only
+when an interpreter is found. Build, test, git and non-.NET trees are never touched. Two escape hatches
+exist for genuine shell cases: the MCP tool `run_command` (same command, still logged) and the literal
+token `vmcp-allow` in the command.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1 -Scope zcode
@@ -174,19 +187,19 @@ Then register the built DLL in your client's MCP configuration:
 
 Point at the DLL rather than using `dotnet run`: `dotnet run` writes build output, which can corrupt
 the stdio protocol. The repository's own `.mcp.json` uses this Debug-DLL form for development; the
-installer produces the stable Release build for daily use. On Linux/macOS this manual registration is
-the installation path — the same JSON, with the DLL's path on that machine (e.g.
-`/home/you/REPOSITORY/VisualMCP/src/VisualMCP/bin/Debug/net10.0/VisualMCP.dll`).
+installer produces the stable Release build for daily use. The same JSON works on any platform — only
+the DLL path changes (`/home/you/REPOSITORY/VisualMCP/src/VisualMCP/bin/Debug/net10.0/VisualMCP.dll`).
 
 ## Upgrade
 
 Two ways:
 
 - **From inside the client:** `check_for_update` reports the latest GitHub release and the installed
-  version; `self_update` downloads the matching asset, stages it, and exits the server so a detached
-  helper swaps in the new build. The client relaunches it (brief disconnect).
-- **From the repository:** pull, then re-run `scripts\install.ps1` with the same scope and `-StopRunning`
-  if the executable is locked.
+  version; `self_update` downloads the asset for the running platform, stages it, and exits the server
+  so a detached helper swaps in the new build. The client relaunches it (brief disconnect).
+- **From the repository:** pull, then re-run the installer with the same scope — `scripts\install.ps1`
+  on Windows, `scripts/install.sh` on Linux/macOS — and `-StopRunning` / `--stop-running` if the
+  executable is locked.
 
 After either, restart the client if it does not reconnect by itself.
 
@@ -198,6 +211,12 @@ Match the scope you installed with:
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope all   -Uninstall
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope zcode -Uninstall
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope local -Uninstall -ProjectDir C:\REPOSITORY\MyApp
+```
+
+```sh
+./scripts/install.sh --uninstall --scope all
+./scripts/install.sh --uninstall --scope zcode
+./scripts/install.sh --uninstall --scope local --project-dir ~/repo/MyApp
 ```
 
 Uninstalling removes the server registration; it does not delete your solution's `.visualMCP` store.

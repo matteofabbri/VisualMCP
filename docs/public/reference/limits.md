@@ -6,16 +6,22 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
 
 ## Platform
 
-- **Windows is the supported platform.** It is what the installer, the documentation and the routing
-  hook target. CI also produces self-contained builds for Linux x64 and macOS arm64, but they are not the
-  documented, tested path for every feature.
+- **Windows, Linux and macOS are all supported.** There is an installer for each: `scripts/install.ps1`
+  (PowerShell, Windows) and `scripts/install.sh` (POSIX shell, Linux/macOS) publish the server, register
+  it for ZCode and Claude Code and install the routing guard; both take the same scopes and write the
+  same config shapes. The server itself picks the platform's shell, profiling tools and updater at
+  runtime — see [Getting started → Requirements](../getting-started.md#requirements).
 - **The .NET 10 SDK is required.** The server targets `net10.0` and loads solutions through
   `MSBuildWorkspace`.
+- **The routing guard needs Python 3 on Linux/macOS.** Its hook reads a JSON payload, so the POSIX hook
+  is a small Python script; the installer registers it only when an interpreter is found and says so
+  when one is not (the server install is unaffected). The Windows hook is PowerShell and needs nothing
+  extra.
 - **A solution must evaluate and restore.** If MSBuild cannot load a project — a missing SDK, a broken
   `Directory.Build.props`, a package feed that is unreachable — the semantic model degrades to MSBuild
   diagnostics. It does not silently fall back to text search.
 - **Visual Studio is not required**, but some environment tools (`get_environment_info`) report only what
-  is actually installed.
+  is actually installed, and MSVC/`vswhere` exist only on Windows by nature.
 
 ## Analysis
 

@@ -101,8 +101,9 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
 
 ## Status
 
-- **Platform:** Windows is the primary, fully supported platform. CI also builds self-contained
-  binaries for Linux x64 and macOS arm64.
+- **Platform:** Windows, Linux and macOS are all supported, each with its own installer
+  (`scripts/install.ps1`, `scripts/install.sh`); the server adapts its shell, debugger, profiler and
+  updater to the platform it runs on.
 - **Languages:** C# is the main surface (Roslyn); Visual Basic has a style layer (15 ids) plus the
   language-neutral build/test/diagnostic tools; Razor and Blazor markup are analysed by a dedicated
   scanner, and XAML has its own markup layer (inventory, `XAML0001`–`XAML0009` diagnostics, navigation)

@@ -18,6 +18,12 @@ git clone https://github.com/matteofabbri/VisualMCP.git C:\REPOSITORY\VisualMCP
 powershell -ExecutionPolicy Bypass -File C:\REPOSITORY\VisualMCP\scripts\install.ps1 -Scope all
 ```
 
+```sh
+# Linux / macOS
+git clone https://github.com/matteofabbri/VisualMCP.git ~/REPOSITORY/VisualMCP
+~/REPOSITORY/VisualMCP/scripts/install.sh --scope all
+```
+
 Restart your client, open any folder with a `.sln`, and say the sentence that changes everything:
 
 > **Audit this solution and tell me where to start.**

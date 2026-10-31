@@ -170,15 +170,14 @@ if present) and to the post-build install hook in the project file.
 
 **Can I use it on Linux or macOS?**
 
-Yes — the server is platform-independent and works anywhere the .NET 10 SDK (or a self-contained build)
-runs. The platform-sensitive pieces adapt automatically: `run_command` and `run_plan` default to
-PowerShell on Windows and bash elsewhere (`cmd` and Windows PowerShell are refused off Windows with a
-clear error), `self_update` downloads the asset for the platform it runs on and swaps it with a POSIX
-shell helper, `debug_install` picks the linux/osx netcoredbg build, Ghidra's `analyzeHeadless` (not the
-`.bat`) is used off Windows, and `stop_server` reads `/proc`/`ps` instead of WMI. CI produces builds for
-Windows x64, Linux x64 and macOS arm64. The two things that remain Windows-shaped are the PowerShell
-installer and routing guard in `scripts/` — on Linux/macOS register the server in your client manually
-(see [Getting started → Manual installation](getting-started.md#manual-installation)).
+Yes. Both platforms have their own installer — `scripts/install.sh` (POSIX sh) mirrors `scripts/install.ps1`
+with the same scopes and config shapes — and the server adapts at runtime: `run_command` and `run_plan`
+default to bash off Windows (`cmd` and Windows PowerShell are refused with a clear error), `self_update`
+downloads the asset for the running platform and swaps it with a POSIX shell helper, `debug_install`
+picks the linux/osx netcoredbg build, Ghidra's `analyzeHeadless` (not the `.bat`) is used, and
+`stop_server` reads `/proc`/`ps` instead of WMI. The routing guard on Linux/macOS is
+`hooks/pre-tool-use.py`, a small Python 3 script; the installer registers it when an interpreter is
+present and skips it with a warning when not.
 
 **How many tools are there?**
 

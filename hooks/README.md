@@ -2,8 +2,9 @@
 
 The server cannot ask a client to prefer its own tools: ZCode does not forward an MCP server's
 `instructions` to the model. A model that has never been told otherwise does C# work with
-`grep -rn`, `sed -n`, `cat` and `ls`. These two files close that gap, and they are installed by
-`scripts\install.ps1` (skip with `-NoHooks`) or refreshed on their own:
+`grep -rn`, `sed -n`, `cat` and `ls`. These files close that gap, and the installers add them
+(`scripts\install.ps1` / `scripts/install.sh`, skip with `-NoHooks` / `--no-hooks`) or refresh them
+on their own:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1 -Scope zcode
@@ -11,10 +12,17 @@ powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1 -Scope all
 powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1 -Uninstall
 ```
 
+```sh
+./scripts/install.sh --hooks-only --scope zcode
+./scripts/install.sh --hooks-only --scope all
+./scripts/install.sh --hooks-only --uninstall --scope all
+```
+
 | File | What it is | Where it is registered |
 |---|---|---|
-| `pre-tool-use.ps1` | A `PreToolUse` hook on the `Bash` tool. It reads the payload from stdin and answers with a deny decision naming the MCP tool that does the job | ZCode: `%USERPROFILE%\.zcode\cli\config.json` → `hooks.events.PreToolUse` + `hooks.enabled: true`. Claude Code: `%USERPROFILE%\.claude\settings.json` → `hooks.PreToolUse` |
-| `agents-block.md` | The same routing rules stated up front, as a managed block for an instruction file | `%USERPROFILE%\.zcode\AGENTS.md` (user scope, loaded in every workspace). Claude Code does not need it: it receives the server's `instructions` |
+| `pre-tool-use.ps1` | Windows: a `PreToolUse` hook on the `Bash` tool. It reads the payload from stdin and answers with a deny decision naming the MCP tool that does the job | ZCode: `~/.zcode/cli/config.json` → `hooks.events.PreToolUse` + `hooks.enabled: true`. Claude Code: `~/.claude/settings.json` → `hooks.PreToolUse` |
+| `pre-tool-use.py` | Linux/macOS: the same hook in Python 3 (the payload is JSON), registered as `python3 "<path>"` and only when an interpreter is found | the same two places |
+| `agents-block.md` | The same routing rules stated up front, as a managed block for an instruction file | `~/.zcode/AGENTS.md` (user scope, loaded in every workspace). Claude Code does not need it: it receives the server's `instructions` |
 
 ## What is denied, and when
 
