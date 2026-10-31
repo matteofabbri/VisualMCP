@@ -84,8 +84,9 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
 ## Metacode and decompilation
 
 - The model covers the languages it has frontends for: **C#, Razor, Ghidra snapshots and canonical
-  pseudocode**. Python and C++ AST readers exist in the library, but the product does not produce those
-  dumps, so the tools do not accept `.py`/`.cpp` source.
+  pseudocode**. Python and C++ are read from their AST dumps by `translate_python_file` and
+  `translate_cpp_file`, which produce the dump when the interpreter or compiler is installed (or take
+  one you supply): no type checking, no symbol navigation, no editing.
 - **Unsupported constructs stay visible** as `RAW[lang] … // reason` plus a diagnostic. A translation can
   therefore be incomplete; the diagnostics say where.
 - **Ghidra is an external dependency** with a real runtime cost. `analyze_native_binary` can take tens of
@@ -139,7 +140,7 @@ layer (Visual Basic) or text indexing. This is the whole map:
 | **SQL** | Text only. No dialect parser, schema model, query validation, execution or query plans |
 | **EF Core** | The `DbContext` and entities are C# and fully analysed; migrations run through `ef_migrations` (`dotnet ef`). There is still no model-snapshot diff and no generated-SQL inspection |
 | **Kubernetes / Helm** | Nothing. Docker covers local containers and compose only; manifests are text |
-| **Python / C++ / Java / Go / Rust** | Library-level metacode readers for Python and C++ only, and no tool produces their AST dumps; the other languages have labels in the model, not frontends |
+| **Python / C++ / Java / Go / Rust** | `translate_python_file` / `translate_cpp_file` lower a file to pseudocode through its AST dump (no type checker, no navigation); Java, Go and Rust have labels in the model, not frontends |
 
 Full inventory, with the exact workaround for each gap: [docs/gaps.md](../../../docs/gaps.md).
 

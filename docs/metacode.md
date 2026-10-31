@@ -6,9 +6,10 @@ come pseudocodice canonico. La pipeline del prodotto legge **C#** (Roslyn) e **R
 Ghidra. Un tipo decompilato con ILSpy e un binario nativo entrano dalla stessa porta.
 
 Il modello è neutro per costruzione, e due lettori **opt-in** lo dimostrano: Python (dump JSON del
-modulo `ast`) e C++ (`clang -ast-dump=json`). Non stanno in `MetacodeTranslator.Default` perché
-nessun tool di questo prodotto produce quei dump: chi ne ha uno costruisce il traduttore con il
-lettore che lo capisce. Lo stesso algoritmo scritto in C#, Python e C++ esce comunque con lo stesso
+modulo `ast`) e C++ (`clang -ast-dump=json`). Non stanno in `MetacodeTranslator.Default` perché quel
+traduttore legge un sorgente, non un dump: i tool `translate_python_file` / `translate_cpp_file`
+producono il dump e costruiscono un traduttore con il lettore che lo capisce. Lo stesso algoritmo
+scritto in C#, Python e C++ esce comunque con lo stesso
 corpo, riga per riga — è il test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`,
 eseguito con quei lettori.
 
@@ -173,12 +174,13 @@ var options = MetacodeOptions.Default with
 
 ## I lettori opt-in: Python e C++
 
-Questi due lettori non fanno parte della pipeline predefinita: nessun tool del prodotto produce i dump
-che leggono, quindi `metacode_translate` non offre le lingue (`language` vale `cs`, `razor`, `ghidra`
-o `pseudo`) e `MetacodeSource.FromFile` non le deduce dall'estensione — un `.json` non dice se
-contiene un `ast` di CPython, un dump di clang o altro. Il dump si produce fuori dai tool:
-
-Python — un file, nessuna dipendenza:
+Questi due lettori non stanno in `MetacodeTranslator.Default`, che resta la pipeline dei sorgenti che il
+traduttore legge direttamente: `metacode_translate` non offre le lingue (`language` vale `cs`, `razor`,
+`ghidra` o `pseudo`) e `MetacodeSource.FromFile` non le deduce dall'estensione — un `.json` non dice se
+contiene un `ast` di CPython, un dump di clang o altro. Il dump lo producono i due tool dedicati, che
+poi costruiscono il traduttore con il lettore giusto: `translate_python_file` esegue il dumper qui sotto,
+`translate_cpp_file` esegue `clang -ast-dump=json`; entrambi accettano anche un dump già pronto
+(`dumpJson`). Il dumper Python, se lo si vuole lanciare a mano — un file, nessuna dipendenza:
 
 ```python
 import ast, json, sys
@@ -268,9 +270,11 @@ questo testo.
    il più corto perché Roslyn fa il parsing).
 2. Mappare ogni costrutto su un nodo del modello; ciò che non ha nodo diventa
    `MetacodeOpaque*` + `MetacodeDiagnostic`, con il testo originale.
-3. Aggiungerlo a `MetacodeTranslator.Default` **solo se il prodotto sa produrre quel sorgente**: è la
-   regola per cui C# e Razor sono lì e Python/C++ no. Un lettore che dipende da un dump prodotto
-   altrove si passa al costruttore (opt-in), com'è per `PythonFrontend` e `CppFrontend`.
+3. Aggiungerlo a `MetacodeTranslator.Default` **solo se il traduttore può leggere il sorgente
+   direttamente**: è la regola per cui C# e Razor sono lì e Python/C++ no. Un lettore che dipende da un
+   dump prodotto altrove si passa al costruttore (opt-in), com'è per `PythonFrontend` e `CppFrontend`;
+   se il prodotto sa produrre quel dump (come `translate_python_file` / `translate_cpp_file`), il tool
+   costruisce il traduttore con il lettore giusto e resta opt-in.
 4. Aggiungere una fixture al test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`:
    è la definizione operativa di "stessa architettura".
 

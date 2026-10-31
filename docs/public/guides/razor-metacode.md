@@ -144,8 +144,8 @@ are lowered as C#, and the markup body is the body of a `Render` method. `@if`/`
 `try`/`catch` or a brace-less body is kept as one `RAW` block with a diagnostic.
 
 The model is also an **output**: any language can join by emitting canonical pseudocode. The library
-contains Python and C++ AST-JSON readers, but the product does not produce those dumps, so the tools
-accept only the four inputs above.
+contains Python and C++ AST-JSON readers; `translate_python_file` and `translate_cpp_file` produce the
+dump (through CPython's `ast` module and `clang -ast-dump=json`) or take one you supply.
 
 ### Decompiling managed assemblies
 
