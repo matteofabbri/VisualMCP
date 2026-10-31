@@ -179,6 +179,20 @@ static async Task RunServerAsync(string[] args)
         "an event handler to everything attached to it -> xaml_navigate. Markup-only: bindings are not compiled.\n" +
         "- EF Core migrations through the project's own tool (list/add/script/remove/update/info) with a structured " +
         "result -> ef_migrations.\n" +
+        "- Kubernetes through the ecosystem's client: status/context/get (rows parsed from -o json)/describe/logs -> " +
+        "k8s_status/k8s_context/k8s_get/k8s_describe/k8s_logs; apply (server-side dry run by default), delete and " +
+        "rollout change the cluster and need confirm=true -> k8s_apply/k8s_delete/k8s_rollout; Helm releases -> " +
+        "k8s_helm. A missing kubectl/helm or an unreachable cluster is a structured answer.\n" +
+        "- The JavaScript/TypeScript toolchain next to the solution, through the project's own npm/pnpm/yarn: " +
+        "which project and manager -> node_info; install the lockfile or add/remove packages -> node_install; run a " +
+        "package.json script -> node_script; tsc parsed into TSxxxx diagnostics with file:line -> node_typecheck; " +
+        "eslint parsed into findings with rule and position -> node_lint; dependency health -> node_outdated/node_audit. " +
+        "Nothing is downloaded: a missing tsc/eslint is reported with the command that installs it.\n" +
+        "- SQL files (.sql) as a scanned language: inventory with statements, verbs and tables -> sql_files; pattern " +
+        "rules SQL0001-SQL0010 (unterminated literal/comment/bracket, unbalanced parentheses, SELECT *, UPDATE/DELETE " +
+        "without WHERE, DROP without IF EXISTS, dynamic SQL by concatenation, an unclosed transaction, a leading-wildcard " +
+        "LIKE, ADD ... NOT NULL without DEFAULT, INSERT column/value mismatch) -> analyze_sql. It masks comments and " +
+        "literals first and is a pattern scanner, not a dialect parser.\n" +
         "- Administer the inspections: set a diagnostic's severity in the right .editorconfig (solution, project or " +
         "one file) -> configure_inspection; silence one finding with a #pragma around the member or a SuppressMessage " +
         "attribute on it (compiler-gated) -> suppress_finding.\n" +

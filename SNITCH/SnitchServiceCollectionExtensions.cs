@@ -44,6 +44,10 @@ public static class SnitchServiceCollectionExtensions
         // changed files, optional inspection findings on them).
         services.AddSingleton<Collaboration.IChangeReviewService, Collaboration.ChangeReviewService>();
         services.AddSingleton<Docker.IDockerService, Docker.DockerService>();
+        // Kubernetes and Helm through the ecosystem's own clients (kubectl/helm), and the Node
+        // toolchain (npm/pnpm/yarn, tsc, eslint) a .NET solution often carries next to it.
+        services.AddSingleton<Kubernetes.IKubernetesService, Kubernetes.KubernetesService>();
+        services.AddSingleton<Node.INodeService, Node.NodeService>();
         services.AddSingleton<Search.ISearchTextService, Search.SearchTextService>();
         // Full-text index: FTS5 tables in the same solution store, one row per line of every source,
         // document and decompiled file, so a content question is a query and not a walk.
@@ -109,6 +113,10 @@ public static class SnitchServiceCollectionExtensions
         // The write side: verified splices that are re-scanned before they are written, and recorded
         // in the edit history so revert_edit can undo them.
         services.AddSingleton<Languages.Razor.IRazorEditService, Languages.Razor.RazorEditService>();
+
+        // SQL: .sql files are content too. The scanner masks comments and literals and applies the
+        // rules that need no schema; it is deliberately a pattern layer, not a dialect parser.
+        services.AddSingleton<Languages.Sql.ISqlService, Languages.Sql.SqlService>();
 
         // C# analysis services (logic moved from the MCP tool layer).
         services.AddSingleton<Languages.CSharp.Analysis.IGetDiagnosticsService, Languages.CSharp.Analysis.GetDiagnosticsService>();

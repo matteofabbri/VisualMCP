@@ -31,9 +31,11 @@ The files are grouped by area, not by layer: `Refactoring*`, `SimplifyCode*`, `V
 `Metacode*`, `Profiling*`, `Razor*`, `XamlTests`, `Navigation*`, `Complexity*`, `Inspection*`,
 `GitServiceTests`, `GitConflictTests`, `GitRebasePlanTests`, `GitPatchTests`, `RemoteHostTests`,
 `GitHubReviewPayloadTests`, `ChangeReviewTests`, `BoardTests`, `PlanExecutionTests`,
-`DashboardTests`, `OneTypePerFileTests`, `ProductSurfaceTests`, and so on. When you add a rule, a
+`KubernetesServiceTests`, `NodeServiceTests`, `SqlAnalyzerTests`, `DashboardTests`,
+`OneTypePerFileTests`, `ProductSurfaceTests`, and so on. When you add a rule, a
 refactoring or a tool with behaviour beyond argument forwarding, add a row to the matching file rather
-than a new catch-all file.
+than a new catch-all file. The three toolchain test files pin the parsing and the guards, not a live
+cluster or a package registry: `NodeServiceTests` runs one real `npm run` only when npm exists.
 
 ## Conventions
 

@@ -21,8 +21,8 @@ which a single-file bundle breaks).
 | `Update/` | self-update from GitHub Releases |
 
 The tool areas are `CSharp`, `Debugging`, `Docker`, `Execution`, `Git`, `GitHub`, `IO`,
-`Maintenance`, `Metacode`, `Modernization`, `Planning`, `Profiling`, `Runtime`, `Scaffolding`,
-`Search`, `Update`, `VB`, `Web`. `capability_report` prints the live count per area.
+`Kubernetes`, `Maintenance`, `Metacode`, `Modernization`, `Node`, `Planning`, `Profiling`, `Runtime`,
+`Scaffolding`, `Search`, `Sql`, `Update`, `VB`, `Web`. `capability_report` prints the live count per area.
 
 ## Startup order
 

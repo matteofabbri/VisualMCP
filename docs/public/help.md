@@ -153,14 +153,20 @@ be reverted while the file is unchanged. Use a branch and a clean working tree f
 
 **Which languages are supported?**
 
-C# is the main surface. Visual Basic has a style layer (`simplify_vb_code`, 15 ids), the metacode
-frontend (`metacode_translate`, `metacode_index`, `metacode_generate`) and the
-language-neutral build/test/diagnostic tools — no refactorings, inspections or formatter. Razor and
-Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
+C# is the main surface, and Visual Basic is a supported language: the symbol index, metacode,
+`structural_search`, `format_code`/`optimize_usings`/`code_cleanup`, the inspection packs that ship VB
+analyzers, the analysis tools (dead code, code smells, async/performance, complexity), the refactorings
+that are not C#-idiom-specific (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`),
+`simplify_vb_code` (15 ids) and the language-neutral build/test/diagnostic tools all read `.vb`. What
+stays C#-only is named in [Limits → Language coverage](reference/limits.md#language-and-platform-coverage).
+Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
-Core migrations run through `ef_migrations`. F# has no semantic support (text and build/test only).
-JS/TS/HTML/CSS, SQL as a language, and Kubernetes manifests are at most full-text indexed: no parser,
-no semantic analysis. The full table is
+Core migrations run through `ef_migrations`. SQL has a pattern scanner (`sql_files`, `analyze_sql` with
+SQL0001–SQL0010), not a dialect parser. The JavaScript/TypeScript toolchain runs through the project's
+own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and `node_typecheck`/`node_lint` interpret
+`tsc` and `eslint`; Kubernetes and Helm go through `k8s_*`. F# has no semantic support (the compiler's
+own diagnostics through `build_project`, plus build/test and text search). HTML/CSS remain text, and none
+of these layers replaces a parser for those languages: the full table is
 [Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage). C#,
 Razor, decompiled assemblies and Ghidra snapshots are all inputs to metacode.
 
@@ -182,7 +188,7 @@ present and skips it with a warning when not.
 
 **How many tools are there?**
 
-355 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
+373 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
 (everything, with schemas), or the [tool catalogue](tools.md).
 
 **How do I update?**

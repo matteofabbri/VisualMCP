@@ -29,9 +29,9 @@ service declared here. The library has no dependency on MCP, on a client, or on 
 | `Libraries/` | the host-agnostic libraries — [Libraries/README.md](Libraries/README.md) |
 | `Search/` | `search_text` and the FTS5 full-text index over the solution store |
 | `Storage/` | `VisualMcpStore` (SQLite at `<solution>/.visualMCP/visualmcp.db`), the EF Core schema model, command log, edit history |
-| `Execution/` | build, publish, pack, run, EF migrations, environment info, `run_command`, `stop_server` |
+| `Execution/` | build, publish, pack, run, EF migrations, environment info, `run_command`, `stop_server`, and `ExternalTool` (PATH/`node_modules/.bin` resolution; Windows `.cmd` shims through `cmd.exe`) |
 | `Debugging/` | DAP client, netcoredbg discovery and installation, breakpoints, sessions |
-| `Git/`, `GitHub/`, `Docker/` | CLI wrappers that return structured results |
+| `Git/`, `GitHub/`, `Docker/`, `Kubernetes/`, `Node/` | CLI wrappers that return structured results: git, `gh`, the Docker engine, `kubectl`/`helm`, and npm/pnpm/yarn + `tsc`/`eslint` |
 | `Collaboration/` | the hosting services other than GitHub (`git_host`: GitLab, Azure DevOps, Bitbucket) and the review brief (`code_review`) |
 | `Planning/` | the kanban board and the task checklist, stored in the solution store |
 | `Platform/` | host system facts, line endings, text diff |

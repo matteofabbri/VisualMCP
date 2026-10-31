@@ -322,3 +322,75 @@ code_review(baseRef=HEAD, path?, maxFiles=100, includeInspections=false,
 `find_breaking_changes` compares the public surface, and `gh_pr action=review` posts the review with
 its line comments. GitHub is served by the `gh` CLI; `git_host` covers GitLab, Azure DevOps and
 Bitbucket over their HTTP APIs, and both are read-only until `confirm=true`.
+
+## Kubernetes, Node and SQL
+
+```
+k8s_status(timeoutSeconds=30)
+
+k8s_context(action=current|list|use, name?, timeoutSeconds=30)
+
+k8s_get(kind, name?, namespaceName?, allNamespaces=false, selector?,
+        output?, timeoutSeconds=60)
+                → output omitted = summary rows parsed from `get -o json`
+                  (name, namespace, phase or "N/M ready", restarts, age);
+                  output=yaml|json|wide|name|jsonpath=… returns the raw view
+
+k8s_describe(kind, name?, namespaceName?, allNamespaces=false, timeoutSeconds=60)
+
+k8s_logs(pod, container?, namespaceName?, tail=200, since?, previous=false,
+         timeoutSeconds=45)
+
+k8s_apply(file?, content?, namespaceName?, dryRun=true, confirm=false,
+          timeoutSeconds=120)
+                → exactly one of file/content; dryRun=true is the SERVER-side
+                  validation (--dry-run=server) and changes nothing; applying
+                  needs dryRun=false AND confirm=true
+
+k8s_delete(kind, name, namespaceName?, ignoreNotFound=false, confirm=false,
+           timeoutSeconds=120)
+
+k8s_rollout(action=status|restart|undo, kind=deployment, name?, namespaceName?,
+            toRevision?, confirm=false, timeoutSeconds=180)
+
+k8s_helm(action=list|status|history|get-values|template|repo-list, release?,
+         chart?, namespaceName?, valuesFile?, setValues[]?, timeoutSeconds=120)
+                → template renders offline with -f/--set; list and history ask
+                  for -o json; a missing helm is reported, not thrown
+
+node_info(directory?)
+                → nearest package.json above directory (default: cwd), the
+                  package manager (packageManager field → lockfile → npm),
+                  declaredPackageManager, node/manager versions, scripts,
+                  dependency counts, typescriptInstalled/eslintInstalled
+
+node_install(directory?, packages[]?, dev=false, remove=false,
+             frozenLockfile=false, timeoutSeconds=300)
+                → no packages = the lockfile install (npm ci when frozenLockfile);
+                  dev=true adds --save-dev; remove=true uninstalls
+
+node_script(script, directory?, args[]?, timeoutSeconds=600)
+                → <manager> run <script> [-- args…]; an unknown script is refused
+                  with the list of the ones package.json declares
+
+node_typecheck(directory?, project?, emit=false, timeoutSeconds=300)
+                → node_modules/.bin/tsc --noEmit --pretty false, parsed into
+                  TSxxxx diagnostics; missing TypeScript is reported with the
+                  install command, never downloaded
+
+node_lint(directory?, pattern?, fix=false, timeoutSeconds=300)
+                → node_modules/.bin/eslint --format json, parsed into findings
+                  with rule, severity and position; topRules summarises
+
+node_outdated(directory?, timeoutSeconds=180)
+node_audit(directory?, timeoutSeconds=180)
+
+sql_files(path?, maxFiles=500)
+                → per file: lines, statements, verbs, tables, finding count;
+                  bin/obj/node_modules/.git are skipped
+
+analyze_sql(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
+                → SQL0001-SQL0010, each with rule, severity, file:line:column,
+                  the source line and a fix; unknown rule ids are refused with
+                  the catalogue. A pattern scan, not a dialect parser.
+```

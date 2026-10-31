@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **355 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **373 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -12,8 +12,8 @@ Conventions:
 - "Solution tools" auto-discover and load the solution in the working directory. `load_solution` is only
   needed to target a different `.sln`/`.slnx`.
 - A **✎** marks a tool that writes or changes state; **✎ preview** means it defaults to a dry run. Tables
-  made of actions (refactoring, Git, Docker) are mostly writes; the read-only exceptions are named in the
-  section.
+  made of actions (refactoring, Git, Docker, Kubernetes, Node) are mostly writes; the read-only exceptions
+  are named in the section.
 
 ## Contents
 
@@ -22,9 +22,10 @@ Conventions:
 [Refactoring](#refactoring) · [Code style](#code-style) · [Build, run and test](#build-run-and-test) ·
 [Debugging](#debugging) · [Benchmarks](#benchmarks) · [Profiling](#profiling) ·
 [NuGet and packages](#nuget-and-packages) · [Modernization](#modernization) ·
-[EF Core](#ef-core) · [Razor and Blazor](#razor-and-blazor) · [XAML](#xaml) ·
+[EF Core](#ef-core) · [Razor and Blazor](#razor-and-blazor) · [XAML](#xaml) · [SQL](#sql) ·
 [Decompilation and reflection](#decompilation-and-reflection) · [Metacode](#metacode) ·
-[Git](#git) · [GitHub](#github) · [Docker](#docker) · [Planning](#planning) ·
+[Git](#git) · [GitHub](#github) · [Docker](#docker) · [Kubernetes and Helm](#kubernetes-and-helm) ·
+[Node and JavaScript/TypeScript](#node-and-javascripttypescript) · [Planning](#planning) ·
 [Automation and protocols](#automation-and-protocols) · [Maintenance](#maintenance) ·
 [Scaffolding](#scaffolding) · [Self-management](#self-management)
 
@@ -57,7 +58,7 @@ Conventions:
 
 | Tool | What it does |
 |---|---|
-| `find_symbol` | Find declared types and members by name, semantically; ranking exact → prefix → CamelHumps (`CPS` finds `CheckParameterSafety`) → contains, with the match kind on each hit |
+| `find_symbol` | Find declared types and members by name, semantically; ranking exact → prefix → CamelHumps (`CPS` finds `CheckParameterSafety`) → contains, with the match kind on each hit, and a fuzzy-subsequence fallback (`custord` finds `CustomerOrder`) when nothing matched |
 | `call_hierarchy` | The call hierarchy in both directions as a tree: who calls this member, what it calls, with a depth and a node budget |
 | `solution_map` | The map of the codebase: projects and what each is, the namespaces with the largest types, the entry points, and the repository's Markdown |
 | `capability_report` | What the SERVER can do, read from the running build: tools by area with live counts, rule catalogues, language layers |
@@ -65,7 +66,7 @@ Conventions:
 | `find_endpoints` | ASP.NET endpoints: controller actions and minimal-API Map* calls with verb, route and file:line |
 | `find_todos` | The TODO / FIXME / HACK / XXX comments with file:line, grouped by marker |
 | `analyze_stack_trace` | A stack trace as frames with file:line, resolving the frames that carry no location |
-| `structural_search` | ✎ preview Match C# syntax by shape with `$holes$` (not regex), and report what each hole bound; with a replacement, rewrite every match under the compiler gate |
+| `structural_search` | ✎ preview Match code by shape with `$holes$` (not regex), in C# or Visual Basic (`language=auto|cs|vb`), and report what each hole bound; with a replacement, rewrite every match under the compiler gate |
 | `read_symbol` | Return the source of a declaration (whole type, method, property, field) with line numbers |
 | `find_references` | Every real use of a symbol — reads, writes, calls — not just textual occurrences |
 | `find_callers` | Call hierarchy: every method that calls the given method |
@@ -153,6 +154,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `rename_tuple_component` | Rename one element of a named tuple, semantically |
 | `move_type` | ✎ Move a type into its own file named after it |
 | `move_type_to_outer_scope` | Hoist a nested type to its namespace, rewriting `Outer.Inner` |
+| `move_type_to_nested_scope` | ✎ Move a namespace-level type into another type, rewriting every reference to `Target.Source` |
 | `move_to_folder` | ✎ Move a file to the folder that matches its namespace (or an explicit folder) |
 | `move_to_namespace` | ✎ Move a type to another namespace and update references |
 | `move_static_members` | ✎ Move static methods/properties/fields to another type and re-point every use |
@@ -170,6 +172,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `introduce_parameter` | ✎ Turn a compile-time-fixed expression into a parameter, passing it at every call site |
 | `introduce_part_of_string` | ✎ Lift a substring of a string literal into a private const |
 | `change_signature` | ✎ Reorder, add or remove parameters and update every call site |
+| `transform_parameters` | ✎ Wrap parameters in a parameter object, make them optional or required, retype them, or replace one with a property |
 | `change_type` | ✎ Replace a declaration's type, only if the project still compiles |
 | `change_nullability` | ✎ Toggle a nullable annotation, refused when it would add nullability diagnostics |
 | `use_base_type` | ✎ Replace a declaration's type with a base type or interface, if it compiles |
@@ -191,9 +194,11 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `implement_inpc` | ✎ Add `INotifyPropertyChanged` plumbing and convert properties to notifying ones |
 | `generate_members` | ✎ Generate constructor, `Equals`/`GetHashCode` and `ToString` from fields/properties |
 | `implement_members` | ✎ Generate stubs for the interface and abstract members a type still owes; refused unless the compiler errors disappear |
-| `create_from_usage` | ✎ Create the method, property or type a compiler error already assumes (CS1061/CS0246/CS0103) |
+| `create_from_usage` | ✎ Create what a compiler error already assumes: the method or property on the receiver's type (CS1061), the static member on its type (CS0117), the overload whose signature is the call site (CS1501/CS7036), the type (CS0246) or a method on the enclosing type (CS0103) |
 | `generate_docs` | ✎ Write the missing XML `<summary>`/`<param>`/`<typeparam>`/`<returns>` entries from the declaration name |
 | `make_static` | ✎ Make an instance member static and rewrite call sites |
+| `make_non_static` | ✎ Make a static member an instance member, routing each call through an instance already in scope |
+| `generify` | ✎ Turn a concrete type used in a method or type into a type parameter, updating call sites and references |
 | `static_to_extension` | ✎ Turn a static method into an extension method, rotating the receiver |
 | `type_to_partial` | ✎ Mark every declaration of a type `partial` |
 | `global_usings` | ✎ Move a project's plain usings into `GlobalUsings.cs` |
@@ -204,7 +209,8 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `remove_regions` | ✎ Strip `#region`/`#endregion` and keep the code |
 | `safe_delete` | ✎ Delete a symbol only when Roslyn finds zero references |
 | `invert_if` | ✎ Swap an if/else's branches and negate the condition |
-| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators, remove an argument name, and string literals between regular, verbatim and raw — 26 action ids, compiler-gated |
+| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators (add and remove), remove an argument name, merge or split an `if` chain, join a null check with its use, `use_var` / `use_explicit_type`, split a declaration, remove braces, `#nullable enable` migration, `ConfigureAwait(false)`, and string literals between regular, verbatim and raw — 36 action ids, compiler-gated |
+| `templates` | ✎ preview ReSharper's templates as data: `list` the 18 live, 10 postfix (`.if`, `.null`, `.var`, `.await`, `.foreach`, …) and 8 file templates plus the team's own in `.visualMCP/templates.json`; `expand` a live shortcut or a postfix expression at a line; `create` a new file (class, interface, record, struct, enum, static class, abstract class, xUnit test); `save`/`delete` the custom ones — compiler-gated |
 | `fix_complexity` | ✎ preview Make the codebase simpler in one call: rank every method, lower the worst with the same moves as `reduce_complexity`, report before/after — whole solution, project or file |
 | `reduce_complexity` | ✎ Lower cyclomatic and cognitive complexity by extracting blocks, naming booleans and adding guard clauses, re-measuring until a target |
 | `remove_params` | ✎ preview Remove the `params` modifier from a method's last array parameter; refused when a call site passes the elements individually |
@@ -221,7 +227,8 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 |---|---|
 | `simplify_code` | ✎ preview Apply the IDE's mechanical style suggestions to C#: 87 rule ids, at document, project or solution scope, compiler-gated, preview by default; IDE0005/IDE0032/IDE0290 are delegated to their own tools |
 | `simplify_vb_code` | ✎ preview The same engine for Visual Basic: 15 rule ids, compiler-gated, preview by default |
-| `code_cleanup` | ✎ preview Run the cleanup steps in order (style → usings → regions → reorder → format) over a document, project or solution |
+| `code_cleanup` | ✎ preview Run the cleanup steps in order (style → usings → regions → reorder → format) over a document, project or solution; `steps` or a named `profile` — the built-in `full`/`reformat`/`style`/`usings`/`regions`/`reorder`/`safe` or a team one from `.visualMCP/cleanup-profiles.json`, which `saveProfileAs` writes |
+| `layout_code` | ✎ preview CodeMaid's Format Document rules Roslyn's formatter does not implement: reflow full-line `//` comments to a width, join a line range (refused when the token stream would change), collapse runs of blank lines and trim them at the braces |
 | `format_code` | ✎ preview Reformat with Roslyn using the project's `.editorconfig`, preserving line endings; document, project or solution |
 
 ## Build, run and test
@@ -370,6 +377,17 @@ proved — the notes say so.
 | `analyze_xaml` | Findings `XAML0001`–`XAML0009`: duplicate `x:Name`/`x:Key`, missing or unresolvable `x:Class`, an event handler with no method, a resource key nothing defines, a `DataTemplate` without its type, a name colliding with a member, invalid XML |
 | `xaml_navigate` | Follow one name to everything attached to it: `name` (declarations + `ElementName` uses + the generated field), `resource` (definitions + uses), `style` (BasedOn chain and derived styles), `handler` (markup + method) |
 
+## SQL
+
+`.sql` files as a scanned language: comments and string literals are masked first, statements are split
+and the rules that need no schema are applied. It is a pattern scanner, not a dialect parser — it never
+claims that a database accepts a statement.
+
+| Tool | What it does |
+|---|---|
+| `sql_files` | Inventory of the solution's `.sql` files: lines, statements, verbs, tables named, finding count per file; `bin`, `obj`, `node_modules` and VCS folders are skipped |
+| `analyze_sql` | Findings `SQL0001`–`SQL0010` with `file:line:column`, the source line and a fix: unterminated literal/comment/bracket, unbalanced parentheses, `SELECT *`, `UPDATE`/`DELETE` without `WHERE`, `DROP` without `IF EXISTS`, dynamic SQL by concatenation, an unclosed transaction, a leading-wildcard `LIKE`, `ADD … NOT NULL` without `DEFAULT`, an `INSERT` column/value count mismatch |
+
 ## Decompilation and reflection
 
 | Tool | What it does |
@@ -475,6 +493,42 @@ the other actions change GitHub, and merges/deletes require `confirm=true`.
 | `docker_stats` | One-shot CPU/memory/network/block I/O sample |
 | `docker_compose` | up, down, ps, logs, restart, stop, start, pull, build |
 | `docker_prune` | Reclaim disk; requires `confirm=true` |
+
+## Kubernetes and Helm
+
+Through the ecosystem's own clients: `kubectl` for the cluster, `helm` for releases. `k8s_status`,
+`k8s_context`, `k8s_get`, `k8s_describe` and `k8s_logs` are read-only; `k8s_apply`, `k8s_delete` and
+`k8s_rollout` change the cluster and require `confirm=true` (apply defaults to a server-side dry run).
+A missing client or an unreachable cluster is a structured answer, not an exception.
+
+| Tool | What it does |
+|---|---|
+| `k8s_status` | Whether kubectl is installed, client and server versions, the current context, whether a cluster answers, and the helm version when present |
+| `k8s_context` | `current`, `list` (the contexts table) or `use` to switch context |
+| `k8s_get` | Resources as rows (name, namespace, phase or `N/M ready`, restarts, age) parsed from `get -o json`; `output=yaml\|json\|wide\|name\|jsonpath=…` for the client's own view; kinds may be comma-separated |
+| `k8s_describe` | The full `kubectl describe` text: events, conditions, containers, scheduler decisions |
+| `k8s_logs` | A pod's logs with `tail`, `since`, `container` and `previous` |
+| `k8s_apply` | ✎ Apply a manifest from a file or from `content`; server-side dry run unless `dryRun=false` with `confirm=true` |
+| `k8s_delete` | ✎ Delete one resource; requires `confirm=true`, `ignoreNotFound` for idempotence |
+| `k8s_rollout` | `status`, `restart` or `undo` (with `toRevision`) of a workload; restart/undo require `confirm=true` |
+| `k8s_helm` | `list`, `status`, `history`, `get-values`, `template` (offline render with values file / `--set`) and `repo-list` |
+
+## Node and JavaScript/TypeScript
+
+The toolchain a .NET solution often carries next to it, run through the project's own package manager
+(npm, pnpm or yarn — detected from `packageManager`, then the lockfile) and the project's own installed
+`tsc`/`eslint`. Nothing is downloaded implicitly: a missing compiler is reported with the command that
+installs it.
+
+| Tool | What it does |
+|---|---|
+| `node_info` | The nearest `package.json`, its name/version, the package manager and its version, the scripts, dependency counts, whether TypeScript and ESLint are installed |
+| `node_install` | Install the lockfile (`ci` / `--frozen-lockfile`), add packages (`dev=true` for `--save-dev`) or remove them |
+| `node_script` | Run one `package.json` script with arguments forwarded after `--`; refuses a script that does not exist and lists the ones that do |
+| `node_typecheck` | `tsc --noEmit --pretty false` parsed into `TSxxxx` diagnostics with file:line:column and counts — the JS/TS equivalent of `get_diagnostics` |
+| `node_lint` | `eslint --format json` parsed into findings (file, rule, severity, position), counts and the rules that fire most; `fix=true` runs `--fix` |
+| `node_outdated` | `outdated --json` normalised across npm, pnpm and yarn 1 |
+| `node_audit` | `audit --json` normalised: severity counts and per package the title, vulnerable range and fix |
 
 ## Planning
 

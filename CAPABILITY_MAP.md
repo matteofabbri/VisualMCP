@@ -468,24 +468,34 @@ nativo con una spiegazione invece di lasciare che ILSpy fallisca nella metadata.
 | Squash commit | ✅ | `git_squash` — commit-tree + reset --soft: funziona anche squashendo l'intero branch |
 | Rinominare un commit | ✅ | `git_amend` (HEAD) |
 | Merge | ✅ | `git_merge` — default/no-ff/ff-only/squash, abort, conflitti riportati |
+| Merge assistito a 3 vie | ✅ | `git_conflicts` — hunk con ours/theirs/base, resolve per hunk (ours/theirs/both/base/custom), staging automatico |
 | Rebase | ✅ | `git_rebase` — start/continue/abort/skip |
+| Rebase interattivo | ✅ | `git_rebase action=plan` — todo list JSON (pick/reword/squash/fixup/drop con messaggi) applicata via `GIT_SEQUENCE_EDITOR`, nessun editor |
 | Cherry-pick / revert | ✅ | `git_cherry_pick`, `git_revert` |
 | Reset | ✅ | `git_reset` — soft/mixed/hard; hard richiede `confirm=true` |
 | Git stash | ✅ | `git_stash` — push/list/pop/apply/drop/show/clear |
+| Patch / shelve nominati | ✅ | `git_patch` — create (working/staged/range), list, show, apply (`--check`, `--3way`, reverse), delete |
+| Worktree | ✅ | `git_worktree` — list/add/remove/prune |
+| Bisect | ✅ | `git_bisect` — start/good/bad/skip/log/view/reset |
+| Submodule | ✅ | `git_submodule` — status/update/init/sync/deinit |
 | Tag | ✅ | `git_tag` — list/create/delete, annotati con messaggio |
 | Remote | ✅ | `git_remote` — list/add/remove/set-url |
 | Fetch / pull / push | ✅ | `git_sync` — force con `--force-with-lease` dietro `confirm=true` |
 | Git show | ✅ | `git_show` |
 | Git blame | ✅ | `git_blame` (con range di righe) |
-| Comando git arbitrario | ✅ | `git_run` — copre reflog, worktree, bisect, submodule, filter-repo |
+| Comando git arbitrario | ✅ | `git_run` — copre reflog e filter-repo |
 | GitHub repo | ✅ | `gh_repo` — list/view/create/fork/clone/edit/delete |
-| GitHub PR | ✅ | `gh_pr` — list/view/create/merge/close/reopen/comment/diff/checkout/ready |
+| GitHub PR | ✅ | `gh_pr` — list/view/create/merge/close/reopen/comment/review/review-comments/checks/diff/checkout/ready |
+| GitHub review inline | ✅ | `gh_pr action=review` — commenti ancorati a `path`/`line`/`side`, event comment/approve/request-changes |
+| GitHub check runs | ✅ | `gh_pr action=checks` — stato, bucket, link di ogni check sul PR |
+| GitHub branch protection | ✅ | `gh_branch_protection` — get/checks/rules (ruleset pubblici, dettaglio con token admin) |
 | GitHub issue | ✅ | `gh_issue` — list/view/create/close/reopen/comment |
 | GitHub release | ✅ | `gh_release` — list/view/create/upload/delete |
 | GitHub Actions | ✅ | `gh_actions` — list/view/logs/rerun/cancel/workflows/dispatch |
 | GitHub secrets | ✅ | `gh_secret` — list/set/delete |
 | GitHub CLI passthrough | ✅ | `github` (gh command) |
-| PR diff analysis (Roslyn-aware) | ❌ | 🎯 |
+| GitLab / Azure DevOps / Bitbucket | ✅ | `git_host` — PR/MR, commenti, merge, issue/work item, pipelines; provider e coordinate dal remote, token da ambiente |
+| Review brief di un diff (Roslyn-aware) | ✅ | `code_review` — file per tipo, checklist dei rischi, TODO nuovi con riga, metodi peggiori dei file cambiati, findings opzionali |
 | Conventional commits enforcement | ❌ | 🎯 |
 
 ---
@@ -631,6 +641,29 @@ nativo con una spiegazione invece di lasciare che ILSpy fallisca nella metadata.
 
 ---
 
+## 17. Toolchain non-.NET: Kubernetes, Node e SQL (2026-10-31)
+
+Chiude la sezione 13 di [docs/gaps.md](docs/gaps.md): le righe "workaround" sono diventate tool, oppure un
+confine scritto con il motivo. 355 → **373 tool**.
+
+| Feature | Implementato | Note |
+|---------|:---:|-------|
+| Stato del cluster, contesti kubeconfig | ✅ | `k8s_status` (client/server/contesto/reachability + versione helm), `k8s_context` (`current`/`list`/`use`) |
+| Risorse del cluster come dati | ✅ | `k8s_get` — righe (nome, namespace, fase o `N/M ready`, restart, età) da `get -o json`; `output=yaml\|json\|wide\|name\|jsonpath=…` per la vista grezza; kind multipli con la virgola |
+| Diagnosi di un pod | ✅ | `k8s_describe` (eventi, condizioni, container, scheduler), `k8s_logs` (`tail`, `since`, `container`, `previous`) |
+| Scrittura sul cluster con conferma | ✅ | `k8s_apply` (server-side dry run di default; applica solo con `dryRun=false` + `confirm=true`), `k8s_delete`, `k8s_rollout` (`status`/`restart`/`undo`) |
+| Release Helm | ✅ | `k8s_helm` — `list`, `status`, `history`, `get-values`, `template` (render offline con `-f`/`--set`), `repo-list`; helm assente è una risposta, non un'eccezione |
+| Rilevamento del progetto JS/TS e del package manager | ✅ | `node_info` — il `package.json` più vicino, `packageManager` → lockfile → npm, versioni di node e del manager, script, dipendenze, tsc/eslint installati |
+| Installazione e script npm/pnpm/yarn | ✅ | `node_install` (lockfile, `ci`/`--frozen-lockfile`, add con `dev`, `remove`), `node_script` (argomenti dopo `--`, script inesistente rifiutato con la lista) |
+| Diagnostica TypeScript | ✅ | `node_typecheck` — `tsc --noEmit --pretty false` interpretato in diagnostica `TSxxxx` con `file(line,col)`, conteggi e output grezzo se non parsa nulla; TypeScript assente è segnalato con il comando che lo installa, mai scaricato |
+| Diagnostica ESLint | ✅ | `node_lint` — `eslint --format json` in finding (file, regola, severità, posizione), conteggi e regole più frequenti; `fix=true` esegue `--fix` |
+| Salute delle dipendenze JS | ✅ | `node_outdated` e `node_audit` normalizzano le forme npm, pnpm e yarn 1 (severità, range vulnerabile, fix disponibile) |
+| Inventario SQL | ✅ | `sql_files` — righe, statement, verbi, tabelle, finding per file; `bin`/`obj`/`node_modules`/VCS esclusi |
+| Diagnostica SQL | ✅ | `analyze_sql` — SQL0001–SQL0010 (lessicale, correttezza, sicurezza, performance) con `file:line:column`, riga sorgente e fix; commenti e letterali mascherati prima del match |
+| Parser SQL dialettale / schema | ❌ | Non c'è: lo scanner prova la forma, non che un database accetti lo statement (§1.6 di gaps.md) |
+
+---
+
 ## Riepilogo per Categoria
 
 Conteggio: una riga ✅ e una riga ❌ per ciascuna tabella di sezione; le righe 🔧 (parziali) e 💀
@@ -658,16 +691,16 @@ Conteggio: una riga ✅ e una riga ❌ per ciascuna tabella di sezione; le righe
 | Modernizzazione & upgrade | 6 | 0 | 100% |
 | **TOTALE** | **212** | **41** | **84%** |
 
-Le tabelle delle sezioni non contengono ancora i **14 tool aggiunti il 2026-10-30** — SSR, cleanup e
-formattazione, famiglia "create" (`implement_members`, `create_from_usage`, `generate_docs`), baseline
-delle ispezioni e le sette analisi (layer, export del grafo, LCOM4, test quality, validazione,
-nullability, breaking changes): il totale effettivo è **219 implementati**.
+Le tabelle delle sezioni sono ferme al 2026-10-30 e non contengono i **14 tool aggiunti quel giorno**
+(SSR, cleanup e formattazione, famiglia "create", baseline delle ispezioni, sette analisi) né i **18 chiusi
+il 2026-10-31** (9 Kubernetes/Helm, 7 Node/JS-TS, 2 SQL). Il conteggio vivo è `capability_report`:
+**373 tool**.
 
 ---
 
 ## Gap Prioritari vs ReSharper
 
-Aggiornato il 2026-10-30. Le quattro voci che stavano qui sono state chiuse: `structural_search`
+Aggiornato il 2026-10-31. Le quattro voci che stavano qui sono state chiuse: `structural_search`
 (SSR), `check_layer_violations` (layer enforcement), `generate_docs` (XML doc) e `convert_to_record`
 (già implementato, era rimasto elencato per errore). Nella stessa sessione sono arrivati anche
 `code_cleanup`, `format_code`, `implement_members`, `create_from_usage`, `inspection_baseline`,
@@ -678,18 +711,20 @@ Restano, in ordine di impatto:
 
 | Feature ReSharper / Rider | Priorità | Stato |
 |---------------------------|:---:|-------|
-| Debugger interattivo (breakpoint, stepping, watch, evaluate, debug di un test) | 🔴 Alta | ❌ assente; `profile_dump` / `profile_stacks` coprono solo lo snapshot |
-| Ambito linguaggi/piattaforme: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Media | ❌ fuori dal perimetro C#: al massimo indicizzati come testo (`text_index`), nessun parser né analisi semantica. **VB** ha solo `simplify_vb_code` (15 id, 34 rifiutati con motivo): niente refactoring, ispezioni dei pack, formatter, symbol index o metacode |
-| Flusso di test: debug di un test, continuous testing, "quali test coprono questo simbolo", scaffolding, mutation testing | 🟡 Media | ⚠️ `run_tests` + `get_test_coverage_map` coprono esecuzione e copertura per classe/metodo |
-| Codice decompilato come workspace (go-to-definition, rename, find usages) e vista IL | 🟡 Media | ❌ `decompile_*` restituisce testo; `find_assembly_api` è il sostituto per cercare nell'API |
-| Diagrammi ed esplorazione: grafo tipi/progetti interattivo, sequence diagram, structure view, code vision, TODO explorer | 🟢 Bassa | ⚠️ `export_dependency_graph` esporta DOT/Mermaid; il resto è assente |
-| Resto della famiglia "create/generate" e context action: long tail (if→switch, pattern merging, LINQ shape, loop, interpolazione, nullable migration) e template live/postfix/file | 🟡 Media | ⚠️ `context_action` copre 13 id (import_type, guardie, wrap in try/catch/finally/if/using, string_to_raw/verbatim/regular); `implement_members`, `create_from_usage`, `generate_docs` coprono i casi frequenti |
-| Amministrazione delle ispezioni (severità per scope, soppressioni, `.DotSettings`, daemon con compilazione calda) | 🟡 Media | ⚠️ `inspection_baseline` dà il gate CI, non la configurazione |
+| Debugger interattivo (breakpoint, stepping, watch, evaluate, debug di un test) | 🔴 Alta | ✅ chiuso il 2026-10-30: 16 tool `debug_*` su netcoredbg (DAP), `debug_test` compreso; restano fuori edit-and-continue e i breakpoint per tipo di eccezione |
+| Ambito linguaggi/piattaforme: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Media | ⚠️ chiuso il 2026-10-31 per XAML (inventario + XAML0001–0009 + navigazione), Razor, SQL (scanner SQL0001–SQL0010), EF migrations (`ef_migrations`), Kubernetes/Helm (`k8s_*`) e toolchain Node (npm/pnpm/yarn, tsc, eslint). Restano senza modello semantico **JS/TS** (solo toolchain) e **F#** (solo build/test: non è una lingua Roslyn) |
+| Flusso di test: debug di un test, continuous testing, "quali test coprono questo simbolo", scaffolding, mutation testing | 🟡 Media | ✅ chiuso: `run_test`, `rerun_failed`, `debug_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `run_affected_tests`, `find_flaky_tests` |
+| Codice decompilato come workspace (go-to-definition, find usages) e vista IL | 🟡 Media | ✅ chiuso per la navigazione: `assembly_workspace` (Ricerca/source/references/outline su un Roslyn workspace per MVID) + `disassemble` per l'IL; rename e debug nel decompilato restano impossibili (non c'è sorgente da scrivere) |
+| Diagrammi ed esplorazione: grafo tipi/progetti interattivo, sequence diagram, structure view, code vision, TODO explorer | 🟢 Bassa | ⚠️ `export_dependency_graph` (progetti/namespace/tipi), `call_graph`, `sequence_diagram`, `control_flow_graph`, `track_value`, `find_todos`, `find_endpoints`, `solution_map` e `find_file` ci sono; il rendering è del client |
+| Resto della famiglia "create/generate" e context action: long tail e template live/postfix/file | 🟡 Media | ⚠️ `context_action` copre 26 id; `implement_members`, `create_from_usage`, `generate_docs`, `generate_dto_from_json`, `generate_builder` coprono i casi frequenti; template e long tail restano |
+| Amministrazione delle ispezioni (severità per scope, soppressioni, `.DotSettings`, daemon con compilazione calda) | 🟡 Media | ✅ chiuso: `configure_inspection`, `suppress_finding`, `read_dot_settings`, `custom_inspections`, `naming_rules`, `find_spelling_issues`, `background_analysis`/`analysis_findings`; resta fuori solo il catalogo proprietario ReSharper |
 | Local history, merge assistito a 3 vie, GitLab/Azure DevOps | 🟢 Bassa | ✅ chiusa il 2026-10-31: `local_history`, `git_conflicts` (modello dei conflitti), `git_rebase action=plan`, `git_patch`, `git_host` (GitLab/Azure DevOps/Bitbucket), review inline e `code_review` |
-| Refactoring minori: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Bassa | ❌ |
+| Refactoring minori: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Bassa | ✅ chiusa il 2026-10-31 (`extract_members_to_partial`, `inline_field`, `transform_parameters`, `extension_to_static`, `invert_boolean`, `make_non_static`, `move_type_to_nested_scope`, `generify`) |
+| Taint analysis e trend di qualità tra commit | 🟡 Media | ❌ non chiudibile con un tool isolato: serve un motore di data-flow, rispettivamente le findig salvate per revisione (vedi §12 di gaps.md) |
+| Editing collaborativo in tempo reale | 💀 | Fuori scope: trasporto condiviso e superficie editor, non un tool stdio locale |
 
 L'inventario completo — linguaggio per linguaggio e area per area, con cosa esiste oggi, cosa manca
-esattamente e il workaround — è in **[docs/gaps.md](docs/gaps.md)**. La fotografia ✅ categoria per
+esattamente e dove finisce il confine — è in **[docs/gaps.md](docs/gaps.md)**. La fotografia ✅ categoria per
 categoria resta in [docs/resharper-codemaid-coverage.md](docs/resharper-codemaid-coverage.md).
 
 ## Gap Prioritari vs SonarQube/CodeScene
