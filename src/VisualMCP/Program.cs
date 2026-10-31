@@ -151,8 +151,10 @@ static async Task RunServerAsync(string[] args)
         "translate_python_file, clang -ast-dump=json via translate_cpp_file; pass dumpJson to translate a dump produced elsewhere).\n" +
         "- The SOLUTION'S metacode, persisted in .visualMCP/visualmcp.db and generated when the solution opens " +
         "(the background pass keeps it in step with saved files and a build refreshes it) -> metacode_index: " +
-        "action=status|build|complexity|trees. Every source of the solution is stored twice there — its native text " +
-        "and language (source_document) and its metacode (mc_document/mc_tree); the document set is decided by " +
+        "action=status|build|complexity|trees|ast. Every source of the solution is stored twice there — its native text " +
+        "and language (source_document) and its metacode (mc_document/mc_tree), whose COMPLETE AST is also stored " +
+        "node by node in mc_node (parent, property slot, position, depth, span, payload) so action=ast answers with " +
+        "the tree itself; the document set is decided by " +
         "language, so Razor pages/components are included and a language no frontend reads (Visual Basic today) is " +
         "recorded natively and reported as `unsupported` instead of being skipped. Its complexity is computed over " +
         "the language-neutral model " +

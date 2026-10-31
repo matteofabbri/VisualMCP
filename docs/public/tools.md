@@ -387,7 +387,7 @@ proved — the notes say so.
 |---|---|
 | `metacode_translate` | Lower C#, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed |
 | `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check |
-| `metacode_index` | The solution's metacode persisted in `.visualMCP/visualmcp.db`: status, build, model-level cyclomatic/cognitive complexity, stored trees |
+| `metacode_index` | The solution's metacode persisted in `.visualMCP/visualmcp.db`: status, build, model-level cyclomatic/cognitive complexity, stored trees, and the complete AST (`ast`: every node with parent link, property slot, position, depth, span and payload) |
 | `metacode_generate` | Generate C# from pseudocode, a stored tree or a file; what C# cannot express is lowered with a diagnostic |
 | `translate_python_file` | Translate a `.py` file into canonical pseudocode (runs CPython's `ast` dumper, or accepts a supplied dump) |
 | `translate_cpp_file` | Translate a C/C++ file into canonical pseudocode (runs `clang -ast-dump=json`, or accepts a supplied dump) |

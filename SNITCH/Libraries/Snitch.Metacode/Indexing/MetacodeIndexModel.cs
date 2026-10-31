@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Snitch.Metacode.Indexing;
 
 /// <summary>
@@ -32,6 +34,13 @@ public sealed record MetacodeDocumentFacts(
     IReadOnlyList<MetacodeTreeRow> Rows,
     int Diagnostics)
 {
+    /// <summary>
+    /// Every node of every declaration in <see cref="Rows"/>, in pre-order per declaration: the complete
+    /// AST, stored in <c>mc_node</c> next to the declaration's rendered text. Empty only for a document
+    /// no frontend read.
+    /// </summary>
+    public IReadOnlyList<MetacodeAstNode> Nodes { get; init; } = [];
+
     /// <summary>
     /// The document as its own language writes it — the native half of the record. Null for a document
     /// with no file behind it: a type that came out of a decompiled assembly.
@@ -82,6 +91,9 @@ public sealed record MetacodeBuildReport(
 
     /// <summary>How many were stored natively only, because no frontend reads their language.</summary>
     public int Unsupported { get; init; }
+
+    /// <summary>How many AST nodes the store holds in total (the <c>mc_node</c> rows).</summary>
+    public int Nodes { get; init; }
 }
 
 /// <summary>One binary whose code the store holds: the file name, the MVID its rows are keyed on, and how many types it contributed.</summary>
@@ -104,6 +116,9 @@ public sealed record MetacodeIndexStatus(
     /// <c>Documents</c>: a document no frontend reads appears here and not there.
     /// </summary>
     public int Sources { get; init; }
+
+    /// <summary>How many nodes of the AST the store holds (the <c>mc_node</c> rows), across every document.</summary>
+    public int Nodes { get; init; }
 }
 
 /// <summary>One row of the complexity report: a callable and the score the metacode gives it.</summary>
@@ -127,4 +142,39 @@ public sealed record MetacodeGenerateResult(
     string Target,
     IReadOnlyList<string> Diagnostics,
     IReadOnlyList<string> Usings,
+    string? Error = null);
+
+/// <summary>One node of a stored AST, nested the way the model holds it.</summary>
+/// <remarks>
+/// <see cref="Slot"/> is the parent's property that holds this node and <see cref="Ordinal"/> its index
+/// inside it, so the nested shape loses nothing of the flat rows it was built from. <see cref="Data"/> is
+/// the node's own payload, already parsed from the stored JSON.
+/// </remarks>
+public sealed record MetacodeAstTreeNode(
+    int Id,
+    string Kind,
+    string Slot,
+    int Ordinal,
+    int Line,
+    int Column,
+    JsonElement Data,
+    IReadOnlyList<MetacodeAstTreeNode> Children);
+
+/// <summary>One declaration's complete AST as the store holds it: the nested tree plus what it costs.</summary>
+public sealed record MetacodeAstTree(
+    string Path,
+    string Key,
+    string Kind,
+    string Name,
+    int Line,
+    int Nodes,
+    int MaxDepth,
+    IReadOnlyList<MetacodeAstTreeNode> Root);
+
+/// <summary>The answer to "show me the AST": the declarations that matched, their trees, and whether the cap cut them.</summary>
+public sealed record MetacodeAstResult(
+    string? Path,
+    IReadOnlyList<MetacodeAstTree> Declarations,
+    int Nodes,
+    bool Truncated,
     string? Error = null);

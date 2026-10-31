@@ -32,6 +32,9 @@ public sealed class MetacodeIndexStore : IDisposable
         max_nesting, statements, branches, expressions, text
         """;
 
+    /// <summary>What one path owns, children first, so a delete never leaves an orphan behind.</summary>
+    private static readonly string[] OwnedTables = ["mc_node", "mc_tree", "mc_document", "source_document"];
+
     /// <summary>
     /// The path prefix of a document that has no file: the metacode of a decompiled assembly. Those rows
     /// live in the same tables as the solution's own code (so one query sees both), and the prefix is what
@@ -150,7 +153,7 @@ public sealed class MetacodeIndexStore : IDisposable
             using (var delete = connection.CreateCommand())
             {
                 delete.Transaction = transaction;
-                delete.CommandText = "DELETE FROM mc_tree WHERE path = $path;";
+                delete.CommandText = "DELETE FROM mc_node WHERE path = $path; DELETE FROM mc_tree WHERE path = $path;";
                 delete.Parameters.AddWithValue("$path", facts.Path);
                 delete.ExecuteNonQuery();
             }
@@ -202,6 +205,53 @@ public sealed class MetacodeIndexStore : IDisposable
                 }
             }
 
+            // The complete AST, node by node: one row per node of every declaration, in pre-order, so
+            // the tree is a query (`ORDER BY node_id`) instead of a rendering that has to be parsed.
+            if (facts.Nodes.Count > 0)
+            {
+                using var node = connection.CreateCommand();
+                node.Transaction = transaction;
+                node.CommandText = """
+                    INSERT OR REPLACE INTO mc_node
+                        (path, declaration_key, node_id, parent_id, slot, ordinal, depth, kind,
+                         line, col, end_line, data, doc_hash)
+                    VALUES ($path, $key, $id, $parent, $slot, $ordinal, $depth, $kind,
+                            $line, $col, $end, $data, $hash);
+                    """;
+
+                var nodePath = node.Parameters.Add("$path", SqliteType.Text);
+                var nodeKey = node.Parameters.Add("$key", SqliteType.Text);
+                var nodeId = node.Parameters.Add("$id", SqliteType.Integer);
+                var parent = node.Parameters.Add("$parent", SqliteType.Integer);
+                var slot = node.Parameters.Add("$slot", SqliteType.Text);
+                var ordinal = node.Parameters.Add("$ordinal", SqliteType.Integer);
+                var depth = node.Parameters.Add("$depth", SqliteType.Integer);
+                var nodeKind = node.Parameters.Add("$kind", SqliteType.Text);
+                var nodeLine = node.Parameters.Add("$line", SqliteType.Integer);
+                var nodeCol = node.Parameters.Add("$col", SqliteType.Integer);
+                var nodeEnd = node.Parameters.Add("$end", SqliteType.Integer);
+                var nodeData = node.Parameters.Add("$data", SqliteType.Text);
+                var nodeHash = node.Parameters.Add("$hash", SqliteType.Text);
+
+                foreach (var ast in facts.Nodes)
+                {
+                    nodePath.Value = facts.Path;
+                    nodeKey.Value = ast.DeclarationKey;
+                    nodeId.Value = ast.NodeId;
+                    parent.Value = ast.ParentId;
+                    slot.Value = ast.Slot;
+                    ordinal.Value = ast.Ordinal;
+                    depth.Value = ast.Depth;
+                    nodeKind.Value = ast.Kind;
+                    nodeLine.Value = ast.Line;
+                    nodeCol.Value = ast.Column;
+                    nodeEnd.Value = ast.EndLine;
+                    nodeData.Value = ast.Data;
+                    nodeHash.Value = facts.Hash;
+                    node.ExecuteNonQuery();
+                }
+            }
+
             using (var stamp = connection.CreateCommand())
             {
                 stamp.Transaction = transaction;
@@ -216,7 +266,9 @@ public sealed class MetacodeIndexStore : IDisposable
                 stamp.Parameters.AddWithValue("$mtime", facts.Mtime);
                 stamp.Parameters.AddWithValue("$language", facts.Language);
                 stamp.Parameters.AddWithValue("$declarations", facts.Rows.Count);
-                stamp.Parameters.AddWithValue("$nodes", facts.Rows.Sum(row => row.Statements + row.Expressions));
+                stamp.Parameters.AddWithValue("$nodes", facts.Nodes.Count > 0
+                    ? facts.Nodes.Count
+                    : facts.Rows.Sum(row => row.Statements + row.Expressions));
                 stamp.Parameters.AddWithValue("$diagnostics", facts.Diagnostics);
                 stamp.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
                 stamp.ExecuteNonQuery();
@@ -257,7 +309,7 @@ public sealed class MetacodeIndexStore : IDisposable
         {
             using var transaction = connection.BeginTransaction();
 
-            foreach (var table in new[] { "mc_tree", "mc_document", "source_document" })
+            foreach (var table in OwnedTables)
             {
                 using var delete = connection.CreateCommand();
                 delete.Transaction = transaction;
@@ -362,7 +414,7 @@ public sealed class MetacodeIndexStore : IDisposable
 
             foreach (var path in paths)
             {
-                foreach (var table in new[] { "mc_tree", "mc_document", "source_document" })
+                foreach (var table in OwnedTables)
                 {
                     using var delete = connection.CreateCommand();
                     delete.Transaction = transaction;
@@ -405,7 +457,7 @@ public sealed class MetacodeIndexStore : IDisposable
             using var transaction = connection.BeginTransaction();
             foreach (var path in stale)
             {
-                foreach (var table in new[] { "mc_tree", "mc_document", "source_document" })
+                foreach (var table in OwnedTables)
                 {
                     using var delete = connection.CreateCommand();
                     delete.Transaction = transaction;
@@ -461,7 +513,7 @@ public sealed class MetacodeIndexStore : IDisposable
             using var transaction = connection.BeginTransaction();
             foreach (var path in stale)
             {
-                foreach (var table in new[] { "mc_tree", "mc_document", "source_document" })
+                foreach (var table in OwnedTables)
                 {
                     using var delete = connection.CreateCommand();
                     delete.Transaction = transaction;
@@ -596,6 +648,77 @@ public sealed class MetacodeIndexStore : IDisposable
         }
     }
 
+    /// <summary>
+    /// The stored AST of one declaration, in pre-order. The rows are the tree: a node's parent is the row
+    /// <c>parent_id</c> names, the property that holds it is <c>slot</c>, and its position there is
+    /// <c>ordinal</c>.
+    /// </summary>
+    public IReadOnlyList<MetacodeAstNode> Ast(string path, string declarationKey, int limit)
+    {
+        var connection = Open();
+        if (connection is null) return [];
+
+        _gate.Wait();
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT declaration_key, node_id, parent_id, slot, ordinal, depth, kind, line, col, end_line, data
+                FROM mc_node
+                WHERE path = $path AND declaration_key = $key
+                ORDER BY node_id LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$path", path);
+            command.Parameters.AddWithValue("$key", declarationKey);
+            command.Parameters.AddWithValue("$limit", Clamp(limit));
+
+            var nodes = new List<MetacodeAstNode>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                nodes.Add(new MetacodeAstNode(
+                    reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetString(3),
+                    reader.GetInt32(4), reader.GetInt32(5), reader.GetString(6), reader.GetInt32(7),
+                    reader.GetInt32(8), reader.GetInt32(9), reader.GetString(10)));
+            }
+
+            return nodes;
+        }
+        catch (SqliteException)
+        {
+            return [];
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>How many nodes the store holds for one declaration, so a capped read can say it was cut.</summary>
+    public int AstCount(string path, string declarationKey)
+    {
+        var connection = Open();
+        if (connection is null) return 0;
+
+        _gate.Wait();
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM mc_node WHERE path = $path AND declaration_key = $key;";
+            command.Parameters.AddWithValue("$path", path);
+            command.Parameters.AddWithValue("$key", declarationKey);
+            return Convert.ToInt32(command.ExecuteScalar());
+        }
+        catch (SqliteException)
+        {
+            return 0;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     /// <summary>Rows whose declaration key or name matches exactly; a qualified name matches the end of the key.</summary>
     public IReadOnlyList<MetacodeTreeRow> Resolve(string query, int limit)
     {
@@ -678,6 +801,7 @@ public sealed class MetacodeIndexStore : IDisposable
             var average = Count(connection,
                 "SELECT COALESCE(CAST(AVG(cyclomatic) AS INTEGER), 0) FROM mc_tree WHERE cyclomatic > 0;");
             var sources = Count(connection, "SELECT COUNT(*) FROM source_document;");
+            var nodes = Count(connection, "SELECT COUNT(*) FROM mc_node;");
 
             string? newest = null;
             using (var command = connection.CreateCommand())
@@ -690,6 +814,7 @@ public sealed class MetacodeIndexStore : IDisposable
                 documents, declarations, functions, types, max, average, newest, _path, null)
             {
                 Sources = sources,
+                Nodes = nodes,
             };
         }
         catch (SqliteException)

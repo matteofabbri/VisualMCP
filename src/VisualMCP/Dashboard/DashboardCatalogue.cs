@@ -61,6 +61,10 @@ public static class DashboardCatalogue
             "One row per declaration: its canonical pseudocode (compressed) and the structural facts the " +
             "model gives it — cyclomatic and cognitive complexity, nesting, statements, branches."),
 
+        new("mc_node", "Metacode AST nodes", "Indexes",
+            "The complete AST of every stored declaration, one row per node: the parent link, the parent " +
+            "property that holds it and its position there, depth, span, and the node's own payload as JSON."),
+
         new("ti_document", "Indexed documents (text)", "Indexes",
             "One row per file in the full-text index, with length, modification time and line count."),
 

@@ -20,7 +20,7 @@ public sealed class SchemaTests
         "context", "command_log", "applied_edit", "package_fact", "package_dependency", "decompiled_artifact",
         "board_item", "board_comment", "board_history",
         "ti_document", "ti_row", "ti_line",
-        "mc_document", "mc_tree", "source_document",
+        "mc_document", "mc_tree", "mc_node", "source_document",
         "si_symbol", "si_usage", "si_document", "si_metacode",
         "native_artifact", "native_function", "native_call",
     ];

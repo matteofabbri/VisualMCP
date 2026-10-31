@@ -70,7 +70,7 @@ The tables the store is known to contain today:
 |---|---|
 | Activity | `command_log`, `applied_edit`, `context` |
 | Board | `board_item`, `board_comment`, `board_history` |
-| Indexes | `si_symbol`, `si_usage`, `si_document`, `si_metacode`, `source_document`, `mc_document`, `mc_tree`, `ti_document`, `ti_row`, `ti_line` |
+| Indexes | `si_symbol`, `si_usage`, `si_document`, `si_metacode`, `source_document`, `mc_document`, `mc_tree`, `mc_node`, `ti_document`, `ti_row`, `ti_line` |
 | Packages | `package_fact`, `package_dependency` |
 | Artifacts | `decompiled_artifact` |
 

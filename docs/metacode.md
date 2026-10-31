@@ -681,8 +681,19 @@ scrive la sua lingua, dall'altro come la legge il modello.
 | Tabella | Chiave | Cosa tiene |
 |---|---|---|
 | `source_document` | `path` | il file **nella sua lingua nativa**: testo, tag di lingua (`cs`, `vb`, `razor`), hash del contenuto, timestamp, caratteri e righe. C'è per **ogni** sorgente della soluzione |
-| `mc_document` | `path` | hash del contenuto, timestamp, progetto, lingua, numero di dichiarazioni, diagnostici — solo per i documenti che un frontend ha letto |
+| `mc_document` | `path` | hash del contenuto, timestamp, progetto, lingua, numero di dichiarazioni, nodi dell'AST, diagnostici — solo per i documenti che un frontend ha letto |
 | `mc_tree` | `declaration_key` + `path` + riga + nome | pseudocodice canonico della dichiarazione (gzip) e i fatti strutturali: cyclomatic, cognitive, nesting massimo, istruzioni, rami, espressioni |
+| `mc_node` | `path` + `declaration_key` + `node_id` | **l'AST completo** di ogni dichiarazione: una riga per nodo, con `parent_id`, `slot` (la proprietà del padre che lo contiene), `ordinal`, `depth`, riga/colonna e il payload del nodo in JSON |
+
+`mc_node` è l'albero, `mc_tree.text` è la sua resa: lo pseudocodice canonico serve a leggere, confrontare e
+rigenerare, `mc_node` tiene **ogni** nodo del modello — lo stesso vocabolario di `MetacodeNode` (`If`,
+`Block`, `Invocation`, `Binary`, …) — con i legami di parentela, quindi una domanda strutturale ("dove
+sono i `Try` più profondi di 4", "quali nodi non hanno un'origine") è una query SQL e non un parse.
+Le righe sono in pre-ordine: `node_id` cresce sempre dopo il padre, e `ORDER BY node_id` ricostruisce
+l'albero senza altro input. Il walk è guidato dal costruttore primario di ogni record, non da uno
+`switch` sui tipi: un nodo nuovo del modello entra nell'AST il giorno che esiste, senza una lista da
+aggiornare. `metacode_index action=ast` lo restituisce annidato, con `parent_id`/`slot`/`ordinal` su ogni
+nodo e il payload già interpretato; un tipo annida i suoi membri, esattamente come il suo testo.
 
 Il lato nativo è il testo, non un albero serializzato: un `SyntaxTree` di Roslyn non si serializza, e
 rileggerlo dal testo costa un parse. Quello che il database conserva è quindi la sorgente esatta (più il

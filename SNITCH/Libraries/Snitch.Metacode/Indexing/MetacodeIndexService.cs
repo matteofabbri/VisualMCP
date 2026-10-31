@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Snitch.Metacode.Analysis;
 using Snitch.Metacode.Decompilation;
@@ -47,6 +48,14 @@ public interface IMetacodeIndexService
 
     /// <summary>The stored trees of a symbol (or of every declaration at a path), in source order.</summary>
     IReadOnlyList<MetacodeTreeRow> Trees(string? symbol = null, string? path = null, int limit = 50);
+
+    /// <summary>
+    /// The COMPLETE AST the store holds, node by node: every declaration that matches
+    /// <paramref name="symbol"/> (a name, a qualified name or a declaration key) or lives at
+    /// <paramref name="path"/>, nested the way the model holds it. At most <paramref name="maxNodes"/>
+    /// nodes come back in one call, and the result says when the cap cut it.
+    /// </summary>
+    MetacodeAstResult Ast(string? symbol = null, string? path = null, int maxNodes = 2000);
 
     /// <summary>The callables ranked by the cyclomatic complexity of their metacode.</summary>
     IReadOnlyList<MetacodeComplexityRow> Complexity(
@@ -301,6 +310,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             Documents = status.Documents,
             Sources = status.Sources,
             Unsupported = unsupported,
+            Nodes = status.Nodes,
         };
     }
 
@@ -339,11 +349,15 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             cancellationToken.ThrowIfCancellationRequested();
 
             var path = DecompiledPath(assembly, type.FullName);
-            var rows = MetacodeDeclarations.Collect(type.Document, path);
+            var collected = MetacodeDeclarations.Collect(type.Document, path);
 
             // The whole assembly shares one freshness token — its MVID — so DecompiledHash can answer
             // "was this exact binary stored?" from any of its rows, and a new build replaces them all.
-            var facts = new MetacodeDocumentFacts(path, project, identity, 0, CSharp, rows, type.Document.Diagnostics.Count);
+            var facts = new MetacodeDocumentFacts(
+                path, project, identity, 0, CSharp, collected.Rows, type.Document.Diagnostics.Count)
+            {
+                Nodes = collected.Nodes,
+            };
 
             if (!await _index.ReplaceAsync(facts, cancellationToken).ConfigureAwait(false))
             {
@@ -353,9 +367,9 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 
             written.Add(path);
             indexed++;
-            declarations += rows.Count;
+            declarations += collected.Rows.Count;
             diagnostics += facts.Diagnostics;
-            foreach (var row in rows)
+            foreach (var row in collected.Rows)
             {
                 if (FunctionKinds.Contains(row.Kind)) functions++;
                 if (TypeKinds.Contains(row.Kind)) types++;
@@ -379,6 +393,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             stopwatch.ElapsedMilliseconds, database, _workspace.LoadedSolutionPath)
         {
             Documents = status.Documents,
+            Nodes = status.Nodes,
         };
     }
 
@@ -554,11 +569,13 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     {
         var translator = new MetacodeTranslator([new CSharpFrontend(), new RazorFrontend()]);
         var model = translator.Translate(MetacodeSource.FromText(text, LanguageOf(path), path), MetacodeOptions.Default);
-        var rows = MetacodeDeclarations.Collect(model, path);
+        var collected = MetacodeDeclarations.Collect(model, path);
         var hasReader = model.Diagnostics.All(diagnostic => diagnostic.Code != MetacodeDiagnosticCodes.NoFrontend);
 
-        return new MetacodeDocumentFacts(path, project, hash, mtime, language, rows, model.Diagnostics.Count)
+        return new MetacodeDocumentFacts(
+            path, project, hash, mtime, language, collected.Rows, model.Diagnostics.Count)
         {
+            Nodes = collected.Nodes,
             Source = text,
             HasReader = hasReader,
         };
@@ -589,6 +606,98 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             .OrderBy(row => row.Path, StringComparer.OrdinalIgnoreCase)
             .ThenBy(row => row.Line)
             .ToList();
+    }
+
+    public MetacodeAstResult Ast(string? symbol = null, string? path = null, int maxNodes = 2000)
+    {
+        if (string.IsNullOrWhiteSpace(symbol) && string.IsNullOrWhiteSpace(path))
+            return new MetacodeAstResult(null, [], 0, false, "ast needs symbol or path.");
+
+        if (!TryOpen())
+            return new MetacodeAstResult(path, [], 0, false,
+                "No solution is loaded, so there is no stored metacode. Call load_solution first.");
+
+        // A symbol picks declarations wherever they live; a path alone means the whole file. Both
+        // together means "this symbol, but only in this file" — a partial type is the reason.
+        var declarations = string.IsNullOrWhiteSpace(symbol)
+            ? _index.InPath(path!.Trim(), 200)
+            : _index.Resolve(symbol.Trim(), 500)
+                .Where(row => string.IsNullOrWhiteSpace(path) ||
+                              string.Equals(row.Path, path.Trim(), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+        if (declarations.Count == 0)
+            return new MetacodeAstResult(path, [], 0, false,
+                $"The store has no declaration for '{(string.IsNullOrWhiteSpace(symbol) ? path : symbol)}'. " +
+                "Build it (metacode_index action=build) or check the name.");
+
+        var trees = new List<MetacodeAstTree>();
+        var remaining = Math.Clamp(maxNodes, 1, 100_000);
+        var returned = 0;
+        var truncated = false;
+
+        foreach (var declaration in declarations)
+        {
+            if (remaining <= 0)
+            {
+                truncated = true;
+                break;
+            }
+
+            var stored = _index.AstCount(declaration.Path, declaration.Key);
+            if (stored == 0) continue;
+
+            var nodes = _index.Ast(declaration.Path, declaration.Key, remaining);
+            if (nodes.Count < stored) truncated = true;
+
+            returned += nodes.Count;
+            remaining -= nodes.Count;
+            trees.Add(new MetacodeAstTree(
+                declaration.Path, declaration.Key, declaration.Kind, declaration.Name, declaration.Line,
+                stored, nodes.Max(node => node.Depth), BuildTree(nodes)));
+        }
+
+        if (trees.Count == 0)
+            return new MetacodeAstResult(path, [], 0, false,
+                "No AST is stored for those declarations: the index was built before mc_node existed. " +
+                "Rebuild it (metacode_index action=build force=true).");
+
+        return new MetacodeAstResult(path, trees, returned, truncated);
+    }
+
+    /// <summary>
+    /// The nested shape from the flat rows: a node's children are the rows whose parent is it, ordered by
+    /// the position they hold in the parent's property. Rows are pre-order, so a cap that cuts the tail
+    /// never orphans a node — a cut node's children come after it and are cut with it.
+    /// </summary>
+    private static IReadOnlyList<MetacodeAstTreeNode> BuildTree(IReadOnlyList<MetacodeAstNode> nodes)
+    {
+        var byParent = nodes
+            .GroupBy(node => node.ParentId)
+            .ToDictionary(group => group.Key, group => group.OrderBy(node => node.Ordinal).ToList());
+
+        List<MetacodeAstTreeNode> Children(int parent) =>
+            (byParent.TryGetValue(parent, out var children) ? children : [])
+            .Select(node => new MetacodeAstTreeNode(
+                node.NodeId, node.Kind, node.Slot, node.Ordinal, node.Line, node.Column,
+                Payload(node.Data), Children(node.NodeId)))
+            .ToList();
+
+        return Children(0);
+    }
+
+    /// <summary>The stored payload, parsed so the answer carries data instead of a JSON string.</summary>
+    private static JsonElement Payload(string data)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(data);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.SerializeToElement(new { raw = data });
+        }
     }
 
     /// <summary>
@@ -767,6 +876,11 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     }
 }
 
+/// <summary>What one document contributed: a row per declaration and the complete AST of each of them.</summary>
+internal sealed record MetacodeCollected(
+    IReadOnlyList<MetacodeTreeRow> Rows,
+    IReadOnlyList<MetacodeAstNode> Nodes);
+
 /// <summary>
 /// Walks a translated document and produces one row per declaration: the canonical pseudocode of that
 /// declaration (a type nests its members), the file and span it came from, and the structural facts the
@@ -775,15 +889,16 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 /// </summary>
 internal static class MetacodeDeclarations
 {
-    public static IReadOnlyList<MetacodeTreeRow> Collect(MetacodeDocument model, string path)
+    public static MetacodeCollected Collect(MetacodeDocument model, string path)
     {
         var rows = new List<MetacodeTreeRow>();
+        var nodes = new List<MetacodeAstNode>();
         var renderer = new PseudocodeRenderer();
 
         foreach (var module in model.Modules)
-            Walk(module.Declarations, module.Name, [], rows, renderer, path);
+            Walk(module.Declarations, module.Name, [], rows, nodes, renderer, path);
 
-        return rows;
+        return new MetacodeCollected(rows, nodes);
     }
 
     private static void Walk(
@@ -791,6 +906,7 @@ internal static class MetacodeDeclarations
         string @namespace,
         IReadOnlyList<string> types,
         List<MetacodeTreeRow> rows,
+        List<MetacodeAstNode> nodes,
         PseudocodeRenderer renderer,
         string path)
     {
@@ -800,9 +916,10 @@ internal static class MetacodeDeclarations
             var kind = KindOf(declaration);
             var metrics = MetricsOf(declaration);
             var origin = declaration.Origin;
+            var key = KeyOf(@namespace, types, declaration, kind, name);
 
             rows.Add(new MetacodeTreeRow(
-                KeyOf(@namespace, types, declaration, kind, name),
+                key,
                 path,
                 kind,
                 name,
@@ -817,8 +934,11 @@ internal static class MetacodeDeclarations
                 metrics.Expressions,
                 renderer.Render(declaration)));
 
+            // The same declaration as a tree of nodes, so the store keeps the AST and not only its text.
+            nodes.AddRange(MetacodeAst.Serialize(declaration, key));
+
             if (declaration is MetacodeTypeDeclaration type)
-                Walk(type.Members, @namespace, [.. types, type.Name], rows, renderer, path);
+                Walk(type.Members, @namespace, [.. types, type.Name], rows, nodes, renderer, path);
         }
     }
 

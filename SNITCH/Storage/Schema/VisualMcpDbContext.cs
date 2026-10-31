@@ -51,6 +51,8 @@ public sealed class VisualMcpDbContext : DbContext
 
     public DbSet<SourceDocumentRow> SourceDocuments => Set<SourceDocumentRow>();
 
+    public DbSet<MetacodeNodeRow> MetacodeNodes => Set<MetacodeNodeRow>();
+
     public DbSet<SymbolRow> Symbols => Set<SymbolRow>();
 
     public DbSet<SymbolUsageRow> SymbolUsages => Set<SymbolUsageRow>();
@@ -168,6 +170,16 @@ public sealed class VisualMcpDbContext : DbContext
         {
             row.ToTable("source_document");
             row.HasKey(document => document.Path);
+        });
+
+        model.Entity<MetacodeNodeRow>(row =>
+        {
+            row.ToTable("mc_node");
+            row.HasKey(node => new { node.Path, node.DeclarationKey, node.NodeId });
+            row.HasIndex(node => node.Path).HasDatabaseName("mc_node_path");
+            row.HasIndex(node => new { node.Path, node.DeclarationKey, node.ParentId })
+                .HasDatabaseName("mc_node_parent");
+            row.HasIndex(node => node.Kind).HasDatabaseName("mc_node_kind");
         });
 
         model.Entity<SymbolRow>(row =>

@@ -20,7 +20,7 @@ becomes `RAW[lang] …` plus a diagnostic (`MC0001`–`MC0008`) instead of silen
 | root | the model (`MetacodeModel`, `MetacodeExpressions`, `MetacodeStatements`), the translator, the rewriter, diagnostics |
 | `Frontends/` | C# (Roslyn syntax only), Razor pages/components, canonical pseudocode, Ghidra snapshots; Python and C++ readers are opt-in and read AST JSON dumps, not source |
 | `Decompilation/` | ILSpy and the C# compactor used by `decompile_type` / `decompile_assembly` / `decompile_to_metacode`, plus the native (Ghidra) pipeline |
-| `Indexing/` | the persisted metacode index (`mc_document` / `mc_tree`) that `metacode_index` builds |
+| `Indexing/` | the persisted metacode index (`mc_document` / `mc_tree`, plus the complete AST in `mc_node`) that `metacode_index` builds |
 | `Symbols/` | the symbol index (`si_symbol`, `si_usage`, `si_metacode`, `si_document`) behind `reference_index` |
 | `Coding/` | `IMetacodeCodingService`: decompile-and-store, rewrite a declaration, insert a member |
 | `Generation/` | the C# emitter behind `metacode_generate` |

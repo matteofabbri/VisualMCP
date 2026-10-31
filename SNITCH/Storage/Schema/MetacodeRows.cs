@@ -50,3 +50,25 @@ public sealed class SourceDocumentRow
     public string Text { get; set; } = string.Empty;
     public DateTimeOffset IndexedAt { get; set; }
 }
+
+/// <summary>
+/// One node of a declaration's AST. <see cref="ParentId"/> 0 is the declaration itself; <see cref="Slot"/>
+/// names the parent property that holds the node and <see cref="Ordinal"/> its index inside it, so the
+/// tree is reconstructible from the rows alone. <see cref="Data"/> is the node's own payload as JSON.
+/// </summary>
+public sealed class MetacodeNodeRow
+{
+    public string Path { get; set; } = string.Empty;
+    public string DeclarationKey { get; set; } = string.Empty;
+    public int NodeId { get; set; }
+    public int ParentId { get; set; }
+    public string Slot { get; set; } = string.Empty;
+    public int Ordinal { get; set; }
+    public int Depth { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public int Line { get; set; }
+    public int Col { get; set; }
+    public int EndLine { get; set; }
+    public string Data { get; set; } = string.Empty;
+    public string DocHash { get; set; } = string.Empty;
+}
