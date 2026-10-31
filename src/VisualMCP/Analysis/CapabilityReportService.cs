@@ -72,10 +72,13 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 razor = "Snitch.Languages.Razor (heuristic markup scanner, 28 rules)",
                 xaml = "Snitch.Languages.Xaml (markup + Roslyn code-behind: inventory, XAML0001-0009, navigation)",
                 metacode = "Snitch.Metacode (C#, Visual Basic, Razor, pseudocode, Ghidra frontends; persisted index)",
-                sql = "none: .sql is full-text only",
-                javascript = "none: .js/.ts/.jsx/.tsx are full-text only",
-                fsharp = "none: no semantic model (not a Roslyn language)",
-                kubernetes = "none: YAML is full-text only; Docker covers local containers",
+                sql = "Snitch.Languages.Sql (SqlAnalyzer: comments/literals masked, statements split, SQL0001-SQL0010; " +
+                      "a pattern scanner, not a dialect parser)",
+                javascript = "Snitch.Node (the project's own npm/pnpm/yarn plus tsc and eslint interpreted; the JS/TS " +
+                             "source itself has no parser or module graph), with ExternalTool for PATH/.cmd resolution",
+                fsharp = "none: no semantic model (not a Roslyn language); build_project still returns the compiler's FS#### lines",
+                kubernetes = "Snitch.Kubernetes (kubectl/helm wrappers: status, context, get/describe/logs, apply/delete/rollout, " +
+                             "helm releases); YAML is otherwise full-text",
             },
 
             docs = new
