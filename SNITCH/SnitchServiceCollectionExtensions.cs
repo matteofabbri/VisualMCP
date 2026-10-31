@@ -68,6 +68,8 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Inspections.IDotSettingsService, Languages.CSharp.Inspections.DotSettingsService>();
         services.AddSingleton<Languages.CSharp.Inspections.ISpellingService, Languages.CSharp.Inspections.SpellingService>();
         services.AddSingleton<Languages.CSharp.Inspections.INamingRulesService, Languages.CSharp.Inspections.NamingRulesService>();
+        // The ReSharper-id coverage map: what each proprietary id maps to here, and what is absent.
+        services.AddSingleton<Languages.CSharp.Inspections.IResharperInspectionMapService, Languages.CSharp.Inspections.ResharperInspectionMapService>();
         services.AddSingleton<Execution.IBuildProjectService, Execution.BuildProjectService>();
         services.AddSingleton<Execution.IRunProjectService, Execution.RunProjectService>();
         services.AddSingleton<Execution.IRunCommandService, Execution.RunCommandService>();

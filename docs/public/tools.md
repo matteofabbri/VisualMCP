@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **343 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **344 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -90,13 +90,14 @@ Conventions:
 | `fix_diagnostics` | ✎ preview Fix the mechanical compiler diagnostics instead of reporting them: CS0168/CS0219 unused local, CS0169 unused field, CS0067 unused event, CS0105 duplicated using, CS0108/CS0114 hidden member (`new`), CS0109 redundant `new`. Compiler-gated, recorded and revertible |
 | `run_code_analysis` | Run the project's configured Roslyn analyzers (StyleCop, Roslynator, .NET analyzers) |
 | `solution_audit` | One-call health report: inspections by id, compiler diagnostics, complexity hotspots, largest files, project graph and cycles, first moves; cached per unchanged solution |
-| `inspect_code` | Built-in Rider-style inspection packs over every project, plus the VisualMCP house rules (`VMC0001`: one type per file); filter by pack, id, severity, file |
+| `inspect_code` | Built-in Rider-style inspection packs over every project, plus the VisualMCP house rules (`VMC0001`: one type per file) and the opt-in `rider` pack (ReSharper-shaped ids); filter by pack, id, severity, file |
 | `apply_code_fix` | ✎ preview Apply a diagnostic's own code fix, optionally FixAll at document/project/solution scope |
 | `inspection_baseline` | ✎ create/check/show/clear a baseline of `inspect_code` findings, so a change is judged only by the findings it introduced |
 | `configure_inspection` | ✎ Set `dotnet_diagnostic.<id>.severity` (none/silent/suggestion/warning/error/default) in the right `.editorconfig`: solution, project or one file. Idempotent; reports the previous value |
 | `configure_formatting` | ✎ Set any other `.editorconfig` option (`csharp_*`, `dotnet_*`, `indent_*`, `end_of_line`, `charset`, `file_header_template`, …) at the same scopes, same upsert |
 | `suppress_finding` | ✎ preview Silence one finding where it takes effect: a `#pragma` around the member or a `SuppressMessage` attribute on it; compiler-gated |
 | `custom_inspections` | Inspections declared in `.visualMCP/inspections.json` (banned symbols/namespaces/attributes, identifier/string/comment patterns) with id, severity, message; `validate` checks the file |
+| `resharper_inspection_map` | Where ReSharper's inspection ids stand: the `rider` pack ids, the simplify_code/pack/tool mapping, the ids with no capability, plus the Inspection-type count of a local Rider install |
 | `read_dot_settings` | Read the ReSharper `.DotSettings`/`.DotSettings.user` layers: inspection severities, disabled ids, custom dictionary words |
 | `find_spelling_issues` | Words one edit away from a word the solution or `.visualMCP/spelling.dic` + the `.DotSettings` words already use |
 | `naming_rules` | ✎ preview Apply `dotnet_naming_rule` from `.editorconfig`: list the violations with the expected name, or rename them (`apply=true`) |

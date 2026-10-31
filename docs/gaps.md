@@ -16,8 +16,9 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (ninth revision: diagrams and exploration — type-level dependency graph, `call_graph`,
-`sequence_diagram`, `control_flow_graph`, `track_value` and `localization_report`, 338 → 343). The
+Last updated: 2026-10-31 (tenth revision: the ReSharper id question is answered with a measurement — 8 ids
+native in the opt-in `rider` inspection pack plus `resharper_inspection_map`, a curated id→capability map,
+343 → 344). The
 style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -271,7 +272,7 @@ covered as well:
 | Suppress a finding (`SuppressMessage`, `#pragma`, `.editorconfig` severity) | ✅ `suppress_finding` (pragma around the member or the attribute), compiler-gated; `configure_inspection` for the severity |
 | `.DotSettings` layers, shared team settings | ⚠️ `read_dot_settings` reads `.DotSettings`/`.DotSettings.user` (severities, disabled ids, custom dictionary words). The severities are ReSharper inspection ids and are reported, not applied to Roslyn diagnostics — there is no id map between the two catalogs |
 | Custom inspections authored in the product | ✅ `custom_inspections`: rules declared in `.visualMCP/inspections.json` (banned symbols/namespaces/attributes, identifier patterns, string-literal and comment patterns) with id, severity and message; they have no code fix |
-| ReSharper's proprietary set (~2500 ids) | ⚠️ overlap only with the ~800 pack ids; the rest are absent |
+| ReSharper's proprietary set (~2500 ids) | ⚠️ `resharper_inspection_map` is the exact state: **8 ids are implemented natively under ReSharper's names** in the opt-in `rider` inspection pack (`ConvertToConstant_Local`, `LoopVariableIsNeverChangedInsideLoop`, `MemberCanBeMadeStatic_Global`, `RedundantArgument`, `EmptyConstructor`, `RedundantIfElseBlock`, `ConditionIsAlwaysTrueOrFalse`, `RedundantBaseConstructorCall`); ~30 more map to an existing capability (`simplify_code` IDE id, a Roslyn pack, a dedicated tool, a context action); 10 well-known ids have none. The remaining ~2500 are closed-source analyzers over JetBrains' PSI — each a reimplementation, not a registration — so they are not ported |
 | Solution-wide background analysis / daemon | ✅ `background_analysis` starts a warm loop that re-runs the packs when the loaded solution changes; `analysis_findings` serves the cached findings between calls (by file, project, severity or id) |
 | Formatting settings management, `.editorconfig` generation | ✅ `configure_formatting` authors `csharp_*`/`dotnet_*`/`indent_*`/`end_of_line`/`charset`/`file_header_template`; severities with `configure_inspection` |
 | Naming rules (`IDE1006`) application | ✅ `naming_rules` reads `dotnet_naming_rule`/`symbols`/`style` from the `.editorconfig` chain, lists the violations with the expected name, and with `apply=true` renames them through `apply_rename` (recorded and revertible). Locals and parameters are listed only |
@@ -280,9 +281,10 @@ covered as well:
 
 The practical consequence: a team can run the inspections, gate a change with `inspection_baseline`,
 tune one rule and suppress one finding where the compiler reads it, add rules without building an
-analyzer, apply the naming policy, and keep a warm analysis running while it edits. What remains of the
-ReSharper-shaped administration is `.DotSettings` *application* (the ids are ReSharper's) and the
-proprietary inspection catalogue itself.
+analyzer, apply the naming policy, and keep a warm analysis running while it edits. What remains is the
+ReSharper proprietary catalogue itself: eight of its ids are implemented here, the map says which
+capability answers ~30 more, and the rest would be a reimplementation of a closed-source product rather
+than a gap a tool can close.
 
 ---
 

@@ -46,6 +46,10 @@ internal static class InspectionPackCatalog
     {
         new InspectionPack("house", "VisualMCP", Array.Empty<string>(),
             "VisualMCP's own house rules (VMC): one type per file."),
+        new InspectionPack("rider", "VisualMCP", Array.Empty<string>(),
+            "ReSharper-shaped inspections implemented natively under ReSharper's ids: convert to const, loop " +
+            "variable changed inside the loop, member can be static, redundant argument, empty constructor, " +
+            "redundant if/else, always-true/false condition, redundant base() call."),
         new InspectionPack("roslynator", "Roslynator.Analyzers", new[] { "Roslynator." },
             "ReSharper-style inspections: redundant code, simplifications, language usage (RCS)."),
         new InspectionPack("netanalyzers", "Microsoft.CodeAnalysis.NetAnalyzers",
@@ -132,14 +136,23 @@ internal static class InspectionPackCatalog
 
         foreach (var definition in Definitions)
         {
-            // The house rules are compiled into this assembly; every other pack is an external
-            // analyzer package discovered on disk or in the NuGet cache.
-            if (definition.Id == "house")
+            // The house rules and the ReSharper-shaped inspections are compiled into this assembly;
+            // every other pack is an external analyzer package discovered on disk or in the NuGet cache.
+            if (definition.Id is "house" or "rider")
             {
-                packs.Add(new LoadedInspectionPack(
-                    definition,
-                    ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer()),
-                    ImmutableArray<CodeFixProvider>.Empty));
+                var own = definition.Id == "house"
+                    ? ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer())
+                    : ImmutableArray.Create<DiagnosticAnalyzer>(
+                        new Rider.ConvertToConstantLocalAnalyzer(),
+                        new Rider.LoopVariableChangedAnalyzer(),
+                        new Rider.MemberCanBeMadeStaticAnalyzer(),
+                        new Rider.RedundantArgumentAnalyzer(),
+                        new Rider.EmptyConstructorAnalyzer(),
+                        new Rider.RedundantIfElseAnalyzer(),
+                        new Rider.ConstantConditionAnalyzer(),
+                        new Rider.RedundantBaseConstructorCallAnalyzer());
+
+                packs.Add(new LoadedInspectionPack(definition, own, ImmutableArray<CodeFixProvider>.Empty));
                 continue;
             }
 

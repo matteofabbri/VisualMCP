@@ -23,9 +23,9 @@ public static class InspectCodeTool
         IInspectCodeService inspections,
         [Description("Optional: restrict to a single project by name.")] string? projectName = null,
         [Description("Optional: restrict to a single file (absolute or relative path).")] string? filePath = null,
-        [Description("Inspection packs: 'house' (VisualMCP rules, VMC0001 one-type-per-file), 'roslynator', " +
-                     "'netanalyzers', 'asyncfixer', 'meziantou', 'stylecop', a comma-separated list, or 'all'. " +
-                     "Default: house,roslynator,netanalyzers,asyncfixer.")]
+        [Description("Inspection packs: 'house' (VisualMCP rules, VMC0001 one-type-per-file), 'rider' (ReSharper-shaped " +
+                     "inspections under ReSharper's own ids, opt-in), 'roslynator', 'netanalyzers', 'asyncfixer', " +
+                     "'meziantou', 'stylecop', a comma-separated list, or 'all'. Default: house,roslynator,netanalyzers,asyncfixer.")]
         string packs = "",
         [Description("Minimum severity: error, warning, info or hidden. Default: info, which is the " +
                      "Rider-like view (suggestions arrive as WEAK_WARNING); pass 'warning' for action items only.")]

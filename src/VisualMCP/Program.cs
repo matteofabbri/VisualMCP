@@ -185,6 +185,9 @@ static async Task RunServerAsync(string[] args)
         "likely typos (one edit from a word the solution or the dictionary uses) -> find_spelling_issues; the " +
         ".editorconfig naming policy, list or rename the violations -> naming_rules; and the warm loop that re-runs the " +
         "packs when the solution changes, with cached findings to poll -> background_analysis / analysis_findings.\n" +
+        "- ReSharper's proprietary inspection ids (~2500, closed-source PSI analyzers): what each maps to here and what " +
+        "is absent -> resharper_inspection_map; 8 of them are implemented natively under ReSharper's ids in the opt-in " +
+        "'rider' inspection pack (inspect_code packs=rider).\n" +
         "- Test workflow: run ONE test or class without hand-building --filter, with a TRX result and the failures " +
         "recorded -> run_test; re-run exactly those failures -> rerun_failed; which test methods reference this symbol " +
         "-> tests_covering_symbol; scaffold an xUnit class for a type (one [Fact] per public method, compiler-gated) -> " +
