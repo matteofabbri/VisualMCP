@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **318 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **322 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -186,7 +186,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `remove_regions` | ✎ Strip `#region`/`#endregion` and keep the code |
 | `safe_delete` | ✎ Delete a symbol only when Roslyn finds zero references |
 | `invert_if` | ✎ Swap an if/else's branches and negate the condition |
-| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, variable), surround-with (try/catch, try/finally, if, using) over a line range, and string literals between regular, verbatim and raw — 13 action ids, compiler-gated |
+| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators, remove an argument name, and string literals between regular, verbatim and raw — 26 action ids, compiler-gated |
 | `fix_complexity` | ✎ preview Make the codebase simpler in one call: rank every method, lower the worst with the same moves as `reduce_complexity`, report before/after — whole solution, project or file |
 | `reduce_complexity` | ✎ Lower cyclomatic and cognitive complexity by extracting blocks, naming booleans and adding guard clauses, re-measuring until a target |
 | `remove_params` | ✎ preview Remove the `params` modifier from a method's last array parameter; refused when a call site passes the elements individually |
@@ -220,6 +220,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `tests_covering_symbol` | Which test methods reference this symbol (semantic, `[Fact]`/`[Theory]`/`[Test]`/…), with file:line |
 | `generate_tests` | ✎ preview Scaffold an xUnit test class with one `[Fact]` per public method; compiler-gated, written into the test project |
 | `test_impact_analysis` | Which tests a change can affect: git diff → the symbols the changed files declare → the test methods that reference them, with a ready filter |
+| `run_mutation_tests` | ✎ Run Stryker.NET over a test project: mutation score, killed/survived/timed-out/no-coverage counts, the worst files and the surviving mutants with file and line |
 | `dotnet_publish` | Publish a project (RID, self-contained, single-file, output folder) with a structured result |
 | `add_project_reference` | ✎ Add a `<ProjectReference>` (`dotnet add reference`) and reload the workspace |
 | `remove_project_reference` | ✎ Remove a `<ProjectReference>` |
@@ -366,6 +367,8 @@ proved — the notes say so.
 | `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check |
 | `metacode_index` | The solution's metacode persisted in `.visualMCP/visualmcp.db`: status, build, model-level cyclomatic/cognitive complexity, stored trees |
 | `metacode_generate` | Generate C# from pseudocode, a stored tree or a file; what C# cannot express is lowered with a diagnostic |
+| `translate_python_file` | Translate a `.py` file into canonical pseudocode (runs CPython's `ast` dumper, or accepts a supplied dump) |
+| `translate_cpp_file` | Translate a C/C++ file into canonical pseudocode (runs `clang -ast-dump=json`, or accepts a supplied dump) |
 | `decompile_to_metacode` | Decompile a .NET assembly with ILSpy and print it as canonical pseudocode instead of C# |
 | `analyze_native_binary` | Run Ghidra headless on a native binary and print recovered functions as pseudocode with prototype and entry address; the run is also persisted in `native_artifact` / `native_function` / `native_call` (`save=false` to skip) |
 | `metacoding` | ✎ preview Write through the model: `decompile` (a managed assembly becomes metacode trees in the solution database, a native binary is routed to Ghidra and stored in the native tables), `rewrite` (replace a declaration from pseudocode), `insert` (add a generated member). Compiler-gated; mechanical style fixes stay in `simplify_code` |
@@ -465,6 +468,7 @@ the other actions change GitHub, and merges/deletes require `confirm=true`.
 |---|---|
 | `run_plan` | Execute a dependency graph of tool calls and shell commands in one round trip, with validation, parallelism, path-based conflict avoidance and per-step timeouts |
 | `http_invoke` | Call any HTTP endpoint with method, headers and body; accepts self-signed localhost certificates |
+| `run_http_file` | Execute a REST-client `.http`/`.rest` file (variables, `###` separators, headers, bodies) and report each response |
 | `signal_r_connect` | Connect to a SignalR hub and return a session id |
 | `signal_r_subscribe` | Buffer messages for one hub method |
 | `signal_r_events` | Drain buffered events, optionally waiting |

@@ -71,6 +71,8 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Planning.ITaskChecklistService, Planning.TaskChecklistService>();
         services.AddSingleton<Planning.IBoardService, Planning.BoardService>();
         services.AddSingleton<Execution.IStopServerService, Execution.StopServerService>();
+        services.AddSingleton<Languages.CSharp.Testing.IMutationTestingService, Languages.CSharp.Testing.MutationTestingService>();
+        services.AddSingleton<Runtime.IHttpFileService, Runtime.HttpFileService>();
         services.AddSingleton<IFixLineEndingsService, FixLineEndingsService>();
         services.AddSingleton<Web.IDownloadFileService, Web.DownloadFileService>();
 

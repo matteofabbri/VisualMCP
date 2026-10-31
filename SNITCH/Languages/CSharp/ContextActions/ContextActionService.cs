@@ -43,6 +43,12 @@ public sealed partial class ContextActionService : IContextActionService
         ("for_to_foreach", "Convert for to foreach"),
         ("if_to_switch", "Convert if/else-if chain to switch"),
         ("concat_to_interpolated", "Convert concatenation to interpolated string"),
+        ("interpolated_to_concat", "Convert interpolated string to concatenation"),
+        ("digit_separators", "Add digit separators to a numeric literal"),
+        ("remove_argument_name", "Remove argument name"),
+        ("check_dictionary_key", "Check dictionary key"),
+        ("check_enum_defined", "Check enum value is defined"),
+        ("invert_loop", "Invert loop direction"),
         ("check_index_range", "Check index for out of range"),
     ];
 
@@ -135,6 +141,12 @@ public sealed partial class ContextActionService : IContextActionService
         "for_to_foreach" => ForToForeach(target),
         "if_to_switch" => IfChainToSwitch(target),
         "concat_to_interpolated" => ConcatToInterpolated(target),
+        "interpolated_to_concat" => InterpolatedToConcat(target),
+        "digit_separators" => DigitSeparators(target),
+        "remove_argument_name" => RemoveArgumentName(target, text),
+        "check_dictionary_key" => CheckDictionaryKey(target, text),
+        "check_enum_defined" => CheckEnumDefined(target, text),
+        "invert_loop" => InvertLoop(target),
         "check_index_range" => CheckIndexRange(target, text),
         _ => Outcome.Fail($"'{id}' has no implementation."),
     };

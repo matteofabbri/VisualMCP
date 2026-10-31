@@ -182,7 +182,7 @@ installer and routing guard in `scripts/` — on Linux/macOS register the server
 
 **How many tools are there?**
 
-318 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
+322 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
 (everything, with schemas), or the [tool catalogue](tools.md).
 
 **How do I update?**

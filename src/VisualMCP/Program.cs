@@ -136,6 +136,8 @@ static async Task RunServerAsync(string[] args)
         "construct with no node stays visible as RAW + a diagnostic) -> metacode_translate (no solution needed).\n" +
         "- Check that two spellings of the same algorithm really are the same -> metacode_compare (translates both " +
         "sides, then diffs the canonical text line by line; any mix of C#/Razor/Ghidra/pseudocode).\n" +
+        "- Read a PYTHON or C/C++ file in that same pseudocode (the dump is produced for you: CPython's ast via " +
+        "translate_python_file, clang -ast-dump=json via translate_cpp_file; pass dumpJson to translate a dump produced elsewhere).\n" +
         "- The SOLUTION'S metacode, persisted in .visualMCP/visualmcp.db and generated when the solution opens " +
         "(the background pass keeps it in step with saved files and a build refreshes it) -> metacode_index: " +
         "action=status|build|complexity|trees. Every source of the solution is stored twice there — its native text " +
@@ -169,7 +171,8 @@ static async Task RunServerAsync(string[] args)
         "- Test workflow: run ONE test or class without hand-building --filter, with a TRX result and the failures " +
         "recorded -> run_test; re-run exactly those failures -> rerun_failed; which test methods reference this symbol " +
         "-> tests_covering_symbol; scaffold an xUnit class for a type (one [Fact] per public method, compiler-gated) -> " +
-        "generate_tests. Coverage maps now include branch coverage.\n" +
+        "generate_tests; what the suite does NOT catch -> run_mutation_tests (Stryker.NET: mutation score, survivors with file and line). " +
+        "Coverage maps now include branch coverage.\n" +
         "- Add/remove projects to/from the solution (.sln/.slnx) -> add_projects_to_solution / remove_projects_from_solution.\n" +
         "- Modernize the solution: add Aspire (status, install the templates if missing, scaffold AppHost + ServiceDefaults, wire and verify) -> aspire; move the projects to a newer target framework with a build gate and rollback -> update_framework; upgrade every outdated NuGet package (Central Package Management aware), optionally with the framework bump, in one gated pass -> update_solution. Prefer update_solution over one update_nuget_package call per package when modernising a whole solution.\n" +
         "- Git: inspect state -> git_status / git_log / git_diff; stage -> git_stage; commit -> git_commit; new branch -> git_create_branch. (No push/force — use run_command for those.)\n" +
@@ -198,7 +201,8 @@ static async Task RunServerAsync(string[] args)
         "- Interact with GitHub (create repo, PRs, issues, releases, runs) -> github (authenticated 'gh' CLI passthrough).\n" +
         "- Update VisualMCP itself from GitHub Releases: see what's available -> check_for_update; install the latest -> self_update.\n" +
         "- Scaffold project metadata: a LICENSE from a bundled template (20 licenses — call list_licenses for the catalogue with SPDX ids, copyleft family, OSI approval and patent grants) -> add_license; CONTRIBUTING + CLA -> add_contributing; a multi-OS GitHub Actions build (workflowType 'dotnet-multi-os') or a multi-OS release that publishes binaries to a GitHub Release on a tag ('dotnet-release') -> add_ci_workflow.\n" +
-        "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body).\n" +
+        "- Call a REST API endpoint of a running app -> http_invoke (any HTTP method, custom headers, JSON body); " +
+        "run a whole REST-client request file (.http/.rest with @variables and ### separators) -> run_http_file.\n" +
         "- Test a SignalR hub (connect, subscribe, invoke, drain events) -> signal_r_connect / signal_r_subscribe / signal_r_invoke / signal_r_events / signal_r_disconnect.\n" +
         "- Run many mechanical steps at once — the same call over a list of files or projects, then a build — -> run_plan: a dependency graph of 'tool' steps (any tool listed here, by name) and shell 'command' steps, executed natively in parallel, validated before it starts, answered in one round trip. Prefer it to issuing the same tool call N times, or delegating a mechanical fan-out to subagents; it is NOT for steps that need judgement between them.\n\n" +
         "WORKFLOW:\n" +
@@ -245,6 +249,11 @@ static async Task RunServerAsync(string[] args)
             // Self-update is VisualMCP's own deployment concern, not part of the
             // reusable Snitch library — registered here in the plugin.
             services.AddSingleton<ISelfUpdateService, SelfUpdateService>();
+
+            // Python/C++ reachability: the two opt-in metacode readers need an AST dump, and this is
+            // what produces one (python -m ast / clang -ast-dump=json) or accepts one from the caller.
+            services.AddSingleton<VisualMCP.Translation.ISourceDumpTranslationService,
+                                  VisualMCP.Translation.SourceDumpTranslationService>();
 
             // Visual Basic style layer, opt-in by design: AddSnitch stays C#-only so the container never
             // holds two ISimplifyCodeService instances. simplify_vb_code resolves IVbSimplifyCodeService

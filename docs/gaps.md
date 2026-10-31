@@ -16,10 +16,11 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (fifth revision: the server is now platform-independent — `run_command`/
-`run_plan` pick a platform shell, `stop_server` reads `/proc`/`ps` instead of WMI-only, `self_update`
-downloads and swaps the platform's own asset — and `search_nuget_packages` plus `git_worktree` /
-`git_bisect` / `git_submodule` close four rows, 314 → 318). The
+Last updated: 2026-10-31 (sixth revision: six context actions close the literal/statement/guard rows —
+`interpolated_to_concat`, `digit_separators`, `remove_argument_name`, `check_dictionary_key`,
+`check_enum_defined`, `invert_loop`, 20 → 26 action ids — `translate_python_file` / `translate_cpp_file`
+make the two opt-in metacode readers reachable, `run_mutation_tests` runs Stryker.NET, and `run_http_file`
+executes a request file: 318 → 322). The
 style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -32,9 +33,9 @@ style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection
 | [Language and platform scope](#1-language-and-platform-scope) | ❌ | High if your solution uses them | XAML and EF Core are covered now; a JS/SQL/F# codebase still gets almost nothing beyond text search |
 | [Debugger](#2-debugger) | ✅ | — | Implemented: 16 `debug_*` tools over netcoredbg (DAP). The engine is here; the window is the client's ([section 11](#11-ui-bound-features--not-applicable-by-design)) |
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ⚠️ | Medium | Severity in `.editorconfig` and compiler-gated suppressions exist; `.DotSettings`, custom inspections and a background daemon do not |
-| [Test workflow](#4-test-workflow) | ⚠️ | Medium | One test, re-run the failures, which tests reach a symbol, a scaffold class and branch coverage exist; debugging a test, continuous testing, mutation and impact analysis do not |
+| [Test workflow](#4-test-workflow) | ⚠️ | Medium | One test, re-run the failures, which tests reach a symbol, a scaffold class, branch coverage and mutation testing exist; debugging a test and continuous testing do not |
 | [Decompiled code as a workspace](#5-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
-| [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 20 action ids now (guards, wrap, braces, region, foreach↔for, if→switch, concat→interpolation, index guard); the long tail is still the long tail |
+| [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 26 action ids now (guards incl. dictionary/enum/index, wrap, braces, loops incl. invert, if→switch, both interpolation directions, digit separators, argument name); the long tail is still the long tail |
 | [Refactoring gaps](#7-refactoring-gaps) | ⚠️ | Low | 41 of Rider's main set are there (`remove_params` and bidirectional call hierarchy arrived); the remaining names are listed |
 | [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ❌ | Low | Text/graph export exists; visual exploration does not |
 | [Version control and collaboration](#9-version-control-and-collaboration) | ⚠️ | Low | Git (including worktrees, bisect and submodules) and GitHub are covered; the rest of the VCS ecosystem is not |
@@ -67,7 +68,7 @@ The full-text index deliberately accepts many extensions, so XAML, SQL, YAML, JS
 | **EF Core** | The C# model — `DbContext`, entities, configurations — is analysed like any C#; migrations are C# files | No migrations workflow: no `dotnet ef migrations add/list/script/remove`, no model-snapshot diff, no generated-SQL inspection, no seeding help |
 | **Kubernetes / Helm** | `.yml`/`.yaml` are in the full-text index; Docker has a local container surface | No kubectl/Helm/kustomize, no manifest schema validation, no cluster state, no port-forward/logs for pods |
 | **Razor / Blazor** | Page inventory, 17 markup/accessibility rules (RZ2001–RZ2017), 11 security rules (RZ1001–RZ1011), verified edits, Razor→metacode | No Razor compilation: `@model` members, tag helpers, component parameters, cascading values, `@bind` types, CSS isolation and JS interop are unchecked |
-| **Python / C++** | Library-level metacode readers (Python `ast` dump, clang JSON dump) | No tool produces those dumps and the default translator does not accept the languages, so in the product they are unreachable |
+| **Python / C++** | `translate_python_file` (CPython's `ast` dumper) and `translate_cpp_file` (`clang -ast-dump=json`) lower a file to canonical pseudocode, with origin lines and a diagnostic per unmodelled construct; `dumpJson` accepts a dump produced elsewhere | No type checker, no symbol navigation, no editing — the readers model syntax for comparison, not a language service |
 | **Java, Go, Rust** | `MetacodeLanguage` has labels | No frontend, no analysis, no navigation, no editing |
 
 ### 1.1 C#
@@ -301,12 +302,12 @@ nobody asks.
 | Which tests a change affects | ✅ `test_impact_analysis` (git diff → the symbols the changed files declare → the tests that reference them) |
 | Test scaffolding (generate a test class for a type) | ✅ `generate_tests` (xUnit, one `[Fact]` per public method, compiler-gated) |
 | Parameterized/data-driven test discovery | ⚠️ what the runner reports; no test-case model |
-| Mutation testing (Stryker) | ❌ |
-| Test impact analysis (run only affected tests) | ❌ |
+| Mutation testing (Stryker) | ✅ `run_mutation_tests` runs Stryker.NET and returns the mutation score, the killed/survived/timed-out/no-coverage counts, the worst files and the surviving mutants with file and line |
+| Test impact analysis (run only affected tests) | ⚠️ `test_impact_analysis` names the affected tests and a ready filter; running exactly them is the caller's `run_test` call |
 | Test explorer UI, grouping, flaky detection | 💀 / ❌ |
 
-What remains is the part that needs its own engine: continuous testing, mutation testing and test
-impact analysis.
+What remains is the part that needs its own engine: continuous testing. Mutation testing now runs through
+`run_mutation_tests` (Stryker.NET; the external runner is a tool dependency, not a bundled engine).
 
 ---
 
@@ -339,13 +340,14 @@ has:
 - **87 C# style ids** (`simplify_code`, with 39 refused and a reason) and **15 VB ids**;
 - **~800 inspection ids**; a fix exists only where the analyzer ships a `CodeFixProvider`
   (`apply_code_fix`);
-- **20 context-action ids** through `context_action` (21 ReSharper rows): `import_type`, the argument guards
+- **26 context-action ids** through `context_action`: `import_type`, the argument guards
   (`check_param_null`, `check_all_params_null`, `check_string_not_null_or_empty`,
-  `check_collection_not_empty`, `check_variable_null`), the wrap actions (`wrap_in_try_catch`,
-  `wrap_in_try_finally`, `wrap_in_if`, `wrap_in_using`, `wrap_in_region`), the string re-encodings
-  (`string_to_raw`, `string_to_verbatim`, `string_to_regular`) and the family added on 2026-10-30
-  (`add_braces`, `foreach_to_for`, `for_to_foreach`, `if_to_switch`, `concat_to_interpolated`,
-  `check_index_range`);
+  `check_collection_not_empty`, `check_variable_null`, `check_dictionary_key`, `check_enum_defined`,
+  `check_index_range`), the wrap actions (`wrap_in_try_catch`, `wrap_in_try_finally`, `wrap_in_if`,
+  `wrap_in_using`, `wrap_in_region`), the string re-encodings (`string_to_raw`, `string_to_verbatim`,
+  `string_to_regular`), the statement family (`add_braces`, `foreach_to_for`, `for_to_foreach`,
+  `invert_loop`, `if_to_switch`, `concat_to_interpolated`, `interpolated_to_concat`) and
+  `digit_separators` / `remove_argument_name`;
 - generators: `implement_members`, `create_from_usage`, `generate_docs`, `generate_members`,
   `implement_inpc`, `generate_tests`.
 
@@ -353,11 +355,11 @@ What that does not cover:
 
 | Missing family | Examples |
 |---|---|
-| Import/completion actions | `import_type` adds the using for a type already named on the line; still missing symbol completion, static-member import, qualify/unqualify, remove an argument name |
+| Import/completion actions | `import_type` adds the using for a type already named on the line, and `remove_argument_name` makes a named argument positional; still missing symbol completion, static-member import, qualify/unqualify |
 | Wrap actions | try/catch, try/finally, if, using and #region are covered; still missing quotes and the "Surround with" template family |
-| Guard actions | the common null/empty guards and the index/range guard are covered; still missing dictionary-key, span-index, enum-defined and contract annotations |
-| Literal/string actions | raw, verbatim and regular re-encoding and concatenation→interpolation are covered; still missing interpolation→concatenation/format, escape/unescape, split/join, digit separators and the StringBuilder rewrites |
-| Statement actions | `foreach`↔`for`, add-braces and `if`-chain→`switch` are covered; still missing statement ↔ expression and invert a loop |
+| Guard actions | the common null/empty guards, the index/range guard, the dictionary-key guard and the enum-defined guard are covered; still missing span-index and contract annotations |
+| Literal/string actions | raw/verbatim/regular re-encoding, both directions of interpolation↔concatenation and digit separators are covered; still missing escape/unescape of individual characters, split/join and the StringBuilder rewrites |
+| Statement actions | `foreach`↔`for`, add-braces, `if`-chain→`switch` and `invert_loop` are covered; still missing statement ↔ expression |
 | Type actions | a DTO from JSON (`generate_dto_from_json`) and a builder (`generate_builder`) are covered; still missing a DTO from XML and a comparer |
 | Test actions | `generate_tests` scaffolds a class; still missing "add a test for this member" and "run the covering test" |
 | Templates | live templates, postfix templates (`.if`, `.null`, `.var`), file templates, a template editor |
@@ -455,7 +457,7 @@ Build and run are covered (`build_project`, `run_project`, `run_tests`, `run_ben
   build graph or per-target timings — `build_project` returns compiler diagnostics; `extract_build_log_errors`
   parses a text log;
 - no run configurations (per-project env vars/args stored and reused — `run_project` takes arguments per
-  call); `.http` files are text and `http_invoke` executes one request, it does not run a request file;
+  call); a `.http` request file runs through `run_http_file`, and `.http` files edited elsewhere are text;
 - no deployment targets (IIS, Azure, containers, Kubernetes);
 - **no standalone command-line tool** for a pipeline (the equivalents of ReSharper's `inspectcode`,
   `dupfinder`, `cleanupcode`): the MCP server must be driven by an MCP client, so CI needs a harness;
@@ -494,7 +496,7 @@ they are repeated here because they are also "what is missing" for a .NET team:
 | Gap | What it would need |
 |---|---|
 | Taint analysis (SQL injection/XSS across the data flow) | A data-flow engine; `find_security_issues` is pattern-based |
-| Mutation testing | A mutation runner (Stryker) and a score |
+| Mutation testing | ✅ `run_mutation_tests` (Stryker.NET) returns the mutation score and the survivors; the runner itself is an external tool the user installs |
 | Quality trend between commits | Storing findings per revision and diffing them; `inspection_baseline` only freezes one state |
 | Database profiling, async/event-source viewers, instrumentation profiling | The four Visual Studio profiling tools not covered (see [profiling.md](profiling.md)) |
 

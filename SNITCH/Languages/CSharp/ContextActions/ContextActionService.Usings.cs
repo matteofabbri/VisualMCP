@@ -119,6 +119,8 @@ public sealed partial class ContextActionService
         "System" => IsSymbolVisible(model, position, "ArgumentNullException") ||
                     IsSymbolVisible(model, position, "InvalidOperationException"),
         "System.Linq" => IsSymbolVisible(model, position, "Enumerable"),
+        "System.Collections.Generic" => IsSymbolVisible(model, position, "KeyNotFoundException") ||
+                                        IsSymbolVisible(model, position, "Dictionary"),
         _ => true,
     };
 
