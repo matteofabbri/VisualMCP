@@ -28,6 +28,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snitch.Metacode", "SNITCH\L
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snitch.Profiling", "SNITCH\Libraries\Snitch.Profiling\Snitch.Profiling.csproj", "{47BDCCA2-7977-5CFE-DE10-6719D1B16DA8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snitch.Profiling.Probe", "SNITCH\Libraries\Snitch.Profiling.Probe\Snitch.Profiling.Probe.csproj", "{435F9E45-7707-48AA-A003-E6C52FE3D36A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -98,6 +100,18 @@ Global
 		{47BDCCA2-7977-5CFE-DE10-6719D1B16DA8}.Release|x64.Build.0 = Release|Any CPU
 		{47BDCCA2-7977-5CFE-DE10-6719D1B16DA8}.Release|x86.ActiveCfg = Release|Any CPU
 		{47BDCCA2-7977-5CFE-DE10-6719D1B16DA8}.Release|x86.Build.0 = Release|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Debug|x64.Build.0 = Debug|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Debug|x86.Build.0 = Debug|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Release|x64.ActiveCfg = Release|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Release|x64.Build.0 = Release|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Release|x86.ActiveCfg = Release|Any CPU
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -108,6 +122,7 @@ Global
 		{4F8312E4-9853-449B-BAD9-C785E12F19DA} = {47C707E5-E409-4D5A-BA90-57DA90FFE19D}
 		{1A523771-DAEC-C767-0EBA-DB2F4E13DCA0} = {4F8312E4-9853-449B-BAD9-C785E12F19DA}
 		{47BDCCA2-7977-5CFE-DE10-6719D1B16DA8} = {4F8312E4-9853-449B-BAD9-C785E12F19DA}
+		{435F9E45-7707-48AA-A003-E6C52FE3D36A} = {4F8312E4-9853-449B-BAD9-C785E12F19DA}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {43B3B4F5-742E-4E6A-B291-FFDCA70F90A4}
