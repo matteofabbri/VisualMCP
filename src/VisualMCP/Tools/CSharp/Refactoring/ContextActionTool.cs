@@ -32,6 +32,10 @@ public static class ContextActionTool
         "remove_braces (a one-statement block, refused when it would rebind an else or a declaration) · " +
         "migrate_to_nullable (#nullable enable at the top, or a disable turned into it) · " +
         "use_configure_await_false (append .ConfigureAwait(false) to the awaited expression) · " +
+        "merge_patterns ('x is A || x is B' → 'x is A or B', and the '&&'/'and' form) · " +
+        "concat_to_stringbuilder (a string local built with '+=' becomes a StringBuilder, appends and reads rewritten with it) · " +
+        "linq_query_to_method / linq_method_to_query (the two directions of LINQ syntax, over from/where/orderby/select) · " +
+        "convert_to_extension_block (a static class of 'this' extension methods becomes a C# 14 `extension(T receiver)` block) · " +
         "string_to_raw / string_to_verbatim / string_to_regular (re-encoded from the value the compiler sees). " +
         "Every action is refused when the projected edit would add a compiler error, and every write is recorded in the edit history.")]
     public static Task<object> ContextAction(

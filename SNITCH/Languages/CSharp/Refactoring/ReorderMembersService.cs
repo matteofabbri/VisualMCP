@@ -11,7 +11,7 @@ public interface IReorderMembersService
     Task<object> ReorderMembers(string? projectName, string? filePath, bool dryRun);
 }
 
-public sealed class ReorderMembersService : IReorderMembersService
+public sealed partial class ReorderMembersService : IReorderMembersService
 {
     private readonly IRoslynWorkspace _workspace;
     public ReorderMembersService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -60,8 +60,9 @@ public sealed class ReorderMembersService : IReorderMembersService
                 var root = await document.GetSyntaxRootAsync();
                 if (root is null) continue;
 
-                var rewriter = new MemberReorderRewriter();
-                var newRoot = rewriter.Visit(root);
+                SyntaxNode? newRoot = document.Project.Language == LanguageNames.VisualBasic
+                    ? new VbMemberReorderRewriter().Visit(root)
+                    : new MemberReorderRewriter().Visit(root);
 
                 if (newRoot is null || newRoot.IsEquivalentTo(root)) continue;
 

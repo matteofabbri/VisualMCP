@@ -8,12 +8,18 @@ using VisualMCP.Startup;
 using VisualMCP.Update;
 using Snitch;
 using Snitch.Languages.VB;
+using Snitch.Platform;
 
 // Redirect stdout to null immediately: the MCP stdio transport uses the raw
 // stdout stream directly, so Console.SetOut does not affect it, but it does
 // prevent any stray text (host startup banners, log lines) from corrupting
 // the JSON protocol before our FileLoggerProvider takes over.
 Console.SetOut(TextWriter.Null);
+
+// The workspace may have pinned where temp and the package caches go (disk_usage action=guard writes
+// .visualMCP/disk-policy.json). Read it before anything spawns a build: the variables are inherited by
+// every child process, and Path.GetTempPath() resolves the redirected TEMP from here on.
+DiskPolicy.ApplyStartupPolicy(Directory.GetCurrentDirectory());
 
 // Must be called before any MSBuild/Roslyn types are JIT-compiled.
 MSBuildLocator.RegisterDefaults();
@@ -116,6 +122,12 @@ static async Task RunServerAsync(string[] args)
         "- Where does a refactoring pay first? git history (how often a file changes) joined with Roslyn " +
         "complexity (how hard its worst method is to read) -> git_churn_hotspots (read-only; since/path/minCommits " +
         "narrow the window).\n" +
+        "- Where did the disk space go / how do I keep builds off the system drive -> disk_usage: action=report " +
+        "measures TEMP, the NuGet caches, the .NET CLI home, tool installs, the MCP log and the solution store " +
+        "with absolute paths, bytes and a clean target, action=clean removes one target (dry run by default; " +
+        "confirm=true to delete), action=guard redirects TEMP/TMP/NUGET_PACKAGES/.NET CLI state to a root on " +
+        "another drive and persists the policy for later starts. Use it BEFORE long build/test work on a " +
+        "machine whose system drive is short of space.\n" +
         "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
         "- Debug a running program — a REAL debugger (DAP), not logging: install the adapter once -> debug_install " +
         "(debug_status says whether it is there; a few MB from the Samsung release); start a built .dll or a " +
@@ -258,11 +270,15 @@ static async Task RunServerAsync(string[] args)
         "and resolve (ours|theirs|both|base|custom, per hunk with blockIndex) stages the file — never hand-edit '<<<<<<<' " +
         "blocks. An interactive rebase is a plan, not an editor: git_rebase action=plan with a JSON todo list of " +
         "pick/reword/squash/fixup/drop steps and their messages. Park work as a NAMED shelf on disk -> git_patch " +
-        "(create/list/show/apply with --check/--3way/reverse/delete); git_stash stays the anonymous in-repo variant.\n" +
+        "(create/list/show/apply with --check/--3way/reverse/delete); git_stash stays the anonymous in-repo variant. " +
+        "A commit convention is data: commit_lint lints a message, HEAD or a range against Conventional Commits " +
+        "(type/scope/description/breaking/footers plus rule ids), and git_commit conventional=true refuses a " +
+        "non-conforming message instead of writing it.\n" +
         "- Hosting services: GitHub -> gh_* (gh_pr covers list/view/create/merge/comment, plus REVIEW with line-anchored " +
         "comments via comments=[{path,line,side,body}] and reviewEvent, review-comments, checks; gh_branch_protection " +
         "inspects protection, required checks and rulesets). GitLab, Azure DevOps and Bitbucket Cloud -> git_host (PRs, " +
-        "comments, merges, issues/work items, pipelines; provider/host/project/repository parsed from the remote; " +
+        "comments, merges, review-pr approve/request-changes/comment, close-pr/reopen-pr/update-pr, issues/work items, " +
+        "pipelines; provider/host/project/repository parsed from the remote; " +
         "credentials from GITLAB_TOKEN / AZURE_DEVOPS_EXT_PAT / BITBUCKET_*). Before reviewing a change -> code_review " +
         "gives the brief (changed files by kind, risk signals, new TODOs with lines, worst methods, optional inspection " +
         "findings); it does not run tests (run_affected_tests) and does not post (gh_pr action=review).\n" +
@@ -496,6 +512,19 @@ static async Task RunServerAsync(string[] args)
 
     var logger = host.Services.GetRequiredService<ILoggerFactory>()
         .CreateLogger("VisualMCP.Startup");
+
+    var diskPolicy = DiskPolicy.Current;
+    if (diskPolicy.Enabled)
+    {
+        logger.LogInformation(
+            "Disk policy: TEMP, the NuGet caches and .NET CLI state are redirected to {Root} ({Policy}).",
+            diskPolicy.Root, diskPolicy.PolicyPath);
+    }
+    else
+    {
+        logger.LogInformation(
+            "Disk policy: none. If the system drive fills during builds, run disk_usage action=guard apply=true.");
+    }
 
     // Stop the dashboard when the host shuts down; it is bound to no lifetime of its own.
     var dashboard = host.Services.GetRequiredService<VisualMCP.Dashboard.DashboardServer>();

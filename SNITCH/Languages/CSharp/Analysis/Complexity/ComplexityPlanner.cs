@@ -16,7 +16,7 @@ namespace Snitch.Languages.CSharp.Analysis.Complexity;
 /// or split an <c>else-if</c> ladder into a switch.
 /// </para>
 /// </summary>
-public static class ComplexityPlanner
+public static partial class ComplexityPlanner
 {
     /// <summary>Suggestions for one unit, best expected reduction first.</summary>
     public static IReadOnlyList<ComplexitySuggestion> Suggest(
@@ -24,6 +24,9 @@ public static class ComplexityPlanner
         SemanticModel model,
         CancellationToken cancellationToken = default)
     {
+        if (unit.SyntaxTree.Options.Language == LanguageNames.VisualBasic)
+            return SuggestVisualBasic(unit, model, cancellationToken);
+
         var suggestions = new List<ComplexitySuggestion>();
         if (BodyBlock(unit) is not { } body) return suggestions;
 

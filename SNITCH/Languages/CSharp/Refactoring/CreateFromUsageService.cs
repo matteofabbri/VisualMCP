@@ -66,7 +66,7 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
             .ToList();
 
         var target = diagnostics.FirstOrDefault(diagnostic =>
-            diagnostic.Id is "CS1061" or "CS0246" or "CS0103" or "CS0117" or "CS1501" or "CS7036");
+            diagnostic.Id is "CS1061" or "CS0246" or "CS0103" or "CS0117" or "CS1501" or "CS7036" or "CS1729");
         if (target is null)
             return new
             {
@@ -80,6 +80,7 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
                     "CS0117 static member not found on a type",
                     "CS1501 no overload takes these arguments",
                     "CS7036 a required argument is missing",
+                    "CS1729 no constructor takes these arguments",
                     "CS0246 type not found",
                     "CS0103 unknown name used as a call",
                 },
@@ -92,6 +93,7 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
             "CS1061" => await MemberFromUsageAsync(node, model, solution, document, cancellationToken),
             "CS0117" => await StaticMemberOnTypeAsync(node, model, solution, document, cancellationToken),
             "CS1501" or "CS7036" => await OverloadFromUsageAsync(node, model, solution, document, cancellationToken),
+            "CS1729" => await ConstructorFromUsageAsync(node, model, solution, document, cancellationToken),
             "CS0246" => await TypeFromUsageAsync(node, solution, document, cancellationToken),
             _ => await StaticMemberFromUsageAsync(node, model, document, cancellationToken),
         };
@@ -337,6 +339,42 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
 
         var newText = ImplementMembersService.InsertMembers(targetText, declaration, new[] { stub });
         return new Edit(targetDocument, newText, targetText.ToString(), name, kind, stub, null);
+    }
+
+    // ── CS1729: the type exists, the constructor does not ───────────────────
+
+    private static async Task<Edit> ConstructorFromUsageAsync(
+        SyntaxNode node, SemanticModel model, Solution solution, Document document, CancellationToken cancellationToken)
+    {
+        var creation = node.AncestorsAndSelf().OfType<ObjectCreationExpressionSyntax>().FirstOrDefault();
+        if (creation is null)
+            return Fail("The error is not on a 'new' expression, so there is no constructor to add.");
+
+        if (model.GetTypeInfo(creation, cancellationToken).Type is not INamedTypeSymbol type)
+            return Fail($"The type of `{creation.Type}` could not be resolved.");
+
+        var reference = type.DeclaringSyntaxReferences.FirstOrDefault();
+        if (reference is null)
+            return Fail($"'{type.ToDisplayString()}' is not declared in the solution, so a constructor cannot be added to it.");
+
+        var targetDocument = solution.GetDocument(reference.SyntaxTree) ?? document;
+        var targetRoot = await targetDocument.GetSyntaxRootAsync(cancellationToken);
+        var targetText = await targetDocument.GetTextAsync(cancellationToken);
+        if (targetRoot is null) return Fail("Could not read the file that declares the type.");
+
+        var declaration = targetRoot.DescendantNodes().OfType<TypeDeclarationSyntax>()
+            .FirstOrDefault(candidate => candidate.Identifier.ValueText == type.Name);
+        if (declaration is null) return Fail($"Could not find the declaration of '{type.Name}'.");
+
+        var parameters = (creation.ArgumentList?.Arguments ?? default)
+            .Select((argument, index) =>
+                $"{TypeOf(argument.Expression, model)} " +
+                $"{argument.NameColon?.Name.Identifier.ValueText ?? "arg" + (index + 1)}")
+            .ToList();
+
+        var stub = $"public {type.Name}({string.Join(", ", parameters)}) {{ }}";
+        var newText = ImplementMembersService.InsertMembers(targetText, declaration, new[] { stub });
+        return new Edit(targetDocument, newText, targetText.ToString(), type.Name, "constructor", stub, null);
     }
 
     // ── CS0246: the type does not exist ──────────────────────────────────────

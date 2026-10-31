@@ -16,6 +16,7 @@ registrations and dashboard.
 | Client routing rules | `%USERPROFILE%\.zcode\AGENTS.md`, and `CLAUDE.md`/`AGENTS.md` in a project |
 | Log | `%USERPROFILE%\.claude\mcp-servers\VisualMCP\debug.log` |
 | Solution store | `<solution>\.visualMCP\visualmcp.db` |
+| Disk policy | `<solution>\.visualMCP\disk-policy.json` (written by `disk_usage action=guard`; read at startup) |
 | Profiling artifacts | `<solution>\.visualMCP\profiling\` (traces, dumps, reports, symbols) |
 | Project memory | `%USERPROFILE%\.claude\projects\<slug>\memory\` |
 | Hooks | `hooks\pre-tool-use.ps1` and `hooks\agents-block.md`, installed into the client configuration |
@@ -33,9 +34,14 @@ the same file, including calls that were cancelled.
 | `GHIDRA_INSTALL_DIR` / `GHIDRA_HOME` | Where Ghidra is installed, used by `analyze_native_binary`; `ghidraHome`/`headlessPath` override it. When neither is set, Ghidra is downloaded into `<local data>\VisualMCP\tools` on first use |
 | `JAVA_HOME_OVERRIDE` | JDK handed to Ghidra (JDK 21+); `javaHome` overrides it |
 | `VISUALMCP_SKIP_INSTALL_ON_BUILD` | Build-time only: stops the Visual Studio post-build target from re-running the installer |
+| `VISUALMCP_TEMP` | The root a disk policy redirects to; `disk_usage action=guard` sets it. A policy file found at startup is applied before anything spawns a build |
 
-Standard .NET variables still apply (`NUGET_PACKAGES`, `DOTNET_*`). The server does not read a project
-configuration file of its own; the solution store is the only state it keeps.
+Standard .NET variables still apply (`NUGET_PACKAGES`, `DOTNET_*`). The server reads one optional file of
+its own: `<workspace>\.visualMCP\disk-policy.json`, written by `disk_usage action=guard`. It holds the
+root and the variables it sets (`TEMP`, `TMP`, `NUGET_PACKAGES`, `NUGET_HTTP_CACHE_PATH`,
+`DOTNET_CLI_HOME`, `DOTNET_BUNDLE_EXTRACT_BASE_DIR`), which are applied to the process and inherited by
+every child process. Delete the file, or set `enabled=false`, to stop redirecting. Everything else the
+server keeps is the solution store.
 
 ## Client registration
 

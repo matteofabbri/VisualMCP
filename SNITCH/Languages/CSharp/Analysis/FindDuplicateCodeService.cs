@@ -12,7 +12,16 @@ public interface IFindDuplicateCodeService
     Task<object> FindDuplicateCode(string? projectName, int minStatements, int minTokens);
 }
 
-public sealed class FindDuplicateCodeService : IFindDuplicateCodeService
+/// <summary>
+/// Clone detection over statement blocks: a method body and every sliding window of it are hashed with
+/// identifiers and literals replaced by placeholders, so two blocks that differ only in names and
+/// values land on the same hash. A hash with two or more occurrences is a clone cluster.
+/// <para>
+/// The blocks come from C# method declarations and from VB method, constructor and operator blocks;
+/// the walk is the same one, the token classification is the only per-language part.
+/// </para>
+/// </summary>
+public sealed partial class FindDuplicateCodeService : IFindDuplicateCodeService
 {
     private readonly IRoslynWorkspace _workspace;
     public FindDuplicateCodeService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -43,32 +52,24 @@ public sealed class FindDuplicateCodeService : IFindDuplicateCodeService
                 var root = await document.GetSyntaxRootAsync();
                 if (root is null || document.FilePath is null) continue;
 
-                // Index method bodies
-                foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+                foreach (var body in MethodBodies(root))
                 {
-                    if (method.Body is null) continue;
-                    var stmts = method.Body.Statements;
-                    if (stmts.Count < minStatements) continue;
-
-                    IndexBlock(stmts.Cast<SyntaxNode>().ToList(), document.FilePath, project.Name,
-                        method.Identifier.Text, method.GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                        minTokens, index);
-                }
-
-                // Index statement sub-sequences within method bodies (sliding window)
-                foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
-                {
-                    if (method.Body is null) continue;
-                    var stmts = method.Body.Statements.ToList();
-                    if (stmts.Count < minStatements * 2) continue;
-
-                    for (int start = 0; start <= stmts.Count - minStatements; start++)
+                    // Index the whole body
+                    if (body.Statements.Count >= minStatements)
                     {
-                        var window = stmts.Skip(start).Take(minStatements).Cast<SyntaxNode>().ToList();
+                        IndexBlock(body.Statements.Take(body.Statements.Count).ToList(), document.FilePath, project.Name,
+                            body.Name, body.Line, minTokens, index);
+                    }
+
+                    // Index statement sub-sequences within the body (sliding window)
+                    if (body.Statements.Count < minStatements * 2) continue;
+
+                    for (var start = 0; start <= body.Statements.Count - minStatements; start++)
+                    {
+                        var window = body.Statements.Skip(start).Take(minStatements).ToList();
                         IndexBlock(window, document.FilePath, project.Name,
-                            $"{method.Identifier.Text}[{start}..{start + minStatements - 1}]",
-                            stmts[start].GetLocation().GetLineSpan().StartLinePosition.Line + 1,
-                            minTokens, index);
+                            $"{body.Name}[{start}..{start + minStatements - 1}]",
+                            LineOf(window[0]), minTokens, index);
                     }
                 }
             }
@@ -107,6 +108,22 @@ public sealed class FindDuplicateCodeService : IFindDuplicateCodeService
         };
     }
 
+    /// <summary>One indexable body: its statements, the name it is reported under and its first line.</summary>
+    private sealed record MethodBody(IReadOnlyList<SyntaxNode> Statements, string Name, int Line);
+
+    private static IEnumerable<MethodBody> MethodBodies(SyntaxNode root) =>
+        root.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicMethodBodies(root)
+            : root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                .Where(method => method.Body is not null)
+                .Select(method => new MethodBody(
+                    method.Body!.Statements.Cast<SyntaxNode>().ToList(),
+                    method.Identifier.Text,
+                    LineOf(method)));
+
+    private static int LineOf(SyntaxNode node) =>
+        node.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+
     private static void IndexBlock(
         List<SyntaxNode> nodes, string filePath, string projectName,
         string context, int line, int minTokens,
@@ -139,14 +156,12 @@ public sealed class FindDuplicateCodeService : IFindDuplicateCodeService
     {
         foreach (var token in node.DescendantTokens())
         {
-            var kind = token.Kind();
             // Replace identifiers and literals with placeholders to catch structural clones
-            if (kind == SyntaxKind.IdentifierToken)
+            if (IsIdentifierToken(token))
                 sb.Append("ID ");
-            else if (token.IsKind(SyntaxKind.NumericLiteralToken))
+            else if (IsNumericLiteralToken(token))
                 sb.Append("NUM ");
-            else if (token.IsKind(SyntaxKind.StringLiteralToken) ||
-                     token.IsKind(SyntaxKind.InterpolatedStringStartToken))
+            else if (IsStringLiteralToken(token))
                 sb.Append("STR ");
             else
                 sb.Append(token.RawKind).Append(' ');

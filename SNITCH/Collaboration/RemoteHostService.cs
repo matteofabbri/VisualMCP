@@ -23,9 +23,10 @@ public sealed record HostCoordinates(
 }
 
 /// <summary>
-/// The hosting providers other than GitHub: merge/pull requests, their comments and merges, issues
-/// and pipelines/builds, over each vendor's HTTP API. GitHub stays on the <c>gh</c> CLI (gh_*), which
-/// also covers reviews and checks; this is the equivalent for GitLab, Azure DevOps and Bitbucket.
+/// The hosting providers other than GitHub: merge/pull requests, their comments, merges, reviews and
+/// the close/reopen/update lifecycle, plus issues and pipelines/builds, over each vendor's HTTP API.
+/// GitHub stays on the <c>gh</c> CLI (gh_*), which also covers line-anchored reviews and checks; this
+/// is the equivalent for GitLab, Azure DevOps and Bitbucket.
 /// </summary>
 public interface IRemoteHostService
 {
@@ -44,7 +45,8 @@ public interface IRemoteHostService
         int? limit,
         bool confirm,
         string? repoPath,
-        int timeoutSeconds);
+        int timeoutSeconds,
+        string? reviewEvent = null);
 }
 
 /// <summary>Default implementation over HttpClient, with per-provider request and response mapping.</summary>
@@ -82,7 +84,8 @@ public sealed class RemoteHostService : IRemoteHostService
     public async Task<object> HostAsync(
         string action, string provider, string? hostUrl, string? project, string? repository,
         int? number, string? title, string? body, string? sourceBranch, string? targetBranch,
-        string? state, int? limit, bool confirm, string? repoPath, int timeoutSeconds)
+        string? state, int? limit, bool confirm, string? repoPath, int timeoutSeconds,
+        string? reviewEvent = null)
     {
         var verb = (action ?? "detect").Trim().ToLowerInvariant();
         var site = await ResolveAsync(provider, hostUrl, project, repository, repoPath);
@@ -103,6 +106,7 @@ public sealed class RemoteHostService : IRemoteHostService
                 supportedActions = new[]
                 {
                     "detect", "list-prs", "view-pr", "create-pr", "comment-pr", "merge-pr",
+                    "review-pr", "close-pr", "reopen-pr", "update-pr",
                     "list-issues", "create-issue", "pipelines",
                 },
                 note = "GitHub repositories use gh_* (gh_pr, gh_issue, gh_actions), which also covers line-anchored reviews and checks.",
@@ -119,9 +123,9 @@ public sealed class RemoteHostService : IRemoteHostService
         {
             return at.Provider switch
             {
-                GitLab => await GitLabAsync(verb, at, credential, number, title, body, sourceBranch, targetBranch, prState, clamped, confirm, token),
-                AzureDevOps => await AzureAsync(verb, at, credential, number, title, body, sourceBranch, targetBranch, prState, clamped, confirm, token),
-                Bitbucket => await BitbucketAsync(verb, at, credential, number, title, body, sourceBranch, targetBranch, prState, clamped, confirm, token),
+                GitLab => await GitLabAsync(verb, at, credential, number, title, body, sourceBranch, targetBranch, prState, clamped, confirm, token, reviewEvent),
+                AzureDevOps => await AzureAsync(verb, at, credential, number, title, body, sourceBranch, targetBranch, prState, clamped, confirm, token, reviewEvent),
+                Bitbucket => await BitbucketAsync(verb, at, credential, number, title, body, sourceBranch, targetBranch, prState, clamped, confirm, token, reviewEvent),
                 _ => UnsupportedProvider(provider),
             };
         }
@@ -138,7 +142,7 @@ public sealed class RemoteHostService : IRemoteHostService
     // ── GitLab ───────────────────────────────────────────────────────────────
     private async Task<object> GitLabAsync(string verb, HostCoordinates at, HostCredential credential,
         int? number, string? title, string? body, string? sourceBranch, string? targetBranch,
-        string state, int limit, bool confirm, CancellationToken token)
+        string state, int limit, bool confirm, CancellationToken token, string? reviewEvent)
     {
         var project = Uri.EscapeDataString(at.Project);
         var api = $"{at.BaseUrl}/api/v4/projects/{project}";
@@ -241,6 +245,69 @@ public sealed class RemoteHostService : IRemoteHostService
                         : Describe(result, at, verb);
                 }
 
+            case "review-pr":
+                if (!confirm) return NeedsConfirm("Posting a review is visible to others.");
+                if (number is null) return NeedsNumber();
+                {
+                    var review = ReviewEvent(reviewEvent);
+                    if (review is null) return BadReviewEvent();
+
+                    if (review == "request-changes")
+                        return new
+                        {
+                            provider = at.Provider, reviewed = false, supported = false, number,
+                            reviewEvent = review,
+                            error = "GitLab's REST API has no request-changes vote (only approve and unapprove); the requested-changes state exists in the UI, not in the API.",
+                            hint = "Post the reason with comment-pr, then approve with review-pr reviewEvent=approve when it is resolved.",
+                        };
+
+                    if (review == "comment")
+                    {
+                        if (string.IsNullOrWhiteSpace(body)) return NeedsReviewBody();
+                        var payload = JsonSerializer.Serialize(new { body }, Json);
+                        var result = await SendAsync(HttpMethod.Post, $"{api}/merge_requests/{number}/notes", headers, payload, token);
+                        return result.Ok
+                            ? new { provider = at.Provider, reviewed = true, reviewEvent = review, number, id = Int(result.Data, "id"), url = result.Url, statusCode = result.StatusCode }
+                            : Describe(result, at, verb);
+                    }
+
+                    var approved = await SendAsync(HttpMethod.Post, $"{api}/merge_requests/{number}/approve", headers, "{}", token);
+                    return approved.Ok
+                        ? new { provider = at.Provider, reviewed = true, reviewEvent = review, number, approved = true, url = approved.Url, statusCode = approved.StatusCode }
+                        : Describe(approved, at, verb);
+                }
+
+            case "close-pr":
+            case "reopen-pr":
+                if (!confirm) return NeedsConfirm(verb == "close-pr"
+                    ? "Closing a merge request is visible to others."
+                    : "Reopening a merge request is visible to others.");
+                if (number is null) return NeedsNumber();
+                {
+                    var payload = JsonSerializer.Serialize(new { state_event = verb == "close-pr" ? "close" : "reopen" }, Json);
+                    var result = await SendAsync(HttpMethod.Put, $"{api}/merge_requests/{number}", headers, payload, token);
+                    return result.Ok
+                        ? new { provider = at.Provider, number, action = verb, state = Text(result.Data, "state"), url = result.Url, statusCode = result.StatusCode }
+                        : Describe(result, at, verb);
+                }
+
+            case "update-pr":
+                if (!confirm) return NeedsConfirm("Editing a merge request is visible to others.");
+                if (number is null) return NeedsNumber();
+                if (string.IsNullOrWhiteSpace(title) && body is null)
+                    return new { error = "Pass title, body (the description), or both." };
+                {
+                    var fields = new Dictionary<string, object>();
+                    if (!string.IsNullOrWhiteSpace(title)) fields["title"] = title!;
+                    if (body is not null) fields["description"] = body;
+
+                    var payload = JsonSerializer.Serialize(fields, Json);
+                    var result = await SendAsync(HttpMethod.Put, $"{api}/merge_requests/{number}", headers, payload, token);
+                    return result.Ok
+                        ? new { provider = at.Provider, updated = true, number, title = Text(result.Data, "title"), url = result.Url, statusCode = result.StatusCode }
+                        : Describe(result, at, verb);
+                }
+
             case "list-issues":
             {
                 var result = await SendAsync(HttpMethod.Get, $"{api}/issues?state={(state == "open" ? "opened" : Uri.EscapeDataString(state))}&per_page={limit}", headers, null, token);
@@ -301,7 +368,7 @@ public sealed class RemoteHostService : IRemoteHostService
     // ── Azure DevOps ─────────────────────────────────────────────────────────
     private async Task<object> AzureAsync(string verb, HostCoordinates at, HostCredential credential,
         int? number, string? title, string? body, string? sourceBranch, string? targetBranch,
-        string state, int limit, bool confirm, CancellationToken token)
+        string state, int limit, bool confirm, CancellationToken token, string? reviewEvent)
     {
         var headers = new Dictionary<string, string> { ["Authorization"] = credential.Value };
         var repo = $"{at.BaseUrl}/{Uri.EscapeDataString(at.Project)}/_apis/git/repositories/{Uri.EscapeDataString(at.Repository)}";
@@ -423,6 +490,85 @@ public sealed class RemoteHostService : IRemoteHostService
                         : Describe(result, at, verb);
                 }
 
+            case "review-pr":
+                if (!confirm) return NeedsConfirm("Posting a review is visible to others.");
+                if (number is null) return NeedsNumber();
+                {
+                    var review = ReviewEvent(reviewEvent);
+                    if (review is null) return BadReviewEvent();
+
+                    if (review == "comment")
+                    {
+                        if (string.IsNullOrWhiteSpace(body)) return NeedsReviewBody();
+                        var commentPayload = JsonSerializer.Serialize(new
+                        {
+                            comments = new[] { new { parentCommentId = 0, content = body, commentType = 1 } },
+                            status = 1,
+                        }, Json);
+
+                        var result = await SendAsync(HttpMethod.Post, $"{repo}/pullRequests/{number}/threads?api-version=7.1", headers, commentPayload, token);
+                        return result.Ok
+                            ? new { provider = at.Provider, reviewed = true, reviewEvent = review, number, threadId = Int(result.Data, "id"), url = result.Url, statusCode = result.StatusCode }
+                            : Describe(result, at, verb);
+                    }
+
+                    // A vote is cast by the authenticated identity, so its reviewer id comes from
+                    // connectionData; the caller must already be a reviewer of the pull request.
+                    var me = await SendAsync(HttpMethod.Get,
+                        $"{at.BaseUrl}/{Uri.EscapeDataString(at.Project)}/_apis/connectionData?api-version=7.1-preview.1",
+                        headers, null, token);
+                    if (!me.Ok) return Describe(me, at, verb);
+
+                    var reviewer = Text(me.Data, "authenticatedUser", "id");
+                    if (string.IsNullOrWhiteSpace(reviewer))
+                        return new
+                        {
+                            error = "Azure DevOps did not report the authenticated user id, so no review vote could be cast.",
+                            url = me.Url,
+                            hint = "Check that the PAT belongs to a user with access to this repository.",
+                        };
+
+                    var vote = review == "approve" ? 10 : -10;
+                    var payload = JsonSerializer.Serialize(new { vote }, Json);
+                    var voted = await SendAsync(HttpMethod.Put,
+                        $"{repo}/pullrequests/{number}/reviewers/{reviewer}?api-version=7.1", headers, payload, token);
+
+                    return voted.Ok
+                        ? new { provider = at.Provider, reviewed = true, reviewEvent = review, number, vote, reviewer, url = voted.Url, statusCode = voted.StatusCode }
+                        : Describe(voted, at, verb);
+                }
+
+            case "close-pr":
+            case "reopen-pr":
+                if (!confirm) return NeedsConfirm(verb == "close-pr"
+                    ? "Abandoning a pull request is visible to others."
+                    : "Reactivating a pull request is visible to others.");
+                if (number is null) return NeedsNumber();
+                {
+                    var payload = JsonSerializer.Serialize(new { status = verb == "close-pr" ? "abandoned" : "active" }, Json);
+                    var result = await SendAsync(HttpMethod.Patch, $"{repo}/pullrequests/{number}?api-version=7.1", headers, payload, token);
+                    return result.Ok
+                        ? new { provider = at.Provider, number, action = verb, state = Text(result.Data, "status"), url = result.Url, statusCode = result.StatusCode }
+                        : Describe(result, at, verb);
+                }
+
+            case "update-pr":
+                if (!confirm) return NeedsConfirm("Editing a pull request is visible to others.");
+                if (number is null) return NeedsNumber();
+                if (string.IsNullOrWhiteSpace(title) && body is null)
+                    return new { error = "Pass title, body (the description), or both." };
+                {
+                    var fields = new Dictionary<string, object>();
+                    if (!string.IsNullOrWhiteSpace(title)) fields["title"] = title!;
+                    if (body is not null) fields["description"] = body;
+
+                    var payload = JsonSerializer.Serialize(fields, Json);
+                    var result = await SendAsync(HttpMethod.Patch, $"{repo}/pullrequests/{number}?api-version=7.1", headers, payload, token);
+                    return result.Ok
+                        ? new { provider = at.Provider, updated = true, number, title = Text(result.Data, "title"), url = result.Url, statusCode = result.StatusCode }
+                        : Describe(result, at, verb);
+                }
+
             case "list-issues":
             {
                 var wiql = JsonSerializer.Serialize(new
@@ -518,7 +664,7 @@ public sealed class RemoteHostService : IRemoteHostService
     // ── Bitbucket Cloud ──────────────────────────────────────────────────────
     private async Task<object> BitbucketAsync(string verb, HostCoordinates at, HostCredential credential,
         int? number, string? title, string? body, string? sourceBranch, string? targetBranch,
-        string state, int limit, bool confirm, CancellationToken token)
+        string state, int limit, bool confirm, CancellationToken token, string? reviewEvent)
     {
         var headers = new Dictionary<string, string> { ["Authorization"] = credential.Value };
         var repo = $"{at.BaseUrl}/2.0/repositories/{Uri.EscapeDataString(at.Project)}/{Uri.EscapeDataString(at.Repository)}";
@@ -615,6 +761,65 @@ public sealed class RemoteHostService : IRemoteHostService
                     var result = await SendAsync(HttpMethod.Post, $"{repo}/pullrequests/{number}/merge", headers, "{}", token);
                     return result.Ok
                         ? new { provider = at.Provider, merged = true, number, state = Text(result.Data, "state"), url = result.Url, statusCode = result.StatusCode }
+                        : Describe(result, at, verb);
+                }
+
+            case "review-pr":
+                if (!confirm) return NeedsConfirm("Posting a review is visible to others.");
+                if (number is null) return NeedsNumber();
+                {
+                    var review = ReviewEvent(reviewEvent);
+                    if (review is null) return BadReviewEvent();
+
+                    if (review == "comment")
+                    {
+                        if (string.IsNullOrWhiteSpace(body)) return NeedsReviewBody();
+                        var payload = JsonSerializer.Serialize(new { content = new { raw = body } }, Json);
+                        var result = await SendAsync(HttpMethod.Post, $"{repo}/pullrequests/{number}/comments", headers, payload, token);
+                        return result.Ok
+                            ? new { provider = at.Provider, reviewed = true, reviewEvent = review, number, id = Int(result.Data, "id"), url = result.Url, statusCode = result.StatusCode }
+                            : Describe(result, at, verb);
+                    }
+
+                    var endpoint = review == "approve" ? "approve" : "request-changes";
+                    var voted = await SendAsync(HttpMethod.Post, $"{repo}/pullrequests/{number}/{endpoint}", headers, "{}", token);
+                    return voted.Ok
+                        ? new
+                        {
+                            provider = at.Provider, reviewed = true, reviewEvent = review, number,
+                            reviewer = Text(voted.Data, "user", "display_name"), url = voted.Url, statusCode = voted.StatusCode,
+                        }
+                        : Describe(voted, at, verb);
+                }
+
+            case "close-pr":
+            case "reopen-pr":
+                if (!confirm) return NeedsConfirm(verb == "close-pr"
+                    ? "Declining a pull request is visible to others."
+                    : "Reopening a pull request is visible to others.");
+                if (number is null) return NeedsNumber();
+                {
+                    var payload = JsonSerializer.Serialize(new { state = verb == "close-pr" ? "DECLINED" : "OPEN" }, Json);
+                    var result = await SendAsync(HttpMethod.Put, $"{repo}/pullrequests/{number}", headers, payload, token);
+                    return result.Ok
+                        ? new { provider = at.Provider, number, action = verb, state = Text(result.Data, "state"), url = result.Url, statusCode = result.StatusCode }
+                        : Describe(result, at, verb);
+                }
+
+            case "update-pr":
+                if (!confirm) return NeedsConfirm("Editing a pull request is visible to others.");
+                if (number is null) return NeedsNumber();
+                if (string.IsNullOrWhiteSpace(title) && body is null)
+                    return new { error = "Pass title, body (the description), or both." };
+                {
+                    var fields = new Dictionary<string, object>();
+                    if (!string.IsNullOrWhiteSpace(title)) fields["title"] = title!;
+                    if (body is not null) fields["description"] = body;
+
+                    var payload = JsonSerializer.Serialize(fields, Json);
+                    var result = await SendAsync(HttpMethod.Put, $"{repo}/pullrequests/{number}", headers, payload, token);
+                    return result.Ok
+                        ? new { provider = at.Provider, updated = true, number, title = Text(result.Data, "title"), url = result.Url, statusCode = result.StatusCode }
                         : Describe(result, at, verb);
                 }
 
@@ -983,11 +1188,29 @@ public sealed class RemoteHostService : IRemoteHostService
 
     private static object NeedsNumber() => new { error = "A pull-request or issue number is required." };
 
+    /// <summary>The three review events, or null when the value names none of them.</summary>
+    private static string? ReviewEvent(string? value) => (value ?? "comment").Trim().ToLowerInvariant() switch
+    {
+        "approve" or "approved" => "approve",
+        "request-changes" or "request_changes" or "requestchanges" or "changes" => "request-changes",
+        "comment" or "note" => "comment",
+        _ => null,
+    };
+
+    private static object BadReviewEvent() => new
+    {
+        error = "reviewEvent must be approve, request-changes or comment.",
+        hint = "Leave it out to post a comment: 'comment' needs a body, 'approve' does not.",
+    };
+
+    private static object NeedsReviewBody() => new { error = "A review comment needs a body (reviewEvent=comment)." };
+
     private static object NeedsConfirm(string what) => new { error = $"{what} Pass confirm=true to proceed." };
 
     private static object UnknownAction(string provider) => new
     {
-        error = "Unknown action. Use detect, list-prs, view-pr, create-pr, comment-pr, merge-pr, list-issues, create-issue or pipelines.",
+        error = "Unknown action. Use detect, list-prs, view-pr, create-pr, comment-pr, merge-pr, review-pr, " +
+                "close-pr, reopen-pr, update-pr, list-issues, create-issue or pipelines.",
         provider,
     };
 

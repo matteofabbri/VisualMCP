@@ -88,6 +88,32 @@ Runs the suite with XPlat Code Coverage and returns per-class and per-method **l
 requires `coverlet.collector` in the test projects; without it, the tool reports that rather than
 inventing numbers.
 
+## Disk space
+
+A long build/test session grows more than the repository: MSBuild temp, testhost working directories and
+NuGet scratch under `TEMP`; packages, the HTTP cache and plugins under the NuGet roots; CLI state under
+`DOTNET_CLI_HOME`; `quick_benchmark`'s temporary project; and the server's own temporary files. On a
+machine with a small system drive that is where the space goes.
+
+```
+disk_usage                                                # drives, folders, bytes, findings
+disk_usage action=clean targets=["temp-stale"] dryRun=false confirm=true
+disk_usage action=guard root="D:\vmcp-tmp" apply=true
+```
+
+`report` measures each known folder with its absolute path, risk and the clean target that removes it,
+and its findings say which folder is the cause and what to call next. `clean` touches only a known
+target's root and, for temp, only entries older than `olderThanHours` (24 by default), so an in-flight
+build is left alone. `guard` is the prevention half: it sets `TEMP`/`TMP`, `NUGET_PACKAGES`,
+`NUGET_HTTP_CACHE_PATH`, `DOTNET_CLI_HOME` and `DOTNET_BUNDLE_EXTRACT_BASE_DIR` under the root, applies
+them to the server process — every `dotnet build`, `dotnet test`, `git` and shell inherits them — and
+writes `<workspace>/.visualMCP/disk-policy.json`, which the next start reads. It deletes nothing; it keeps
+the next session from refilling the drive.
+
+When a policy is active, the policy root is a target too: `targets=["policy-root"]` removes older
+leftovers sitting next to the redirected `temp`/`nuget-packages`/`.NET` folders while leaving those
+folders themselves alone.
+
 ## Benchmark
 
 | Tool | Use |

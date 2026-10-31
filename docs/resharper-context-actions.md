@@ -29,6 +29,11 @@ Two of the 13 have no ReSharper *context action* behind them — `wrap_in_try_ca
 "Surround with" templates — so counting them here would be wrong. The 14 marked rows are the honest overlap
 with the table below.
 
+The **41 ids** `context_action` implements today are more than that first tranche: the guards, the wrap
+actions, the statement and declaration shapes, nullable migration, the string conversions, LINQ in both
+directions, StringBuilder, pattern merging and the C# 14 extension block. The census rows carry a status
+only where the row maps one-to-one onto an id; a family that several ids cover is marked on its cluster.
+
 ## The families not implemented
 
 The 307 rows below are the census, not a to-do list: many are already reached by `simplify_code`, a
@@ -36,17 +41,17 @@ refactoring tool or an inspection fix. These are the clusters that are **not**, 
 
 | Cluster | Example actions | What it needs |
 |---|---|---|
-| if → switch | `IfToSwitchStatementAction`, `IfToSwitchExpressionAction` | a real control-flow rewrite (the reverse of IDE0066) |
-| pattern merging | `MergeSequentialChecksAction`, `MergeIntoPatternAction`, `JoinNullCheckWithUsageAction` | operand analysis over the `and` / `or` operator chains |
-| LINQ shape | `QueryToExtensionMethodAction`, `FromLinqContextAction` | query-syntax ↔ method-chain translation |
-| loops | `ForeachToForAction`, `IterateViaForeachAction`, `IterateViaAwaitForeachAction` | collection-shape analysis |
-| string composition | `ConvertConcatenationToInterpolationAction`, `InterpolationToStringConcatAction`, `UseStringInterpolationAction`, the `PassStringFormat*` family | value-flow over format arguments |
+| if → switch expression | `IfToSwitchExpressionAction` | the statement form is `context_action if_to_switch`; the expression form is the IDE0066 rewrite, still absent |
+| pattern merging | `MergeSequentialChecksAction`, `MergeIntoPatternAction`, `JoinNullCheckWithUsageAction` | ✅ `merge_sequential_checks`, `merge_patterns` (`x is A \|\| x is B` → `x is A or B`) and `join_null_check_with_usage` |
+| LINQ shape | `QueryToExtensionMethodAction`, `FromLinqContextAction` | ✅ `linq_query_to_method` / `linq_method_to_query` over from/where/orderby/select; `join`, `let`, `group` and a second `from` are refused |
+| loops | `ForeachToForAction`, `IterateViaForeachAction`, `IterateViaAwaitForeachAction` | `foreach_to_for`/`for_to_foreach` and `invert_loop` cover the first two; `await foreach` conversion is absent |
+| string composition | `ConvertConcatenationToInterpolationAction`, `InterpolationToStringConcatAction`, `UseStringInterpolationAction`, the `PassStringFormat*` family | `concat_to_interpolated`/`interpolated_to_concat` cover the first two; the format family is absent |
 | modifiers in bulk | `ChangeModifierAction` (visibility, `static`, `readonly`, `const`), `ChangeSetterKindAction`, `ChangeTypeKindAction` | one edit per modifier; the refactoring tools cover the single cases, not the menu |
-| C# 14 extension blocks | `ConvertToExtensionBlockAction`, `ConsolidateExtensionMembersAction`, `ConvertExtensionBlockToClassicExtensionMethodsAction` | the new syntax, both directions |
-| nullable migration | `MigrateToNullableEnableAction`, `AnnotateNullableAction`, `MarkNullableAction`, `AnnotateDataMembersAction` | flow analysis across a file, not a single node |
+| C# 14 extension blocks | `ConsolidateExtensionMembersAction`, `ConvertExtensionBlockToClassicExtensionMethodsAction` | ✅ `convert_to_extension_block` converts the classic form; consolidating existing blocks and the reverse conversion are absent |
+| nullable migration | `MigrateToNullableEnableAction`, `AnnotateNullableAction`, `MarkNullableAction`, `AnnotateDataMembersAction` | `migrate_to_nullable` enables the context; the per-member annotations and their flow analysis are absent |
 | XML doc generation | `AddInheritdocAction`, `AddExceptionDocCommentAction`, `CopyDocumentationAction` | `generate_docs` writes fresh docs, it does not derive them from a base |
-| index/value checks | `CheckArrayIndexValueAction`, `CheckDictionaryKeyValueAction`, `CheckSpanIndexValueAction`, `NumericParameterCheckRangeAction` | per-type index semantics |
-| StringBuilder rewriting | the 5 `StringBuilderRewriting` actions | a second expression model for `Append` chains |
+| index/value checks | `CheckArrayIndexValueAction`, `CheckDictionaryKeyValueAction`, `CheckSpanIndexValueAction`, `NumericParameterCheckRangeAction` | `check_index_range`, `check_dictionary_key` and the numeric guards cover the first two; the span and range forms are absent |
+| StringBuilder rewriting | the 5 `StringBuilderRewriting` actions | ✅ `concat_to_stringbuilder`; the Append-chain rewrites the family also holds are absent |
 | ternary/guard shapes | `IfToTernaryAction`, `IfToGuardClauseAction`, `InvertTernaryConditionAction` | the IDE0045/0046 rewrites exist; the *statement* forms do not |
 
 ## The 307 context actions

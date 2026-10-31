@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **387 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **399 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -123,7 +123,9 @@ Conventions:
 | `find_code_smells` | `async void`, empty catch, await-in-lock, long methods, deep nesting, large classes |
 | `find_missing_validation` | Public methods taking a reference-type/string parameter with no null guard, plus DTO-shaped public classes/records whose properties carry no `System.ComponentModel.DataAnnotations` validation |
 | `analyze_nullability` | Where nullable reference types actually protect: enabled context, `!` suppressions with lines, CS86xx warnings |
-| `find_security_issues` | CWE-tagged scan: SQL/command injection, weak crypto, secrets, unsafe deserialization, SSRF, XXE, TLS bypass, path traversal |
+| `find_security_issues` | CWE-tagged pattern scan: SQL/command injection, weak crypto, secrets, unsafe deserialization, SSRF, XXE, TLS bypass, path traversal |
+| `trace_data_flow` | The taint walk: request query/form/header/cookie/body/route data, console and environment input and model-bound action parameters followed through assignments and call arguments into SQL, `Process.Start`, file operations, redirects, `Html.Raw`/`Response.Write` and HttpClient URLs — each flow with its CWE, the sink and the path; `depth` follows the value into the in-solution methods it is passed to, and the sanitizer list is explicit |
+| `find_throw_sites` | Which methods throw this exception: direct throwers of a type (or of everything deriving from it), the callers that reach one with the shortest call path, and the methods that catch it as a boundary |
 | `find_async_anti_patterns` | `.Result`/`.Wait()`, `async void`, await in loops, `Task.Run` over sync code, missing `ConfigureAwait` |
 | `find_performance_anti_patterns` | Allocation shapes read out of the code with the type model: `string +=` in a loop, a LINQ materialiser inside a loop, a collection or constant-size array allocated per iteration |
 | `analyze_dependencies` | Project reference graph, cycles and root projects |
@@ -266,6 +268,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `nuget_push` | ✎ Push a .nupkg to a feed; the API key is used but never echoed back |
 | `extract_build_log_errors` | Pull compiler/linker/MSBuild errors out of a log file, including UTF-16 logs |
 | `get_environment_info` | OS, installed .NET SDKs and runtimes, Visual Studio, `cl.exe`, and the existence/size of given paths |
+| `disk_usage` | ✎ preview Where the disk went: measures TEMP, the NuGet caches, the .NET CLI home, tool installs, the MCP log and the solution store with absolute paths, bytes, files and a clean target (findings name the cause); `clean` removes one known target, and `guard` redirects TEMP/NuGet/.NET CLI state to another drive and persists the policy |
 | `stop_server` | Stop other VisualMCP instances to release locks on the built executable |
 
 ## Debugging
@@ -402,6 +405,49 @@ claims that a database accepts a statement.
 | `sql_files` | Inventory of the solution's `.sql` files: lines, statements, verbs, tables named, finding count per file; `bin`, `obj`, `node_modules` and VCS folders are skipped |
 | `analyze_sql` | Findings `SQL0001`–`SQL0010` with `file:line:column`, the source line and a fix: unterminated literal/comment/bracket, unbalanced parentheses, `SELECT *`, `UPDATE`/`DELETE` without `WHERE`, `DROP` without `IF EXISTS`, dynamic SQL by concatenation, an unclosed transaction, a leading-wildcard `LIKE`, `ADD … NOT NULL` without `DEFAULT`, an `INSERT` column/value count mismatch |
 
+## JavaScript / TypeScript
+
+`js`, `jsx`, `mjs`, `cjs`, `ts`, `tsx`, `mts` and `cts` files as a scanned language: comments, strings
+and template literals are masked first, and the JSX rules read a tag only where the mask says it is code.
+`node_typecheck`/`node_lint` still run the project's own `tsc`/`eslint`; this layer resolves no module.
+
+| Tool | What it does |
+|---|---|
+| `js_files` | Inventory: lines, TypeScript and JSX flags, modules imported (including `require` and dynamic `import()`), names exported, function and class counts, findings per file |
+| `analyze_js` | Findings `JS0001`–`JS0016`: unterminated string/template/comment, `eval`, `new Function`, `innerHTML`/`outerHTML` from a non-literal, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`/`@ts-nocheck`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")` |
+
+## HTML / CSS
+
+`.html`/`.htm` and `.css`/`.scss` as a scanned markup language: tags are read by a quote-aware scanner
+(so a `>` inside an attribute does not end the tag), stylesheet comments and strings are masked. No DOM.
+
+| Tool | What it does |
+|---|---|
+| `markup_files` | Inventory: lines, element count, ids (and how many repeat), findings per file; `kind` picks html, css or both |
+| `analyze_markup` | HTML `HTML0001`–`HTML0014` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance) and CSS `CSS0001`–`CSS0008` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`) |
+
+## YAML
+
+`.yml`/`.yaml` as an indentation-aware line scan — block mappings, sequence items, block scalars,
+comments, anchors and aliases. It identifies a Kubernetes manifest and checks its structure, not its
+schema.
+
+| Tool | What it does |
+|---|---|
+| `yaml_files` | Inventory: lines, documents, top-level keys, and for a manifest its `kind`, `apiVersion` and `metadata.name` |
+| `analyze_yaml` | Findings `YAML0001`–`YAML0008`: a tab in the indentation, a key declared twice, trailing whitespace, an unquoted `yes`/`no`/`on`/`off`, a colon glued to its key, a value containing `': '`, an unbalanced `[ ]`/`{ }`, an alias with no anchor |
+
+## F#
+
+`.fs`/`.fsi`/`.fsx` as a scanned language: F# is not a Roslyn language, so this layer lists the
+declarations and applies the rules that need no type information. `build_project` still returns the F#
+compiler's own `FS####` diagnostics.
+
+| Tool | What it does |
+|---|---|
+| `fsharp_files` | Inventory: lines, modules and namespaces, types, top-level functions, number of opens, findings per file — the declaration index F# has no symbol tool for |
+| `analyze_fsharp` | Findings `FS0001`–`FS0010`: a tab in the indentation, `Option.get`/`Option.Value`, `List.head`/`Seq.head` and friends, `Unchecked.defaultof`/`unbox`, comparison with `null`, a catch-all `with _ ->`, `let mutable`, `printf`/`printfn`, `failwith`, a duplicated `open` |
+
 ## Decompilation and reflection
 
 | Tool | What it does |
@@ -440,7 +486,8 @@ Everything else changes the repository; the destructive cases require `confirm=t
 | `git_diff` | Working, staged or a ref/range diff; optionally a per-file stat |
 | `git_log` | Recent commits with hash, author, date, subject; filter by path |
 | `git_stage` | Stage paths or everything |
-| `git_commit` | Commit staged changes with a message; optionally stage all first |
+| `git_commit` | Commit staged changes with a message; optionally stage all first; `conventional=true` refuses a message that breaks Conventional Commits |
+| `commit_lint` | Conventional Commits as data: lint a `message`, one `revision` (HEAD by default) or a `range` (`origin/main..HEAD`) and get the parsed type/scope/description/breaking/footers plus every violation with its rule id; merge and `git revert` messages are exempt |
 | `git_create_branch` | Create a branch and optionally switch to it |
 | `git_branch` | List, create, delete, rename or switch branches |
 | `git_squash` | Fold the last N commits into one (refused on a dirty tree) |
@@ -461,7 +508,7 @@ Everything else changes the repository; the destructive cases require `confirm=t
 | `git_worktree` | List, add (on a branch, optionally new), remove or prune linked working trees |
 | `git_bisect` | Start, mark good/bad, skip, log, view or reset a binary search; reports when it finds the first bad commit |
 | `git_submodule` | status (structured), update, init, sync or deinit |
-| `git_host` | GitLab, Azure DevOps and Bitbucket Cloud: `detect` the provider/host/project/repository from the remote, `list-prs`, `view-pr`, `create-pr`, `comment-pr`, `merge-pr`, `list-issues`, `create-issue`, `pipelines` (`confirm=true` for the writes; credentials from `GITLAB_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `BITBUCKET_*`) |
+| `git_host` | GitLab, Azure DevOps and Bitbucket Cloud: `detect` the provider/host/project/repository from the remote, `list-prs`, `view-pr`, `create-pr`, `comment-pr`, `merge-pr`, `review-pr` (`reviewEvent=approve/request-changes/comment`, with GitLab's missing request-changes vote stated), `close-pr`, `reopen-pr`, `update-pr`, `list-issues`, `create-issue`, `pipelines` (`confirm=true` for the writes; credentials from `GITLAB_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `BITBUCKET_*`) |
 | `git_run` | Escape hatch: any git command, verbatim, with exit code and output |
 
 ## GitHub

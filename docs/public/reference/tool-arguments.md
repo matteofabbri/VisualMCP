@@ -317,6 +317,32 @@ nuget_sources(action=list|add|update|remove|enable|disable, name?, url?,
 `launch_settings` and `publish_profile` are the setters of two files that otherwise stay text:
 read/write a single profile without reformatting the document, and preview the result first.
 
+## Disk hygiene
+
+```
+disk_usage(action=report|clean|guard, roots[]?, deep=false, top=10,
+           targets[]?, olderThanHours=24, dryRun=true, confirm=false,
+           apply=false, root?, timeoutSeconds=20)
+        → report (default): drives with free/total, then every known folder with its
+          absolute path, bytes, files, risk and clean target — TEMP/TMP, the NuGet
+          global-packages/http/plugins caches, the .NET CLI home, tool installs, the
+          MCP log, the solution store and (deep=true) the workspace's bin/obj — plus
+          findings that name the cause and the next call.
+          clean: one known target, previewed; a real deletion needs dryRun=false AND
+          confirm=true. temp-stale keeps entries younger than olderThanHours (24 by
+          default), so an in-flight build is left alone; root overrides the temp root.
+          guard: sets VISUALMCP_TEMP, TEMP, TMP, NUGET_PACKAGES,
+          NUGET_HTTP_CACHE_PATH, DOTNET_CLI_HOME and DOTNET_BUNDLE_EXTRACT_BASE_DIR
+          under root, applies them to this process — every child (dotnet build/test,
+          git, shells) inherits them — and persists .visualMCP/disk-policy.json,
+          which the next start reads.
+```
+
+The redirect is inherited, not per-tool: `build_project`, `run_tests`, `run_command` and `git` all see
+it because the variables are set on the server process, and `Path.GetTempPath()` moves with them, so the
+server's own temporary files follow too. `clean` touches only a known target's root (never a caller's
+arbitrary path), and `all-safe` / `all-reclaimable` expand the ids instead of naming each one.
+
 ## Modernization
 
 `aspire` installs and scaffolds Aspire on demand; `update_framework` and `update_solution` move
@@ -407,13 +433,33 @@ git_patch(action=create|list|show|apply|delete, name?, target?, path?,
                 → apply: check=true only validates, reverse=true undoes it, and a
                   plain apply that fails is retried with --3way
 
-git_host(action=detect|list-prs|view-pr|create-pr|comment-pr|merge-pr|
-                list-issues|create-issue|pipelines,
+commit_lint(message?, revision?, range?, types?, maxSubjectLength=72,
+            requireScope=false, allowMergeCommits=true, repoPath?)
+                → three inputs: message = lint a text (no repository read),
+                  revision = one commit's message (HEAD by default), range =
+                  every commit of e.g. origin/main..HEAD (the CI shape)
+                → returns the parsed type/scope/description/breaking/footers and
+                  every violation with its rule id (header-format, type-enum,
+                  header-max-length, scope-empty/scope-format, subject-full-stop,
+                  body-leading-blank, breaking-change-format), the line and a hint
+                → merge commits and git's 'Revert "…"' messages are exempt and
+                  say so; types, header length and a required scope are arguments
+
+git_host(action=detect|list-prs|view-pr|create-pr|comment-pr|merge-pr|review-pr|
+                close-pr|reopen-pr|update-pr|list-issues|create-issue|pipelines,
          provider=auto|gitlab|azuredevops|bitbucket, hostUrl?, project?,
          repository?, number?, title?, body?, sourceBranch?, targetBranch?,
-         state?, limit=20, confirm=false, repoPath?, timeoutSeconds=60)
+         state?, limit=20, confirm=false, repoPath?, timeoutSeconds=60,
+         reviewEvent=approve|request-changes|comment)
                 → detect: provider/host/project/repository parsed from the remote
                   and whether a credential is in the environment
+                → review-pr: approve/request-changes/comment (default comment,
+                  which needs a body); Azure casts the authenticated user's vote
+                  (-10 or 10), Bitbucket posts approve/request-changes, GitLab
+                  approves and reports that its REST API has no request-changes
+                  vote instead of faking one
+                → close-pr / reopen-pr / update-pr (title and/or body) move the
+                  request through its lifecycle
                 → project = GitLab group/project path, Azure DevOps project,
                   Bitbucket workspace; Azure self-hosted form:
                   hostUrl=https://dev.azure.com/{organization}
@@ -458,7 +504,7 @@ get_quality_trend(from=HEAD~1, to=HEAD, repoPath?, path?, top=10)
 its line comments. GitHub is served by the `gh` CLI; `git_host` covers GitLab, Azure DevOps and
 Bitbucket over their HTTP APIs, and both are read-only until `confirm=true`.
 
-## Kubernetes, Node and SQL
+## Kubernetes, Node and the scanned languages
 
 ```
 k8s_status(timeoutSeconds=30)
@@ -528,4 +574,57 @@ analyze_sql(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
                 → SQL0001-SQL0010, each with rule, severity, file:line:column,
                   the source line and a fix; unknown rule ids are refused with
                   the catalogue. A pattern scan, not a dialect parser.
+
+js_files(path?, maxFiles=500)
+                → per file: lines, typeScript, jsx, import count and modules,
+                  exported names, functions, classes, finding count;
+                  node_modules/dist/build/out/coverage/.next are skipped
+
+analyze_js(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
+                → JS0001-JS0016 over masked source (comments, strings and
+                  template literals blanked first); JS0015 (any) fires only for
+                  .ts/.tsx/.mts/.cts. Unknown rule ids return the catalogue.
+
+markup_files(path?, kind=both, maxFiles=500)
+                → kind is html|css|both; per file: lines, elements, id count,
+                  how many repeat, finding count
+
+analyze_markup(path?, kind=both, minSeverity=info, rule?, maxFiles=500,
+               maxFindings=200)
+                → HTML0001-HTML0014 and CSS0001-CSS0008; tags are read with a
+                  quote-aware scanner, script/style bodies are not parsed as
+                  markup; no DOM and no selector resolution
+
+yaml_files(path?, maxFiles=500)
+                → per file: lines, documents, top-level keys, and for a
+                  Kubernetes manifest kind / apiVersion / metadata name
+
+analyze_yaml(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
+                → YAML0001-YAML0008; block scalars, comments and quoted values
+                  are honoured, so their content does not fire a rule
+
+fsharp_files(path?, maxFiles=500)
+                → per file: lines, modules and namespaces, types, top-level
+                  functions, open count, finding count
+
+analyze_fsharp(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
+                → FS0001-FS0010 over masked source; comments (including
+                  (* … *)) and string literals are blanked first
+
+trace_data_flow(projectName?, cwe?, depth=2, maxResults=200)
+                → flows from a source (query/form/header/cookie/body/route data,
+                  Console.ReadLine, environment variable, model-bound action
+                  parameter) to a sink (SQL, Process.Start, File/Directory/Path,
+                  redirect, Html.Raw/Response.Write, HttpClient/WebRequest URL),
+                  each with the CWE, severity, operation and the path; depth is
+                  how many call levels a tainted argument is followed into an
+                  in-solution method (0 = one method at a time); cwe filters,
+                  e.g. "89" or "CWE-89"
+
+find_throw_sites(exceptionType, transitive=true, projectName?, maxResults=200)
+                → direct throwers of the type (or of everything deriving from
+                  it, so "Exception" matches every derived type), the callers
+                  that reach one with the shortest call path, and the catch
+                  clauses that stop the propagation (boundaries). transitive=false
+                  returns only the methods that create it.
 ```

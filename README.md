@@ -6,7 +6,7 @@ C# punishes guessing. Overloads, overrides, generics, partial types, interface d
 misses all of them, so your AI reads the wrong thing, renames the wrong symbol, and breaks the build two
 hours later. You already know the answer to this problem: it is called an IDE. VisualMCP gives the
 agent the IDE's brain — Roslyn's semantic model, the real MSBuild project graph, a debugger, a profiler,
-a decompiler — as **387 tools in one local process** speaking MCP to Claude Code, ZCode, or any MCP
+a decompiler — as **399 tools in one local process** speaking MCP to Claude Code, ZCode, or any MCP
 client.
 
 **Stop your agent from guessing. Give it a compiler.**
@@ -80,7 +80,7 @@ The one after that joins git history with complexity and says which file a refac
 
 ## Safety is the product
 
-You do not hand write access to an AI because it has 387 tools. You hand it over because of four
+You do not hand write access to an AI because it has 399 tools. You hand it over because of four
 invariants that hold across every one of them:
 
 - **Semantic, not textual.** Every write is a Roslyn operation on the real project, never a regex over
@@ -117,7 +117,7 @@ Your agent can reason about a Ghidra recovery and a Razor page with the same voc
 
 ## The receipts
 
-- **387 tools** — and `capability_report` prints the live count from the running build, so you never
+- **399 tools** — and `capability_report` prints the live count from the running build, so you never
   have to take the README's word for it.
 - **972 tests, all green** — the suite that gates every release.
 - **97 of 126** Microsoft code-style ids rewritten under the compiler gate; the other 29 are delegated to
@@ -125,7 +125,8 @@ Your agent can reason about a Ghidra recovery and a Razor page with the same voc
   silently ignored.
 - **~800 inspection ids** from five analyzer packs, each with its own code fix where the analyzer
   ships one.
-- **28 Razor rules** and **9 XAML rules** with CWE ids, file:line and a fix.
+- **28 Razor rules**, **9 XAML rules**, **16 JS/TS rules**, **22 HTML/CSS rules**, **8 YAML rules** and
+  **10 F# rules** with file:line and a fix, the security ones carrying their CWE id.
 - **123,786 lines** of our own codebase audited in one call: 0 errors, 11 warnings, and the mechanical
   ones fix themselves.
 
@@ -141,9 +142,10 @@ Your agent can reason about a Ghidra recovery and a Razor page with the same voc
 
 ## The honest bit
 
-C# and Visual Basic get the semantic model; XAML, Razor and SQL get a scanner (they are not compilers);
-the JavaScript/TypeScript, Node, Docker and Kubernetes toolchains are wrapped rather than reimplemented;
-F#, HTML and CSS are searchable text — on purpose, and stated in the
+C# and Visual Basic get the semantic model; XAML, Razor, SQL, JavaScript/TypeScript, HTML/CSS, YAML
+and F# get a scanner (they are not compilers), each with a rule set that states what it proves; the
+Node, Docker and Kubernetes toolchains are wrapped rather than reimplemented. HTML and CSS are scanned,
+not rendered, and F# has no symbol navigation — on purpose, and stated in the
 [limits](docs/public/reference/limits.md). Everything is static analysis or process instrumentation: no
 tool proves a change preserves behaviour, and none replaces your test suite.
 And it runs on your machine, locally — no hosted service, no account, no daemon. Your code leaves the

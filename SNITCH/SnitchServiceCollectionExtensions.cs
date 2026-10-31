@@ -37,6 +37,9 @@ public static class SnitchServiceCollectionExtensions
 
         // Feature services.
         services.AddSingleton<Git.IGitService, Git.GitService>();
+        // Conventional Commits as data: the message parser, the last commit or a range, so the
+        // repository can enforce a commit convention without a Node toolchain.
+        services.AddSingleton<Git.ICommitConventionService, Git.CommitConventionService>();
         // The hosting services other than GitHub: merge/pull requests, comments, merges, issues and
         // pipelines over the GitLab, Azure DevOps and Bitbucket HTTP APIs.
         services.AddSingleton<Collaboration.IRemoteHostService, Collaboration.RemoteHostService>();
@@ -59,6 +62,9 @@ public static class SnitchServiceCollectionExtensions
         // "find it" and "show it" are one call instead of search_text followed by read_file.
         services.AddSingleton<Languages.CSharp.Search.ICodeSearchService, Languages.CSharp.Search.CodeSearchService>();
         services.AddSingleton<Execution.IEnvironmentInfoService, Execution.EnvironmentInfoService>();
+        // Disk hygiene: measure what a .NET session grows, remove one known target safely, and redirect
+        // TEMP/NuGet/.NET CLI state to another drive through the inherited process environment.
+        services.AddSingleton<Execution.IDiskUsageService, Execution.DiskUsageService>();
         services.AddSingleton<Execution.IExtractBuildLogErrorsService, Execution.ExtractBuildLogErrorsService>();
         services.AddSingleton<Scaffolding.IScaffoldService, Scaffolding.ScaffoldService>();
         // Decompilation is registered by AddSnitchMetacode(): the implementation lives in
@@ -127,6 +133,19 @@ public static class SnitchServiceCollectionExtensions
         // rules that need no schema; it is deliberately a pattern layer, not a dialect parser.
         services.AddSingleton<Languages.Sql.ISqlService, Languages.Sql.SqlService>();
 
+        // JavaScript and TypeScript: the same scanned-language contract as SQL — masked source, rules that
+        // need no module graph, and a JSX pass that reads a tag only where the mask says it is code.
+        services.AddSingleton<Languages.JavaScript.IJavaScriptService, Languages.JavaScript.JavaScriptService>();
+
+        // HTML and stylesheets: tags read by a quote-aware scanner, CSS masked like the other scanners.
+        services.AddSingleton<Languages.WebMarkup.IMarkupService, Languages.WebMarkup.MarkupService>();
+
+        // YAML: an indentation-aware line scan that also identifies a Kubernetes manifest.
+        services.AddSingleton<Languages.Yaml.IYamlService, Languages.Yaml.YamlService>();
+
+        // F#: not a Roslyn language, so this is the scanner layer — declarations plus the partial-access rules.
+        services.AddSingleton<Languages.FSharp.IFSharpService, Languages.FSharp.FSharpService>();
+
         // C# analysis services (logic moved from the MCP tool layer).
         services.AddSingleton<Languages.CSharp.Analysis.IGetDiagnosticsService, Languages.CSharp.Analysis.GetDiagnosticsService>();
         // The compiler's own diagnostics, rewritten instead of reported: apply_code_fix runs a pack's
@@ -148,6 +167,10 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Analysis.IFindCodeSmellsService, Languages.CSharp.Analysis.FindCodeSmellsService>();
         services.AddSingleton<Languages.CSharp.Analysis.IFindDuplicateCodeService, Languages.CSharp.Analysis.FindDuplicateCodeService>();
         services.AddSingleton<Languages.CSharp.Analysis.IFindSecurityIssuesService, Languages.CSharp.Analysis.FindSecurityIssuesService>();
+        // The data-flow half of the security question: where request data actually travels, and which
+        // methods throw an exception — the two queries a pattern scan cannot answer.
+        services.AddSingleton<Languages.CSharp.Analysis.DataFlow.ITraceDataFlowService, Languages.CSharp.Analysis.DataFlow.TraceDataFlowService>();
+        services.AddSingleton<Languages.CSharp.Analysis.DataFlow.IFindThrowSitesService, Languages.CSharp.Analysis.DataFlow.FindThrowSitesService>();
         services.AddSingleton<Languages.CSharp.Analysis.IPlanFeatureChangeService, Languages.CSharp.Analysis.PlanFeatureChangeService>();
         // Architecture, cohesion, test quality, argument validation, nullability and API compatibility:
         // the questions the complexity report and the repair planner do not answer.

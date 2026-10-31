@@ -491,9 +491,9 @@ instead of letting ILSpy fail inside the metadata.
 | GitHub Actions | ✅ | `gh_actions` — list/view/logs/rerun/cancel/workflows/dispatch |
 | GitHub secrets | ✅ | `gh_secret` — list/set/delete |
 | GitHub CLI passthrough | ✅ | `github` (gh command) |
-| GitLab / Azure DevOps / Bitbucket | ✅ | `git_host` — PR/MR, comments, merge, issues/work items, pipelines; provider and coordinates from the remote, token from the environment |
+| GitLab / Azure DevOps / Bitbucket | ✅ | `git_host` — PR/MR, comments, merge, **review (approve / request-changes / comment)**, close/reopen, update, issues/work items, pipelines; provider and coordinates from the remote, token from the environment. GitLab's REST API has no request-changes vote and the tool says so instead of faking one |
 | Review brief for a diff (Roslyn-aware) | ✅ | `code_review` — files by kind, risk checklist, new TODOs with their line, worst methods of the changed files, optional findings |
-| Conventional commits enforcement | ❌ | 🎯 |
+| Conventional commits enforcement | ✅ | `commit_lint` — a message, one revision (HEAD by default) or a range; parsed type/scope/description/breaking/footers plus the rule ids (header-format, type-enum, header-max-length, scope, subject-full-stop, body-leading-blank, breaking-change-format); merge and `git revert` messages exempt. `git_commit conventional=true` refuses a non-conforming message |
 
 ---
 
@@ -681,6 +681,51 @@ Closes the last ❌/⚠️ rows of [docs/resharper-codemaid-coverage.md](docs/re
 
 ---
 
+## 19. ReSharper & CodeMaid: the last open points (2026-10-31)
+
+Closes the four rows the coverage page still listed as open — language reach, the context-action long
+tail, data flow and the ⚠️ security query. **387 → 397 tools.**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Taint: request data reaching a dangerous operation | ✅ | `trace_data_flow` — sources (query/form/header/cookie/body/route data, `Console.ReadLine`, environment variables, model-bound action parameters) followed through assignments and call arguments into SQL (`FromSqlRaw`/`ExecuteSqlRaw`, Dapper, `CommandText`), `Process.Start`, File/Directory/Path, redirects, `Html.Raw`/`Response.Write`, HttpClient/WebRequest URLs; each flow carries the CWE, the sink and the path; the sanitizer list is explicit; `depth` follows the value into the in-solution methods it is passed to |
+| Which methods throw this exception | ✅ | `find_throw_sites` — direct throwers of the type (or of everything deriving from it), the callers that reach one with the shortest call path, and the catch clauses that stop the propagation (`transitive=false` for direct only) |
+| Context action: LINQ in both directions | ✅ | `context_action linq_query_to_method` / `linq_method_to_query` — from/where/orderby/select over one source; `join`, `let`, `group` and a second `from` are refused with the reason, because a wrong translation would be worse than none |
+| Context action: StringBuilder, patterns, extension block | ✅ | `concat_to_stringbuilder` (declaration, appends and reads rewritten together), `merge_patterns` (`x is A \|\| x is B` → `x is A or B`, and the `&&`/`and` form), `convert_to_extension_block` (a static class of `this` methods becomes a C# 14 `extension(T receiver)` block) |
+| Create from usage: the constructor | ✅ | `create_from_usage` — CS1729 adds the missing constructor with the argument types of the `new` expression |
+| JavaScript / TypeScript source | ✅ | `js_files` (imports, exports, functions, classes, JSX) and `analyze_js` (JS0001–JS0016) over masked source |
+| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates) and `analyze_markup` (HTML0001–HTML0014, CSS0001–CSS0008) with a quote-aware tag scanner |
+| YAML | ✅ | `yaml_files` (documents, top-level keys, `kind`/`apiVersion`/`metadata.name`) and `analyze_yaml` (YAML0001–YAML0008) |
+| F# | ✅ | `fsharp_files` (modules, types, functions, opens) and `analyze_fsharp` (FS0001–FS0010); no semantic model — the scanner resolves nothing |
+
+What stays a boundary rather than a row: a scanner proves the shape of a line, never a binding, a type
+or a schema; ReSharper's proprietary ~2500-id inspection catalogue is a closed-source reimplementation,
+not a tool; and the data-flow walk does not follow a value through a field, a database or a queue.
+
+---
+
+
+## 20. Section 9: conventional commits and reviews beyond GitHub (2026-10-31)
+
+Section 9's last ❌ row closes, and the review loop stops being GitHub-only. **397 → 398 tools.**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Conventional Commits enforcement | ✅ | `commit_lint` — lint one message (`message`), one revision (HEAD by default) or a range (`origin/main..HEAD`): the parsed type/scope/description/breaking/footers plus every violation with its rule id (header-format, type-enum, header-max-length, scope-empty/scope-format, subject-full-stop, body-leading-blank, breaking-change-format). Accepted types, header length and a required scope are arguments; merge commits and git's `Revert "…"` messages are exempt. `git_commit conventional=true` applies the same rules before writing |
+| Review and PR lifecycle on GitLab / Azure DevOps / Bitbucket | ✅ | `git_host` — `review-pr` (approve / request-changes / comment: Azure casts the authenticated identity's vote after reading connectionData, Bitbucket posts approve/request-changes, GitLab approves and states that its REST API has no request-changes vote), `close-pr`, `reopen-pr`, `update-pr` (title/body) |
+
+---
+
+## 21. Disk hygiene: where the space goes, and keeping it off the system drive (2026-10-31)
+
+**398 → 399 tools.** One operational tool closes the gap a long agent session exposes on a machine with a
+small system drive.
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Disk report, safe cleanup and a persisted redirect policy | ✅ | `disk_usage` — `report` measures the drives and every known folder (TEMP/TMP, the NuGet global-packages/http/plugins caches, the .NET CLI home, tool installs, the MCP log, the solution store, and with `deep` the workspace's bin/obj) with absolute path, bytes, files, risk and clean target, plus findings that name the cause; `clean` removes one known target, previewed and requiring `dryRun=false` + `confirm=true`, filtering temp by age so an in-flight build survives; `guard` sets `VISUALMCP_TEMP`/`TEMP`/`TMP`/`NUGET_PACKAGES`/`NUGET_HTTP_CACHE_PATH`/`DOTNET_CLI_HOME`/`DOTNET_BUNDLE_EXTRACT_BASE_DIR` under a root, applies them to the process (every child inherits them) and persists `.visualMCP/disk-policy.json`, read at startup by `Program.cs` and applied to child processes by `ProcessRunner` |
+
+---
 
 ## Summary by Category
 
@@ -697,7 +742,7 @@ the total, and every row below is the count of its section.
 | Build & Execution | 8 | 3 | 73% |
 | Decompilation | 7 | 2 | 78% |
 | Documentation | 3 | 3 | 50% |
-| Git & GitHub | 36 | 1 | 97% |
+| Git & GitHub | 38 | 0 | 100% |
 | Benchmarking | 21 | 0 | 100% |
 | Platform & maintenance | 5 | 0 | 100% |
 | Runtime & Infrastructure | 13 | 3 | 81% |
@@ -707,14 +752,17 @@ the total, and every row below is the count of its section.
 | Self-Management | 4 | 0 | 100% |
 | Metacode (pseudocode) | 12 | 0 | 100% |
 | Modernization & upgrade | 6 | 0 | 100% |
-| **TOTAL** | **212** | **41** | **84%** |
+| **TOTAL** | **214** | **40** | **84%** |
 
 The section tables are frozen at 2026-10-30 and do not contain the **14 tools added that day** (SSR, cleanup
 and formatting, the "create" family, the inspection baseline, seven analyses), the **18 closed on 2026-10-31**
 (9 Kubernetes/Helm, 7 Node/JS-TS, 2 SQL), the **2 of section 18** (`templates`, `layout_code`),
-`get_quality_trend` (2026-10-31, the quality trend between two revisions: section 3 carries its row) nor the
+`get_quality_trend` (2026-10-31, the quality trend between two revisions: section 3 carries its row), the
 **6 build-settings tools** of 2026-10-31 (`analyze_binlog`, `project_properties`, `run_config`,
-`launch_settings`, `publish_profile`, `nuget_sources`). The live count is `capability_report`: **387 tools**.
+`launch_settings`, `publish_profile`, `nuget_sources`), the **10 of section 19** (`trace_data_flow`,
+`find_throw_sites`, `js_files`, `analyze_js`, `markup_files`, `analyze_markup`, `yaml_files`,
+`analyze_yaml`, `fsharp_files`, `analyze_fsharp`) or `commit_lint` (section 20), nor `disk_usage`
+(section 21). The live count is `capability_report`: **399 tools**.
 
 ---
 

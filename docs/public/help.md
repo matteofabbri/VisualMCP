@@ -40,6 +40,16 @@ A running app or a previous server instance holds a DLL. Use `stop_server` to st
 instances, or rely on `build_project`'s default `noCopyOutput=true`, which compiles without copying into
 `bin/`.
 
+### The system drive fills up during builds
+
+Builds and tests write outside the repository: MSBuild temp, testhost and NuGet scratch under `TEMP`,
+packages and the HTTP/plugins caches under the NuGet roots, CLI state under `DOTNET_CLI_HOME`, and
+`quick_benchmark` creates a temporary project. Call `disk_usage` to see which folder grew, how big it is
+and where it is; `disk_usage action=guard root="D:\vmcp-tmp" apply=true` moves all of it to another drive
+for this process and every child, and persists the choice in `.visualMCP/disk-policy.json`. To reclaim
+what is already there, `disk_usage action=clean targets=["temp-stale"] dryRun=false confirm=true` removes
+temp entries older than 24 hours; run the same call without `dryRun`/`confirm` first to preview it.
+
 ### A refactoring was refused
 
 The result names the reason. Common ones:
@@ -161,12 +171,16 @@ that are not C#-idiom-specific (`apply_rename`, `encapsulate_field`, `add_params
 stays C#-only is named in [Limits → Language coverage](reference/limits.md#language-and-platform-coverage).
 Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
-Core migrations run through `ef_migrations`. SQL has a pattern scanner (`sql_files`, `analyze_sql` with
-SQL0001–SQL0010), not a dialect parser. The JavaScript/TypeScript toolchain runs through the project's
-own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and `node_typecheck`/`node_lint` interpret
-`tsc` and `eslint`; Kubernetes and Helm go through `k8s_*`. F# has no semantic support (the compiler's
-own diagnostics through `build_project`, plus build/test and text search). HTML/CSS remain text, and none
-of these layers replaces a parser for those languages: the full table is
+Core migrations run through `ef_migrations`. SQL has a scanned layer (`sql_files`, `analyze_sql` with
+SQL0001–SQL0010), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0016 — masked
+source, no module graph), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
+(`yaml_files`, `analyze_yaml`, which also reads a Kubernetes manifest's identity) and F# another
+(`fsharp_files`, `analyze_fsharp`, the declaration index F# has no symbol tool for; the compiler's own
+diagnostics still come through `build_project`). The JavaScript/TypeScript toolchain also runs through
+the project's own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and
+`node_typecheck`/`node_lint` interpret `tsc` and `eslint`; Kubernetes and Helm go through `k8s_*`.
+None of these layers replaces a compiler: a scanner proves the shape of a line, never a binding, a type
+or a schema. The full table is
 [Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage). C#,
 Razor, decompiled assemblies and Ghidra snapshots are all inputs to metacode.
 

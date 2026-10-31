@@ -16,7 +16,24 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (eighteenth revision: **the build settings close the last section 10 rows**.
+Last updated: 2026-10-31 (twentieth revision: **section 9 gains its two remaining points**). `commit_lint`
+lints a message, one revision or a whole range against Conventional Commits (type, scope, description,
+breaking marker, footers; nine rule ids) and `git_commit conventional=true` refuses a non-conforming
+message instead of writing it. `git_host` now reviews (`approve`/`request-changes`/`comment`, with
+GitLab's missing request-changes vote stated instead of faked), closes, reopens and edits merge/pull
+requests on GitLab, Azure DevOps and Bitbucket Cloud, so the review workflow is no longer GitHub-only.
+**397 → 398 tools.** The nineteenth revision: **the last four open points of the ReSharper & CodeMaid
+coverage page close**. JavaScript/TypeScript, HTML/CSS and YAML gain the scanned layer SQL already had —
+`js_files`/`analyze_js` (JS0001–JS0016, modules and exports), `markup_files`/`analyze_markup`
+(HTML0001–HTML0014, CSS0001–CSS0008), `yaml_files`/`analyze_yaml` (YAML0001–YAML0008, plus the
+`kind`/`apiVersion`/`name` of a manifest) — and F# a declaration scanner (`fsharp_files`/
+`analyze_fsharp`, FS0001–FS0010). `trace_data_flow` is a taint walk from request sources to the SQL,
+process, file, redirect, XSS and SSRF sinks across call levels; `find_throw_sites` answers the
+"methods that throw X" query with direct throwers, transitive callers and catching boundaries.
+`context_action` gained `merge_patterns`, `concat_to_stringbuilder`, `linq_query_to_method`,
+`linq_method_to_query` and `convert_to_extension_block` (41 ids), and `create_from_usage` CS1729.
+**387 → 397 tools.** The eighteenth revision:
+**the build settings close the last section 10 rows**.
 New tools: `analyze_binlog` (an MSBuild `.binlog` — or `dotnet build -bl` and then its analysis — with
 errors/warnings by project and line, per-project and per-target durations, the target that dominates the
 wall clock and the project graph), `project_properties` (the **evaluated** MSBuild view through
@@ -72,15 +89,15 @@ figure is the documented ~800 from five packs.
 
 | Area | State | Priority | Why this priority |
 |---|---|:---:|---|
-| [Language and platform scope](#1-language-and-platform-scope) | ⚠️ | Low if your solution uses them | C#, VB, XAML, Razor, EF Core, SQL (scanner), Kubernetes and the Node toolchain are covered; a JS/TS or F# codebase still has no semantic model |
+| [Language and platform scope](#1-language-and-platform-scope) | ⚠️ | Low if your solution uses them | C#, VB, XAML, Razor, EF Core, Kubernetes and the Node toolchain are covered semantically or by a wrapper; SQL, JS/TS, HTML/CSS, YAML and F# each have a **scanned** layer with an inventory and a rule set. What none of the scanners does is resolve a symbol or type-check |
 | [Debugger](#2-debugger) | ✅ | — | Implemented: 16 `debug_*` tools over netcoredbg (DAP). The engine is here; the window is the client's ([section 11](#11-ui-bound-features--not-applicable-by-design)) |
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ✅ | — | Severity, suppression, custom rules, `.DotSettings` reading, naming rules, spelling and a warm analysis loop exist; only the proprietary ReSharper id set is absent |
 | [Test workflow](#4-test-workflow) | ✅ | — | Running, discovery, debugging a test, continuous testing, affected tests, flaky detection and mutation testing all exist; only the explorer UI is the client's |
 | [Decompiled code as a workspace](#5-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
-| [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Low | 36 action ids and the template family (18 live, 10 postfix, 8 file) now exist; what remains is the proprietary long tail (LINQ shape, StringBuilder, extension blocks, data-flow predicates) |
+| [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Low | 41 action ids and the template family (18 live, 10 postfix, 8 file) exist, including LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block; what remains is the proprietary tail whose condition is a type-system fact rather than a shape |
 | [Refactoring gaps](#7-refactoring-gaps) | ✅ | — | All ~51 of Rider's main set are implemented, including `transform_parameters`, `make_non_static`, `move_type_to_nested_scope` and `generify` (2026-10-31) |
 | [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ✅ | — | Graph artifacts (project/namespace/type, call, sequence, control flow), value tracking, localization and the explorers exist as data; drawing them is the client's |
-| [Version control and collaboration](#9-version-control-and-collaboration) | ✅ | — | Git, the conflict model, plan rebase, patches, all four hosting providers and the review workflow exist; only real-time co-editing is out of scope by design |
+| [Version control and collaboration](#9-version-control-and-collaboration) | ✅ | — | Git, the conflict model, plan rebase, patches, all four hosting providers with reviews, the review workflow and conventional-commit enforcement exist; only real-time co-editing is out of scope by design |
 | [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish and the six build-settings tools (evaluated MSBuild, binlog, run configurations, launch/publish profiles, package sources) exist; installer authoring, deployment targets, a standalone CLI and solution-wide style campaigns do not |
 | [UI-bound features](#11-ui-bound-features--not-applicable-by-design) | 💀 | — | Deliberately out of scope for an MCP server |
 
@@ -89,11 +106,16 @@ figure is the documented ~800 from five packs.
 ## 1. Language and platform scope
 
 The semantic engine is **Roslyn**, and it reads the two languages a .NET solution can be written in:
-**C#** and **Visual Basic**. Everything else is one of four things:
+**C#** and **Visual Basic**. Everything else is one of five things:
 
 - a dedicated **Razor/Blazor markup scanner** (heuristics over `.cshtml`/`.razor`),
 - a **markup layer** for XAML, with the C# code-behind analysed through Roslyn,
-- a **pattern scanner** for SQL (comments and literals masked, then the rules that need no schema),
+- a **pattern scanner** per file kind — SQL, JavaScript/TypeScript, HTML/CSS, YAML and F# — where
+  comments and literals are masked first and the rules that need no type information are applied
+  (`analyze_sql`, `analyze_js`, `analyze_markup`, `analyze_yaml`, `analyze_fsharp`),
+- an **inventory** per file kind (`sql_files`, `js_files`, `markup_files`, `yaml_files`,
+  `fsharp_files`): what the file declares, which modules it imports, the ids of a page, the
+  `kind`/`apiVersion` of a manifest,
 - **text** — `search_text`, `text_index` (FTS5), `read_file`, and any tool that does not need a syntax
   tree.
 
@@ -101,20 +123,23 @@ Around those, the non-.NET toolchains are wrapped rather than reimplemented: `no
 own npm/pnpm/yarn, `tsc` and `eslint`; `k8s_*` runs `kubectl` and `helm`; `docker_*` runs the engine. The
 wrapper reports a missing client instead of installing one.
 
-The full-text index deliberately accepts many extensions, so XAML, SQL, YAML, JS/TS and F# files are
-*findable*; they are not *understood*. That distinction is the whole of this section.
+The full-text index deliberately accepts many extensions, so every file a repository carries is
+*findable*. A scanned language is the next step: its rules are read from masked source and stated one
+by one. What no scanner does is resolve a symbol or type-check an expression — that is the distinction
+this section keeps.
 
 | Language / platform | What works today | What is missing |
 |---|---|---|
 | **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](public/reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
-| **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup`); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`); **refactorings** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`); `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; `code_cleanup`'s member reordering; `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`, `fix_complexity`, `generate_docs`, `implement_members` |
-| **F#** | `.fs`/`.fsproj` are in the full-text index; `build_project` returns the F# compiler's own diagnostics (FS####) because it parses the MSBuild log; `run_tests` runs F# tests; Git and file tools | No semantic model: F# is not a Roslyn language, so no symbols, references, refactorings, inspections or complexity |
+| **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup` including member reordering); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`, `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`); **refactorings and generation** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `generate_docs`, `implement_members`, `reduce_complexity`/`fix_complexity`); `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; the context actions are C#-shaped and have no VB matcher; `reduce_complexity` reports extract-method as a hand edit |
+| **F#** | `fsharp_files` — the declaration inventory F# has no symbol index for (modules, types, top-level functions, opens); `analyze_fsharp` — FS0001–FS0010 over masked source (tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open`); `build_project` returns the F# compiler's own diagnostics (FS####); `run_tests` runs F# tests | No semantic model: F# is not a Roslyn language, so no symbols, references, refactorings, inspections or complexity. The scanner resolves nothing |
 | **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `xaml_pages` (inventory), `analyze_xaml` (XAML0001–XAML0009), `xaml_navigate` (names, resources, styles, handlers); the C# code-behind is fully analysed | No compiled-XAML validation: binding paths, styles and tag helpers are not proved; no refactoring across markup and C#; no designer or preview |
-| **JavaScript / TypeScript / JSX / TSX** | `node_info`, `node_install`, `node_script` (the project's npm/pnpm/yarn); `node_typecheck` (tsc → `TSxxxx` diagnostics with file:line), `node_lint` (eslint → findings with rule and position), `node_outdated`, `node_audit`; the files are in the full-text index | No parser or module graph for the JS/TS itself: no symbols, references, rename or refactoring; no bundler or component analysis; no browser preview |
-| **HTML / CSS / SCSS** | `.html`, `.htm`, `.css`, `.scss` are in the full-text index | No parser, no accessibility analysis, no CSS-in-JS or CSS-isolation analysis, no formatting or linting |
-| **SQL** | `sql_files` (per-file statements, verbs and tables) and `analyze_sql` (SQL0001–SQL0010: lexical, correctness, safety, security and performance rules) | No dialect parser, no schema model, no validation against a database, no execution, no query plan, no formatting, and no language-injection analysis for SQL embedded in C# strings |
+| **JavaScript / TypeScript / JSX / TSX** | `node_info`, `node_install`, `node_script` (the project's npm/pnpm/yarn); `node_typecheck` (tsc → `TSxxxx` diagnostics with file:line), `node_lint` (eslint → findings with rule and position), `node_outdated`, `node_audit`; `js_files` (imports, exports, functions, classes, JSX) and `analyze_js` (JS0001–JS0016 over masked source) | No parser or module graph for the JS/TS itself: no symbols, references, rename or refactoring; no bundler or component analysis; no browser preview. The scanner proves the shape of a line, not a binding |
+| **HTML / CSS / SCSS** | `markup_files` (elements, ids, duplicates) and `analyze_markup`: HTML0001–HTML0014 (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance) and CSS0001–CSS0008 (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`) | No DOM: tags are scanned, not parsed into a tree; selectors are not matched against a document; no CSS-in-JS or CSS-isolation analysis, no formatting |
+| **YAML** | `yaml_files` (documents, top-level keys, and `kind`/`apiVersion`/`metadata.name` for a manifest) and `analyze_yaml`: YAML0001–YAML0008 (tab indentation, duplicate key, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collection, an alias with no anchor) | No schema validation (Kubernetes, Helm or CI); kustomize, exec and port-forward are absent. An indentation-aware line scan, not a YAML parser |
+| **SQL** | `sql_files` (per-file statements, verbs and tables) and `analyze_sql` (SQL0001–SQL0010: lexical, correctness, safety, security and performance rules); SQL built in C# is followed by `trace_data_flow` (a request value reaching `FromSqlRaw`/`ExecuteSqlRaw`/Dapper/`CommandText`) | No dialect parser, no schema model, no validation against a database, no execution, no query plan, no formatting |
 | **EF Core** | The C# model — `DbContext`, entities, configurations — is analysed like any C#; `ef_migrations` runs the project's own `dotnet ef` (list, add, script, remove, update, info, dbcontext-list) | No model-vs-migrations/snapshot diff, no generated-SQL inspection, no seeding help |
-| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true`; `k8s_helm` covers releases; Docker has a local container surface | No manifest or chart schema validation, no kustomize, no exec or port-forward; YAML is otherwise full-text only |
+| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true`; `k8s_helm` covers releases; `yaml_files`/`analyze_yaml` read a manifest's identity and its structural mistakes | No manifest or chart schema validation, no kustomize, no exec or port-forward |
 | **Razor / Blazor** | Page inventory, 17 markup/accessibility rules (RZ2001–RZ2017), 11 security rules (RZ1001–RZ1011), verified edits, Razor→metacode | No Razor compilation: `@model` members, tag helpers, component parameters, cascading values, `@bind` types, CSS isolation and JS interop are unchecked |
 | **Python / C++** | `translate_python_file` (CPython's `ast` dumper) and `translate_cpp_file` (`clang -ast-dump=json`) lower a file to canonical pseudocode, with origin lines and a diagnostic per unmodelled construct; `dumpJson` accepts a dump produced elsewhere | No type checker, no symbol navigation, no editing — the readers model syntax for comparison, not a language service |
 | **Java, Go, Rust** | `MetacodeLanguage` has labels | No frontend, no analysis, no navigation, no editing |
@@ -152,7 +177,8 @@ What exists:
   back with the match's own trivia.
 - **The scoped document tools**: `format_code` (Roslyn's formatter over VB), `optimize_usings` (`Imports`
   statements, including aliases and `Imports System.Math` type imports), `code_cleanup` (style, usings,
-  regions and format; member reordering stays C#-only).
+  regions, format and **member reordering**, which orders a class, structure or module by access, kind
+  and name the same way it orders a C# type).
 - **Inspections**: `inspect_code` and `inspection_baseline` run each pack's analyzers for the project's
   language. The .NET analyzers ship a `vb` set and the house rule VMC0001 has a VB implementation;
   Roslynator, StyleCop, AsyncFixer, Meziantou and the ReSharper-shaped pack are C# analyzers and say so
@@ -162,9 +188,25 @@ What exists:
   `find_async_anti_patterns` (`.Result`/`.Wait()`/`.GetResult()`, `Await` in loops, `Task.Run` around a
   sync lambda, missing `ConfigureAwait`), `find_performance_anti_patterns`, `complexity_report` and
   `get_complexity_hotspots` (McCabe, cognitive, Halstead, MI over VB blocks).
+- **Metrics and pattern analysis** (closed 2026-10-31): `get_metrics` ranks VB methods through the same
+  unit list `complexity_report` uses; `get_cohesion_metrics` reads VB classes, structures and modules
+  (the member's fields are found in its enclosing block, because VB declares a method on its statement
+  and puts the body in the block that follows); `find_duplicate_code` indexes VB method, constructor,
+  operator and accessor bodies with a per-language token normaliser; `analyze_complexity` has a VB walk
+  over `For … Next`/`For Each`, `While`, `Do … Loop`, `Select Case`, the extension-method LINQ chain and
+  the `&` concatenation, with the same growth algebra, recursion classification and allocation rules the
+  C# walk uses.
 - **Refactorings** that are not C# syntax: `apply_rename` (Roslyn's renamer, across documents),
   `encapsulate_field` (private field plus `Get`/`Set` property, references rewritten), `add_params` /
   `remove_params` (`ParamArray`, with the compiler gate on the call sites).
+- **Generation and reduction** (closed 2026-10-31): `generate_docs` writes `'''` XML documentation
+  comments with the symbol-derived summary, `<param>`, `<typeparam>` and `<returns>` entries;
+  `implement_members` generates `Sub`/`Function`/`Property`/`Event` stubs carrying the
+  `Implements I.Member` clause VB requires, and its gate is the type's missing-member count rather than
+  a diagnostic id (messages are localized); `reduce_complexity` and `fix_complexity` name a
+  three-operator condition in a private `Function … As Boolean` and flatten a tail `If` of a `Sub` into
+  a guard clause — extracting a block into a method is reported as a hand edit, with that reason, because
+  VB has no standalone block to move.
 - The language-neutral runtime tools: `build_project`, `run_project`, `run_tests`,
   `get_test_coverage_map`, `get_diagnostics` (compilation diagnostics include VB projects).
 - `run_code_analysis` collects **the project's own analyzer references** for the project's language.
@@ -179,15 +221,18 @@ What is still missing:
 |---|---|
 | Refactorings | ⚠️ rename, `encapsulate_field` and the `ParamArray` pair apply; the rest of the catalogue is C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static, top-level statements) and refuses with that reason |
 | `simplify_code` | ⚠️ VB has its own `simplify_vb_code` with 15 ids; the other 34 are returned with a reason |
-| `structural_search`, `format_code`, `optimize_usings` | ✅ both languages; `code_cleanup` covers VB for style/usings/regions/format |
-| `inspect_code` packs, `inspection_baseline` | ⚠️ the packs that ship VB analyzers run (netanalyzers, house); the C#-only packs report that they do not cover the project, and there is no VB fixer surface |
+| `structural_search`, `format_code`, `optimize_usings` | ✅ both languages; `code_cleanup` covers VB for style/usings/regions/format/reorder |
+| `inspect_code` packs, `inspection_baseline` | ⚠️ the packs that ship VB analyzers run (netanalyzers, house); the C#-only packs report that they do not cover the project, and there is no VB fixer surface: no analyzer in those packs ships a Visual Basic `CodeFixProvider`, so `apply_code_fix` has nothing to run |
+| Context actions (`context_action`) | ❌ the ~45 actions are C#-shaped (`add_braces`, `foreach_to_for`, `invert_loop`, `if_to_switch`, `string_to_raw`, …): VB spells each of them differently, and each one needs its own matcher, so none is written |
 | Symbol index (`reference_index`) | ✅ |
 | Dead code, code smells, async/performance patterns, complexity report | ✅ |
+| Metrics, cohesion, clones, Big-O (`get_metrics`, `get_cohesion_metrics`, `find_duplicate_code`, `analyze_complexity`) | ✅ |
+| Generation and reduction (`generate_docs`, `implement_members`, `reduce_complexity`, `fix_complexity`) | ✅ except the extract-method move, which is reported as a hand edit |
 | Metacode translate/generate | ✅ `VisualBasicFrontend` lowers modules, classes, structures, interfaces, enums, properties, methods, events and the statement/expression vocabulary; `With … End With`, `ReDim`, `On Error` and `RaiseEvent` stay `RAW[vb]` with a diagnostic, and `metacode_generate` emits C# from a `.vb` file |
-| Everything else | ❌ `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`, `fix_complexity`, `reduce_complexity`, `generate_docs`, `implement_members` and the context actions walk C# syntax |
 
-Workaround: for those last tools, C# only — a VB project keeps the symbol index, the inspections, the
-analysis and the refactorings listed above.
+Workaround: the two remaining C#-shaped surfaces are the refactoring catalogue and the context actions;
+a VB project keeps the symbol index, the inspections, the analysis, the metrics, the generation tools
+and the three refactorings listed above.
 
 
 ### 1.3 F#
@@ -421,16 +466,18 @@ has:
   rewrite — each named with its category) and **15 VB ids**;
 - **~800 inspection ids**; a fix exists only where the analyzer ships a `CodeFixProvider`
   (`apply_code_fix`);
-- **36 context-action ids** through `context_action`: `import_type`, the argument guards
+- **41 context-action ids** through `context_action`: `import_type`, the argument guards
   (`check_param_null`, `check_all_params_null`, `check_string_not_null_or_empty`,
   `check_collection_not_empty`, `check_variable_null`, `check_dictionary_key`, `check_enum_defined`,
   `check_index_range`), the wrap actions (`wrap_in_try_catch`, `wrap_in_try_finally`, `wrap_in_if`,
   `wrap_in_using`, `wrap_in_region`), the string re-encodings (`string_to_raw`, `string_to_verbatim`,
   `string_to_regular`), the statement family (`add_braces`, `foreach_to_for`, `for_to_foreach`,
   `invert_loop`, `if_to_switch`, `concat_to_interpolated`, `interpolated_to_concat`),
-  `digit_separators` / `remove_argument_name`, and the second batch (`merge_sequential_checks`,
+  `digit_separators` / `remove_argument_name`, the second batch (`merge_sequential_checks`,
   `split_and_in_if`, `join_null_check_with_usage`, `use_var`, `use_explicit_type`, `split_declaration`,
-  `remove_braces`, `migrate_to_nullable`, `remove_digit_separators`, `use_configure_await_false`);
+  `remove_braces`, `migrate_to_nullable`, `remove_digit_separators`, `use_configure_await_false`) and
+  the third (`merge_patterns`, `concat_to_stringbuilder`, `linq_query_to_method`,
+  `linq_method_to_query`, `convert_to_extension_block`);
 - **templates** (`templates`): 18 live, 10 postfix (`.if`, `.null`, `.not`, `.var`, `.await`,
   `.foreach`, `.forr`, `.ret`, `.toList`, `.switch`) and 8 file templates (class, interface, record,
   struct, enum, static class, abstract class, xUnit test), plus the team's own in
@@ -445,8 +492,8 @@ What that does not cover:
 | Import/completion actions | `import_type` adds the using for a type already named on the line, and `remove_argument_name` makes a named argument positional; still missing symbol completion, static-member import, qualify/unqualify |
 | Wrap actions | try/catch, try/finally, if, using and #region are covered; still missing quotes and the "Surround with" template family |
 | Guard actions | the common null/empty guards, the index/range guard, the dictionary-key guard and the enum-defined guard are covered; still missing span-index and contract annotations |
-| Literal/string actions | raw/verbatim/regular re-encoding, both directions of interpolation↔concatenation and digit separators are covered; still missing escape/unescape of individual characters, split/join and the StringBuilder rewrites |
-| Statement actions | `foreach`↔`for`, add-braces, `if`-chain→`switch`, `invert_loop`, merge/split conditions and remove-braces are covered; still missing statement ↔ expression |
+| Literal/string actions | raw/verbatim/regular re-encoding, both directions of interpolation↔concatenation, digit separators and the StringBuilder rewrite (`concat_to_stringbuilder`) are covered; still missing escape/unescape of individual characters and split/join |
+| Statement actions | `foreach`↔`for`, add-braces, `if`-chain→`switch`, `invert_loop`, merge/split conditions, remove-braces, LINQ in both directions, pattern merging and the extension block are covered; still missing statement ↔ expression |
 | Type actions | a DTO from JSON (`generate_dto_from_json`) and a builder (`generate_builder`) are covered; still missing a DTO from XML and a comparer |
 | Test actions | `generate_tests` scaffolds a class; still missing "add a test for this member" and "run the covering test" |
 | Editor policy | naming rules, and `use_var`/`use_explicit_type` as explicit actions (`IDE0007`/`IDE0008` are deliberately not style rewrites), are covered; still missing code-style enforcement on save and licence-header insertion (`IDE0073` needs the repository's template) |
@@ -528,9 +575,10 @@ stash, reset, merge, rebase, cherry-pick, revert, squash, remote, sync, show, ru
 `git_worktree`, `git_bisect` and `git_submodule` since 2026-10-31) and the hosting side covers all four
 providers a .NET team uses: GitHub through the authenticated `gh` CLI (`gh_repo`, `gh_pr`, `gh_issue`,
 `gh_release`, `gh_actions`, `gh_secret`, `gh_branch_protection`) and GitLab, Azure DevOps and Bitbucket
-Cloud through `git_host` (merge/pull requests, their comments and merges, issues/work items and
-pipelines/builds, with credentials read from `GITLAB_TOKEN`, `AZURE_DEVOPS_EXT_PAT` and `BITBUCKET_*`).
-The provider, host, project and repository are parsed from the git remote.
+Cloud through `git_host` (merge/pull requests, their comments, merges, reviews, the close/reopen/update
+lifecycle, issues/work items and pipelines/builds, with credentials read from `GITLAB_TOKEN`,
+`AZURE_DEVOPS_EXT_PAT` and `BITBUCKET_*`). The provider, host, project and repository are parsed from the
+git remote.
 
 Conflicts have a **model**, not just a report: `git_conflicts` parses the `<<<<<<<` blocks of every
 unmerged file into hunks with all three sides (`ours`, `theirs`, and the `|||||||` base when
@@ -545,12 +593,24 @@ creates from the working tree, the index or any revision/range, lists and shows 
 `--check`, `--3way` or `--reverse`, and deletes them — the shareable counterpart of the anonymous
 `git_stash`.
 
+**A commit convention is enforced as data.** `commit_lint` reads a message, the message of one revision
+(HEAD by default) or every commit of a range (`origin/main..HEAD`, the CI shape) and returns the parsed
+type, scope, description, breaking marker and footers together with every violation and its rule id:
+`header-format`, `type-enum`, `header-max-length`, `scope-empty`/`scope-format`, `subject-full-stop`,
+`body-leading-blank`, `breaking-change-format`. The accepted types, the header length and whether a scope
+is required are arguments, because they are a repository's choice; merge commits and the `Revert "…"`
+message git writes are exempt and say so. `git_commit conventional=true` runs the same rules and refuses
+the commit instead of writing it, so the convention holds without a Node toolchain.
+
 The **review workflow** is assembled from data the server already has: `gh_pr action=review` posts a
 GitHub review with line-anchored comments (`path`/`line`/`side`), `action=review-comments` lists them,
 `action=checks` returns the check runs on the PR head, `gh_branch_protection` inspects protection rules,
 required status checks and repository rulesets, and `code_review` builds the review brief for any diff:
 changed files by kind, the risk signals a reviewer looks for first, the new TODO markers with their
-line, the worst methods of each changed C# file, and (opt-in) the inspection findings inside them.
+line, the worst methods of each changed C# file, and (opt-in) the inspection findings inside them. The
+same loop exists on the other three providers: `git_host action=review-pr` approves, requests changes or
+comments (GitLab's REST API has no request-changes vote and the answer says so instead of faking one),
+`close-pr`/`reopen-pr` move the request through its states, and `update-pr` edits the title and body.
 
 **Real-time collaborative editing** (Rider's Code With Me) is not a gap to close: it is a shared
 transport and an editor surface, not a tool a local stdio server can offer. It belongs with the
@@ -612,7 +672,7 @@ they are repeated here because they are also "what is missing" for a .NET team:
 
 | Gap | What it would need |
 |---|---|
-| Taint analysis (SQL injection/XSS across the data flow) | A data-flow engine; `find_security_issues` is pattern-based |
+| Taint analysis (SQL injection/XSS across the data flow) | ✅ `trace_data_flow` (2026-10-31): request sources — query/form/header/cookie/body/route data, console and environment input, model-bound action parameters — followed through assignments and call arguments to the SQL, process, file, redirect, XSS and SSRF sinks, with the CWE and the path. The sanitizer list is explicit and the reach (locals, parameters, call arguments to a caller-set depth) is stated in every answer |
 | Mutation testing | ✅ `run_mutation_tests` (Stryker.NET) returns the mutation score and the survivors; the runner itself is an external tool the user installs |
 | Database profiling, async/event-source viewers, instrumentation profiling | ✅ Closed 2026-10-31: `profile_database` (EF Core/SqlClient/… commands, durations, N+1 shapes), `profile_async` (TplEventSource await durations, incomplete state machines), `profile_events` (any provider's inventory, the Events Viewer) and `profile_instrumentation` (IL rewrite with an injected probe: exact call counts and inclusive/exclusive times). `profile_root_cause` then joins the measurements with the solution's metacode AST to name the loop/LINQ/allocation that produced them. |
 
@@ -633,19 +693,19 @@ where the answer stops and why.
 | You need | The tool — or where the boundary is |
 |---|---|
 | Read, search or edit a file no frontend reads (YAML, JSON, config, Markdown, C/C++, Python, an OData/XML manifest) | `read_file`/`read_files`, `search_text`, `text_index`. The text layer **is** the design for a file with no syntax model; it is not a missing parser. Python and C/C++ can also be lowered with `translate_python_file`/`translate_cpp_file` for comparison, not for analysis |
-| HTML/CSS/SCSS diagnostics | Not here: no parser for either. The files are findable and readable. |
+| HTML/CSS/SCSS diagnostics | `markup_files` and `analyze_markup` (HTML0001–HTML0014, CSS0001–CSS0008). Tags are scanned with a quote-aware reader and CSS is masked; no DOM and no selector resolution (§1.6) |
 | XAML diagnostics and navigation | `xaml_pages`, `analyze_xaml` (XAML0001–XAML0009), `xaml_navigate`. Bindings, styles and tag helpers are not compiled, so they are not proved |
 | SQL diagnostics | `sql_files` and `analyze_sql` (SQL0001–SQL0010). A pattern scanner, not a dialect parser: no schema, no execution, no query plan (§1.6) |
-| JS/TS diagnostics and build | `node_info`/`node_install`/`node_script` for the toolchain; `node_typecheck` (tsc → `TSxxxx`) and `node_lint` (eslint → findings) for the diagnostics; `node_outdated`/`node_audit` for the dependency health. The JS/TS source itself still has no semantic model (§1.5) |
+| JS/TS diagnostics and build | `node_info`/`node_install`/`node_script` for the toolchain; `node_typecheck` (tsc → `TSxxxx`) and `node_lint` (eslint → findings) for the diagnostics; `node_outdated`/`node_audit` for the dependency health; `js_files` and `analyze_js` (JS0001–JS0016) for the source itself. No module graph or type model (§1.5) |
 | EF Core migrations | `ef_migrations` (list/add/script/remove/update/info/dbcontext-list). Model-vs-snapshot diff and generated-SQL inspection are not covered (§1.6) |
 | Kubernetes and Helm | `k8s_status`/`k8s_context`/`k8s_get`/`k8s_describe`/`k8s_logs` read; `k8s_apply`/`k8s_delete`/`k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases. No manifest/chart schema validation, no kustomize, no exec/port-forward (§1.7) |
 | VB refactoring | `apply_rename`, `encapsulate_field`, `add_params`/`remove_params` and `simplify_vb_code` (15 ids) apply; the refactorings that are C# syntax or C# idiom refuse with that reason, and the C#-only analyses are listed in §1.2 |
-| F# analysis | `build_project` returns the F# compiler's diagnostics (FS####), `run_tests` runs F# tests, `search_text`/`text_index` read the files. No symbols, references or refactorings: F# is not a Roslyn language, and a second compiler platform is out of the product's scope (§1.3) |
+| F# analysis | `fsharp_files` lists the declarations (modules, types, functions, opens) and `analyze_fsharp` applies FS0001–FS0010; `build_project` returns the compiler's FS#### diagnostics, `run_tests` runs F# tests, `search_text`/`text_index` read the files. No symbols, references or refactorings: F# is not a Roslyn language (§1.3) |
 | Debug a process | `debug_launch`/`debug_attach` with breakpoints, stepping, `debug_stack`, `debug_variables`, `debug_evaluate` (16 `debug_*` tools); `profile_stacks`/`profile_dump`/`profile_slowdown` remain the post-mortem path (§2) |
 | Single test | `run_test` (name, class or raw filter, TRX result) and `rerun_failed`; `debug_test` for the failing one (§4) |
 | Inspection suppression and severity | `suppress_finding` (a `#pragma` around the member or a `SuppressMessage` attribute, compiler-gated) and `configure_inspection` (severity per scope); `inspection_baseline` gates CI (§3) |
 | Decompiled symbol navigation | `assembly_workspace` (load, search, source, references, outline over a Roslyn workspace) and `inspect_assembly`/`find_assembly_api`. Rename and debugging inside the decompiled code are not possible: there is no source to write (§5) |
-| Taint analysis across a data flow | Not here: `find_security_issues` is pattern-based (§12) |
+| Taint analysis across a data flow | `trace_data_flow` (sources, sinks, sanitizers and the path between them) and `find_throw_sites` for "which methods throw this exception"; the reach — locals, parameters, call arguments to a caller-set depth — is stated in the answer (§12) |
 | Real-time collaborative editing | A shared transport and an editor surface, not a local stdio tool (§11) |
 
 ---

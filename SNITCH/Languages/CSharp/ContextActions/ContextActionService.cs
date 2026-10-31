@@ -60,6 +60,11 @@ public sealed partial class ContextActionService : IContextActionService
         ("migrate_to_nullable", "Migrate to nullable reference types"),
         ("remove_digit_separators", "Remove digit separators"),
         ("use_configure_await_false", "Use ConfigureAwait(false)"),
+        ("merge_patterns", "Merge pattern checks into one 'or'/'and' pattern"),
+        ("concat_to_stringbuilder", "Convert string concatenation to StringBuilder"),
+        ("linq_query_to_method", "Convert LINQ query syntax to a method chain"),
+        ("linq_method_to_query", "Convert a LINQ method chain to query syntax"),
+        ("convert_to_extension_block", "Convert extension methods into a C# 14 extension block"),
     ];
 
     public async Task<object> Apply(
@@ -168,6 +173,11 @@ public sealed partial class ContextActionService : IContextActionService
         "migrate_to_nullable" => MigrateToNullable(target),
         "remove_digit_separators" => RemoveDigitSeparators(target),
         "use_configure_await_false" => UseConfigureAwaitFalse(target),
+        "merge_patterns" => MergePatterns(target),
+        "concat_to_stringbuilder" => ConcatToStringBuilder(target),
+        "linq_query_to_method" => LinqQueryToMethod(target),
+        "linq_method_to_query" => LinqMethodToQuery(target),
+        "convert_to_extension_block" => ConvertToExtensionBlock(target),
         _ => Outcome.Fail($"'{id}' has no implementation."),
     };
 

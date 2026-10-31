@@ -18,7 +18,7 @@ public interface IAnalyzeComplexityService
         string minComplexity = "O(n)");
 }
 
-public sealed class AnalyzeComplexityService : IAnalyzeComplexityService
+public sealed partial class AnalyzeComplexityService : IAnalyzeComplexityService
 {
     private const int MaxTopN = 200;
     private const int MaxListedLoops = 12;
@@ -195,33 +195,45 @@ public sealed class AnalyzeComplexityService : IAnalyzeComplexityService
     private readonly record struct Analyzed(Callable Callable, ComplexityResult Result);
 
     private static IEnumerable<SyntaxNode> CallableDeclarations(SyntaxNode root) =>
-        root.DescendantNodes().Where(node => node is
-            MethodDeclarationSyntax or ConstructorDeclarationSyntax or DestructorDeclarationSyntax or
-            OperatorDeclarationSyntax or ConversionOperatorDeclarationSyntax or LocalFunctionStatementSyntax or
-            AccessorDeclarationSyntax);
+        root.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicCallableDeclarations(root)
+            : root.DescendantNodes().Where(node => node is
+                MethodDeclarationSyntax or ConstructorDeclarationSyntax or DestructorDeclarationSyntax or
+                OperatorDeclarationSyntax or ConversionOperatorDeclarationSyntax or LocalFunctionStatementSyntax or
+                AccessorDeclarationSyntax);
 
-    private static IMethodSymbol? DeclaredSymbol(SemanticModel model, SyntaxNode node) => node switch
-    {
-        MethodDeclarationSyntax method => model.GetDeclaredSymbol(method) as IMethodSymbol,
-        ConstructorDeclarationSyntax constructor => model.GetDeclaredSymbol(constructor) as IMethodSymbol,
-        DestructorDeclarationSyntax destructor => model.GetDeclaredSymbol(destructor) as IMethodSymbol,
-        OperatorDeclarationSyntax @operator => model.GetDeclaredSymbol(@operator) as IMethodSymbol,
-        ConversionOperatorDeclarationSyntax conversion => model.GetDeclaredSymbol(conversion) as IMethodSymbol,
-        LocalFunctionStatementSyntax localFunction => model.GetDeclaredSymbol(localFunction) as IMethodSymbol,
-        AccessorDeclarationSyntax accessor => model.GetDeclaredSymbol(accessor) as IMethodSymbol,
-        _ => null,
-    };
+    private static IMethodSymbol? DeclaredSymbol(SemanticModel model, SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicDeclaredSymbol(model, node)
+            : node switch
+            {
+                MethodDeclarationSyntax method => model.GetDeclaredSymbol(method) as IMethodSymbol,
+                ConstructorDeclarationSyntax constructor => model.GetDeclaredSymbol(constructor) as IMethodSymbol,
+                DestructorDeclarationSyntax destructor => model.GetDeclaredSymbol(destructor) as IMethodSymbol,
+                OperatorDeclarationSyntax @operator => model.GetDeclaredSymbol(@operator) as IMethodSymbol,
+                ConversionOperatorDeclarationSyntax conversion => model.GetDeclaredSymbol(conversion) as IMethodSymbol,
+                LocalFunctionStatementSyntax localFunction => model.GetDeclaredSymbol(localFunction) as IMethodSymbol,
+                AccessorDeclarationSyntax accessor => model.GetDeclaredSymbol(accessor) as IMethodSymbol,
+                _ => null,
+            };
 
-    private static SyntaxNode? BodyOf(SyntaxNode node) => node switch
-    {
-        MethodDeclarationSyntax method => (SyntaxNode?)method.Body ?? method.ExpressionBody?.Expression,
-        ConstructorDeclarationSyntax constructor => (SyntaxNode?)constructor.Body ?? constructor.ExpressionBody?.Expression,
-        DestructorDeclarationSyntax destructor => (SyntaxNode?)destructor.Body ?? destructor.ExpressionBody?.Expression,
-        OperatorDeclarationSyntax @operator => (SyntaxNode?)@operator.Body ?? @operator.ExpressionBody?.Expression,
-        ConversionOperatorDeclarationSyntax conversion => (SyntaxNode?)conversion.Body ?? conversion.ExpressionBody?.Expression,
-        LocalFunctionStatementSyntax localFunction => (SyntaxNode?)localFunction.Body ?? localFunction.ExpressionBody?.Expression,
-        AccessorDeclarationSyntax accessor => (SyntaxNode?)accessor.Body ?? accessor.ExpressionBody?.Expression,
-        _ => null,
+    /// <summary>
+    /// The node a callable's body starts at: in C# the block or the expression body, in VB the block
+    /// itself (its statements are read from it).
+    /// </summary>
+    private static SyntaxNode? BodyOf(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? node
+            : node switch
+            {
+                MethodDeclarationSyntax method => (SyntaxNode?)method.Body ?? method.ExpressionBody?.Expression,
+                ConstructorDeclarationSyntax constructor => (SyntaxNode?)constructor.Body ?? constructor.ExpressionBody?.Expression,
+                DestructorDeclarationSyntax destructor => (SyntaxNode?)destructor.Body ?? destructor.ExpressionBody?.Expression,
+                OperatorDeclarationSyntax @operator => (SyntaxNode?)@operator.Body ?? @operator.ExpressionBody?.Expression,
+                ConversionOperatorDeclarationSyntax conversion => (SyntaxNode?)conversion.Body ?? conversion.ExpressionBody?.Expression,
+                LocalFunctionStatementSyntax localFunction => (SyntaxNode?)localFunction.Body ?? localFunction.ExpressionBody?.Expression,
+                AccessorDeclarationSyntax accessor => (SyntaxNode?)accessor.Body ?? accessor.ExpressionBody?.Expression,
+                _ => null,
     };
 
     private static bool IsGenerated(string? path) =>

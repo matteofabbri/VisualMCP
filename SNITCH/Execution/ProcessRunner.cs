@@ -20,6 +20,10 @@ public static class ProcessRunner
             WorkingDirectory       = workingDir,
         };
 
+        // The disk policy first, so an explicit per-call value still wins: a build started after
+        // disk_usage action=guard writes its temp and restore caches on the drive the policy names.
+        Platform.DiskPolicy.ApplyTo(psi);
+
         if (environment is not null)
             foreach (var (name, value) in environment) psi.Environment[name] = value;
 

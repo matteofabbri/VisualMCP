@@ -197,7 +197,7 @@ internal sealed class MethodCatalog
 /// lookup inside a loop multiplies, recursion is classified by how its argument shrinks, and memory
 /// is the peak of the sizes that are materialised plus the call-stack depth.
 /// </summary>
-internal sealed class ComplexityWalker
+internal sealed partial class ComplexityWalker
 {
     private static readonly string[] OrderingOperators =
         ["OrderBy", "OrderByDescending", "ThenBy", "ThenByDescending", "Order", "OrderDescending"];
@@ -235,12 +235,14 @@ internal sealed class ComplexityWalker
 
     public ComplexityResult Analyze()
     {
-        var local = _method.Body switch
-        {
-            BlockSyntax block => VisitBlock(block, 0),
-            ExpressionSyntax expression => VisitExpression(expression, 0),
-            _ => ComplexityCost.Constant,
-        };
+        var local = _method.Body.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisitVisualBasicBody(_method.Body)
+            : _method.Body switch
+            {
+                BlockSyntax block => VisitBlock(block, 0),
+                ExpressionSyntax expression => VisitExpression(expression, 0),
+                _ => ComplexityCost.Constant,
+            };
 
         var recursion = BuildRecursion(local);
         var time = recursion is null ? local : local.Max(recursion.Time);
@@ -488,7 +490,18 @@ internal sealed class ComplexityWalker
 
     private ComplexityCost EnterLoop(
         SyntaxNode loop, string kind, ComplexityCost factor, string bound, StatementSyntax? body, int depth,
-        ComplexityCost? conditionCost = null)
+        ComplexityCost? conditionCost = null) =>
+        EnterLoop(loop, kind, factor, bound, depth,
+            () => body is null ? ComplexityCost.Constant : VisitStatement(body, depth + 1),
+            conditionCost);
+
+    /// <summary>
+    /// The loop bookkeeping, with the body as a callback: the C# and VB walks both need the nesting
+    /// product and the evidence line, and only the way the body is visited differs.
+    /// </summary>
+    private ComplexityCost EnterLoop(
+        SyntaxNode loop, string kind, ComplexityCost factor, string bound, int depth,
+        Func<ComplexityCost> visitBody, ComplexityCost? conditionCost)
     {
         var line = LineOf(loop);
         var nesting = depth + 1;
@@ -503,7 +516,7 @@ internal sealed class ComplexityWalker
 
         try
         {
-            var bodyCost = body is null ? ComplexityCost.Constant : VisitStatement(body, depth + 1);
+            var bodyCost = visitBody();
             if (conditionCost is { } condition) bodyCost = bodyCost.Max(condition);
             var cost = factor.Multiply(bodyCost);
             _evidence.Add($"{kind} loop at line {line} ({bound}) → {factor.ToBigO()} per iteration; loop and body {cost.ToBigO()}");
@@ -669,7 +682,7 @@ internal sealed class ComplexityWalker
             return VisitLinqChain(invocation, symbol, depth);
 
         var arguments = VisitCallArguments(invocation, depth);
-        if (symbol is not null && VisitKnownMethod(symbol, invocation, arguments) is { } known)
+        if (symbol is not null && VisitKnownMethod(symbol, invocation, ReceiverTypeOf(invocation), arguments) is { } known)
             return known;
 
         // A call outside the analysed solution: its own cost is unknown, assumed O(1); its
@@ -881,12 +894,11 @@ internal sealed class ComplexityWalker
     /// APIs. Returning null means "not modelled", which falls back to O(1) for the call itself.
     /// </summary>
     private ComplexityCost? VisitKnownMethod(
-        IMethodSymbol symbol, InvocationExpressionSyntax invocation, ComplexityCost arguments)
+        IMethodSymbol symbol, SyntaxNode invocation, ITypeSymbol? receiverType, ComplexityCost arguments)
     {
         var type = symbol.ContainingType;
         var typeName = type?.Name ?? string.Empty;
         var name = symbol.Name;
-        var receiverType = ReceiverTypeOf(invocation);
 
         if (typeName == "Array")
         {

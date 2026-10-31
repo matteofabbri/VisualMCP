@@ -78,7 +78,7 @@ public sealed record ReduceComplexityOutcome
     public string Note { get; init; } = string.Empty;
 }
 
-public sealed class ReduceComplexityService : IReduceComplexityService
+public sealed partial class ReduceComplexityService : IReduceComplexityService
 {
     private readonly IRoslynWorkspace _workspace;
 
@@ -193,18 +193,34 @@ public sealed class ReduceComplexityService : IReduceComplexityService
             var suggestion = ComplexityPlanner.Suggest(currentUnit, currentModel, cancellationToken)
                 .FirstOrDefault(candidate => candidate.AutoApplicable && !rejected.ContainsKey(Key(candidate)));
 
-            if (suggestion is null) break;
-
-            var attempt = suggestion.Kind switch
+            if (suggestion is null)
             {
-                "extract-method" => ApplyExtraction(currentRoot, currentModel, currentUnit, suggestion.Line, cancellationToken),
-                "extract-condition" => ApplyConditionExtraction(currentRoot, currentModel, currentUnit, suggestion.Line, cancellationToken),
-                "guard-clause" => ApplyGuardClause(currentRoot, currentModel, currentUnit, suggestion.Line),
-                _ => (null, "not auto-applicable"),
-            };
+                File.AppendAllText(@"D:\REPOSITORY\vmcp-tmp\reduce-trace.txt",
+                    $"step={step} metrics={metrics.Cyclomatic}/{metrics.Cognitive} noSuggestion len={currentUnit.Span.Length}" + Environment.NewLine);
+                break;
+            }
+
+            var attempt = currentUnit.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+                ? suggestion.Kind switch
+                {
+                    "extract-condition" => ApplyVisualBasicConditionExtraction(
+                        currentRoot, currentModel, currentUnit, suggestion.Line, cancellationToken),
+                    "guard-clause" => ApplyVisualBasicGuardClause(currentModel, currentUnit, suggestion.Line),
+                    "extract-method" => (null, "extracting a block into a method is a hand edit in Visual Basic"),
+                    _ => (null, "not auto-applicable"),
+                }
+                : suggestion.Kind switch
+                {
+                    "extract-method" => ApplyExtraction(currentRoot, currentModel, currentUnit, suggestion.Line, cancellationToken),
+                    "extract-condition" => ApplyConditionExtraction(currentRoot, currentModel, currentUnit, suggestion.Line, cancellationToken),
+                    "guard-clause" => ApplyGuardClause(currentRoot, currentModel, currentUnit, suggestion.Line),
+                    _ => (null, "not auto-applicable"),
+                };
 
             if (attempt.Root is null)
             {
+                File.AppendAllText(@"D:\REPOSITORY\vmcp-tmp\reduce-trace.txt",
+                    $"suggestion={suggestion.Kind}@{suggestion.Line} REFUSED: {attempt.Error}" + Environment.NewLine);
                 rejected[Key(suggestion)] = attempt.Error ?? "the move was refused";
                 continue;
             }
@@ -219,6 +235,9 @@ public sealed class ReduceComplexityService : IReduceComplexityService
             if (nextRoot is null || nextModel is null) break;
 
             var nextUnit = FindUnit(nextRoot, name, UnitOrdinal(root, unit));
+            File.AppendAllText(@"D:\REPOSITORY\vmcp-tmp\reduce-trace.txt",
+                $"suggestion={suggestion.Kind}@{suggestion.Line} rootNull={attempt.Root is null} err={attempt.Error} " +
+                $"nextUnit={nextUnit?.GetType().Name ?? "null"} name={name} ordinal={UnitOrdinal(root, unit)}" + Environment.NewLine);
             if (nextUnit is null) break;
 
             var nextMetrics = ComplexityAnalyzer.Analyze(nextUnit, nextModel, document.FilePath);
@@ -339,16 +358,19 @@ public sealed class ReduceComplexityService : IReduceComplexityService
         return Math.Max(0, matches.IndexOf(unit));
     }
 
-    private static string NameOf(SyntaxNode unit) => unit switch
-    {
-        MethodDeclarationSyntax method => method.Identifier.ValueText,
-        ConstructorDeclarationSyntax constructor => constructor.Identifier.ValueText,
-        LocalFunctionStatementSyntax local => local.Identifier.ValueText,
-        AccessorDeclarationSyntax accessor => accessor.Keyword.Text,
-        PropertyDeclarationSyntax property => property.Identifier.ValueText,
-        AnonymousFunctionExpressionSyntax => "lambda",
-        _ => unit.Kind().ToString(),
-    };
+    private static string NameOf(SyntaxNode unit) =>
+        unit.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? ComplexityAnalyzer.NameOf(unit)
+            : unit switch
+            {
+                MethodDeclarationSyntax method => method.Identifier.ValueText,
+                ConstructorDeclarationSyntax constructor => constructor.Identifier.ValueText,
+                LocalFunctionStatementSyntax local => local.Identifier.ValueText,
+                AccessorDeclarationSyntax accessor => accessor.Keyword.Text,
+                PropertyDeclarationSyntax property => property.Identifier.ValueText,
+                AnonymousFunctionExpressionSyntax => "lambda",
+                _ => unit.Kind().ToString(),
+            };
 
     // ── Move 1: a nested block becomes its own method ────────────────────────────────────
 

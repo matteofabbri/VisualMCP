@@ -13,6 +13,10 @@ namespace Snitch.Languages.CSharp.Refactoring;
 /// <c>&lt;param&gt;</c>/<c>&lt;typeparam&gt;</c>/<c>&lt;returns&gt;</c> entries a declaration is missing,
 /// with a sentence derived from the name. It never touches a declaration that already has a doc
 /// comment, and it only inserts comment lines — the code below them is not re-emitted.
+/// <para>
+/// C# writes them as <c>///</c> lines and Visual Basic as <c>'''</c> lines; the selection (which
+/// declarations are public and undocumented) is read from the symbols, so both languages use it.
+/// </para>
 /// </summary>
 public interface IGenerateDocsService
 {
@@ -24,7 +28,7 @@ public interface IGenerateDocsService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class GenerateDocsService : IGenerateDocsService
+public sealed partial class GenerateDocsService : IGenerateDocsService
 {
     private readonly IRoslynWorkspace _workspace;
     private readonly IVisualMcpStore? _store;
@@ -71,16 +75,19 @@ public sealed class GenerateDocsService : IGenerateDocsService
             };
 
         var insertions = new List<(int Position, string Comment, string Symbol)>();
+        var newline = text.ToString().Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var prefix = document.Project.Language == LanguageNames.VisualBasic ? "''' " : "/// ";
+
         foreach (var declaration in declarations)
         {
-            var symbol = model.GetDeclaredSymbol(declaration, cancellationToken);
+            var symbol = DeclaredSymbol(model, declaration, cancellationToken);
             if (symbol is null) continue;
 
             var line = text.Lines.GetLineFromPosition(declaration.SpanStart);
             var indentation = text.ToString(TextSpan.FromBounds(line.Start, declaration.SpanStart));
             if (indentation.Any(character => character is not (' ' or '\t'))) indentation = string.Empty;
 
-            insertions.Add((line.Start, Comment(symbol, indentation), symbol.ToDisplayString()));
+            insertions.Add((line.Start, Comment(symbol, indentation, prefix, newline), symbol.ToDisplayString()));
         }
 
         if (insertions.Count == 0)
@@ -117,7 +124,7 @@ public sealed class GenerateDocsService : IGenerateDocsService
     /// The declarations to document: one named symbol, or every public undocumented type (and, when
     /// <paramref name="includeMembers"/>, its public members) in the file.
     /// </summary>
-    private static List<MemberDeclarationSyntax> Targets(
+    private static List<SyntaxNode> Targets(
         SyntaxNode root,
         SemanticModel model,
         string? symbolName,
@@ -126,11 +133,12 @@ public sealed class GenerateDocsService : IGenerateDocsService
         CancellationToken cancellationToken)
     {
         error = null;
-        var wanted = new List<MemberDeclarationSyntax>();
+        var wanted = new List<SyntaxNode>();
 
         if (!string.IsNullOrWhiteSpace(symbolName))
         {
-            var declaration = root.DescendantNodes().OfType<MemberDeclarationSyntax>()
+            var declaration = root.DescendantNodes()
+                .Where(IsDocumentableDeclaration)
                 .FirstOrDefault(candidate => NameOf(candidate) == symbolName);
 
             if (declaration is null)
@@ -141,55 +149,89 @@ public sealed class GenerateDocsService : IGenerateDocsService
 
             wanted.Add(declaration);
 
-            if (includeMembers && declaration is TypeDeclarationSyntax type)
-                wanted.AddRange(type.Members.OfType<MemberDeclarationSyntax>().Where(IsPublic));
+            if (includeMembers && IsTypeDeclaration(declaration))
+                wanted.AddRange(MemberDeclarations(declaration).Where(member => IsPublic(member, model, cancellationToken)));
 
             return wanted.Where(candidate => !HasDocs(candidate)).ToList();
         }
 
-        foreach (var type in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+        foreach (var type in root.DescendantNodes().Where(IsTypeDeclaration))
         {
             if (model.GetDeclaredSymbol(type, cancellationToken) is not { DeclaredAccessibility: Accessibility.Public }) continue;
 
             if (!HasDocs(type)) wanted.Add(type);
             if (!includeMembers) continue;
 
-            wanted.AddRange(type.Members.OfType<MemberDeclarationSyntax>()
-                .Where(member => IsPublic(member) && !HasDocs(member)));
+            wanted.AddRange(MemberDeclarations(type)
+                .Where(member => IsPublic(member, model, cancellationToken) && !HasDocs(member)));
         }
 
         return wanted;
     }
 
-    private static bool IsPublic(MemberDeclarationSyntax member) =>
-        member.Modifiers.Any(SyntaxKind.PublicKeyword);
+    /// <summary>Everything a doc comment can be attached to; the language decides which node kinds qualify.</summary>
+    private static bool IsDocumentableDeclaration(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? IsVisualBasicDocumentable(node)
+            : node is MemberDeclarationSyntax;
 
-    private static bool HasDocs(MemberDeclarationSyntax member) =>
-        member.GetLeadingTrivia().Any(trivia => trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia)) ||
-        member.GetLeadingTrivia().ToString().Contains("///", StringComparison.Ordinal);
+    private static bool IsTypeDeclaration(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? IsVisualBasicTypeDeclaration(node)
+            : node is TypeDeclarationSyntax;
 
-    private static string? NameOf(MemberDeclarationSyntax member) => member switch
+    private static IEnumerable<SyntaxNode> MemberDeclarations(SyntaxNode type) =>
+        type.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicMemberDeclarations(type)
+            : ((TypeDeclarationSyntax)type).Members.Cast<SyntaxNode>();
+
+    /// <summary>
+    /// The public test is the symbol's accessibility, not a keyword: it is the same answer in both
+    /// languages and it knows VB's defaults (a procedure is Public, a <c>Dim</c> field is Private).
+    /// </summary>
+    private static bool IsPublic(SyntaxNode member, SemanticModel model, CancellationToken cancellationToken) =>
+        DeclaredSymbol(model, member, cancellationToken)?.DeclaredAccessibility == Accessibility.Public;
+
+    private static bool HasDocs(SyntaxNode member)
     {
-        BaseTypeDeclarationSyntax type => type.Identifier.ValueText,
-        DelegateDeclarationSyntax @delegate => @delegate.Identifier.ValueText,
-        MethodDeclarationSyntax method => method.Identifier.ValueText,
-        PropertyDeclarationSyntax property => property.Identifier.ValueText,
-        EventDeclarationSyntax @event => @event.Identifier.ValueText,
-        FieldDeclarationSyntax field => field.Declaration.Variables.FirstOrDefault()?.Identifier.ValueText,
-        _ => null,
-    };
+        var leading = member.GetLeadingTrivia().ToString();
+        return leading.Contains("///", StringComparison.Ordinal)
+               || leading.Contains("'''", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The symbol a declaration introduces. Visual Basic attaches a field's symbol to the declarator,
+    /// not to the statement, so the first declarator is the one that answers.
+    /// </summary>
+    private static ISymbol? DeclaredSymbol(SemanticModel model, SyntaxNode declaration, CancellationToken cancellationToken) =>
+        declaration.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicDeclaredSymbol(model, declaration, cancellationToken)
+            : model.GetDeclaredSymbol(declaration, cancellationToken);
+
+    private static string? NameOf(SyntaxNode member) =>
+        member.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicNameOf(member)
+            : member switch
+            {
+                BaseTypeDeclarationSyntax type      => type.Identifier.ValueText,
+                DelegateDeclarationSyntax @delegate => @delegate.Identifier.ValueText,
+                MethodDeclarationSyntax method      => method.Identifier.ValueText,
+                PropertyDeclarationSyntax property  => property.Identifier.ValueText,
+                EventDeclarationSyntax @event       => @event.Identifier.ValueText,
+                FieldDeclarationSyntax field        => field.Declaration.Variables.FirstOrDefault()?.Identifier.ValueText,
+                _                                   => null,
+            };
 
     // ── the comment ──────────────────────────────────────────────────────────
 
     private sealed record CommentText(string Summary, IReadOnlyList<string> TypeParameters,
         IReadOnlyList<string> Parameters, bool Returns);
 
-    private static string Comment(ISymbol symbol, string indentation)
+    private static string Comment(ISymbol symbol, string indentation, string prefix, string newline)
     {
-        var newline = "\n";
         var comment = Describe(symbol);
         var builder = new StringBuilder();
-        void Line(string text) => builder.Append(indentation).Append("/// ").Append(text).Append(newline);
+        void Line(string text) => builder.Append(indentation).Append(prefix).Append(text).Append(newline);
 
         Line("<summary>");
         Line(Escape(comment.Summary));

@@ -60,6 +60,26 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 },
                 styleRewrites = "87 C# ids + 15 VB ids (simplify_code / simplify_vb_code)",
                 inspections = "~800 ids from five analyzer packs (inspect_code)",
+                javascriptRules = new
+                {
+                    count = Snitch.Languages.JavaScript.JavaScriptAnalyzer.Rules.Count,
+                    range = "JS0001-JS0016",
+                },
+                markupRules = new
+                {
+                    html = "HTML0001-HTML0014",
+                    css = "CSS0001-CSS0008",
+                },
+                yamlRules = new
+                {
+                    count = Snitch.Languages.Yaml.YamlAnalyzer.Rules.Count,
+                    range = "YAML0001-YAML0008",
+                },
+                fsharpRules = new
+                {
+                    count = Snitch.Languages.FSharp.FSharpAnalyzer.Rules.Count,
+                    range = "FS0001-FS0010",
+                },
             },
 
             // The language layers, each with the type that proves it exists in this build.
@@ -74,11 +94,17 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 metacode = "Snitch.Metacode (C#, Visual Basic, Razor, pseudocode, Ghidra frontends; persisted index)",
                 sql = "Snitch.Languages.Sql (SqlAnalyzer: comments/literals masked, statements split, SQL0001-SQL0010; " +
                       "a pattern scanner, not a dialect parser)",
-                javascript = "Snitch.Node (the project's own npm/pnpm/yarn plus tsc and eslint interpreted; the JS/TS " +
-                             "source itself has no parser or module graph), with ExternalTool for PATH/.cmd resolution",
-                fsharp = "none: no semantic model (not a Roslyn language); build_project still returns the compiler's FS#### lines",
+                javascript = "Snitch.Node (the project's own npm/pnpm/yarn plus tsc and eslint interpreted) + " +
+                             "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0016, " +
+                             "module and export inventory; no module graph or type checking)",
+                markup = "Snitch.Languages.WebMarkup (MarkupAnalyzer: quote-aware HTML tag scanner, HTML0001-HTML0014; " +
+                         "CSS/SCSS masked, CSS0001-CSS0008; no DOM and no selector resolution)",
+                yaml = "Snitch.Languages.Yaml (YamlAnalyzer: indentation-aware line scan, YAML0001-YAML0008, manifest " +
+                       "kind/apiVersion/name; not a schema validator)",
+                fsharp = "Snitch.Languages.FSharp (FSharpAnalyzer: masked scan, FS0001-FS0010, declaration inventory). " +
+                         "No semantic model: F# is not a Roslyn language; build_project still returns the compiler's FS#### lines",
                 kubernetes = "Snitch.Kubernetes (kubectl/helm wrappers: status, context, get/describe/logs, apply/delete/rollout, " +
-                             "helm releases); YAML is otherwise full-text",
+                             "helm releases)",
             },
 
             docs = new

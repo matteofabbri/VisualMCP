@@ -14,7 +14,7 @@ public interface IGetCohesionMetricsService
     Task<object> Measure(string? projectName, int minComponents, int top, CancellationToken cancellationToken = default);
 }
 
-public sealed class GetCohesionMetricsService : IGetCohesionMetricsService
+public sealed partial class GetCohesionMetricsService : IGetCohesionMetricsService
 {
     private readonly IRoslynWorkspace _workspace;
 
@@ -44,7 +44,7 @@ public sealed class GetCohesionMetricsService : IGetCohesionMetricsService
                 var model = await document.GetSemanticModelAsync(cancellationToken);
                 if (root is null || model is null) continue;
 
-                foreach (var declaration in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+                foreach (var declaration in root.DescendantNodes().Where(IsTypeDeclaration))
                 {
                     if (model.GetDeclaredSymbol(declaration, cancellationToken) is not INamedTypeSymbol type) continue;
                     if (type.TypeKind is not (TypeKind.Class or TypeKind.Struct)) continue;
@@ -91,7 +91,7 @@ public sealed class GetCohesionMetricsService : IGetCohesionMetricsService
 
     private static Cohesion? Measure(
         INamedTypeSymbol type,
-        TypeDeclarationSyntax declaration,
+        SyntaxNode declaration,
         SemanticModel model,
         Document document,
         CancellationToken cancellationToken)
@@ -129,9 +129,9 @@ public sealed class GetCohesionMetricsService : IGetCohesionMetricsService
                 var node = reference.GetSyntax(cancellationToken);
                 if (node.SyntaxTree != model.SyntaxTree) continue;
 
-                foreach (var identifier in node.DescendantNodes().OfType<IdentifierNameSyntax>())
+                foreach (var name in NameNodes(node))
                 {
-                    if (model.GetSymbolInfo(identifier, cancellationToken).Symbol is IFieldSymbol field &&
+                    if (model.GetSymbolInfo(name, cancellationToken).Symbol is IFieldSymbol field &&
                         fields.Contains(field))
                         touchedFields.Add(field);
                 }
@@ -190,4 +190,19 @@ public sealed class GetCohesionMetricsService : IGetCohesionMetricsService
             components,
             cohesion);
     }
+
+    /// <summary>The type declarations the metric reads: C# classes and structs, VB classes, structures and modules.</summary>
+    private static bool IsTypeDeclaration(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? IsVisualBasicTypeDeclaration(node)
+            : node is TypeDeclarationSyntax;
+
+    /// <summary>
+    /// The name nodes whose symbol a member body can read. The C# and VB identifier types are different
+    /// classes with the same job, so the language picks the enumeration and the caller only sees nodes.
+    /// </summary>
+    private static IEnumerable<SyntaxNode> NameNodes(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicNameNodes(node)
+            : node.DescendantNodes().OfType<IdentifierNameSyntax>();
 }

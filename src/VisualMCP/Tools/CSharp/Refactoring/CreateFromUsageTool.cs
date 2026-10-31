@@ -12,7 +12,8 @@ public static class CreateFromUsageTool
         "already assumes exists. CS1061 adds the method (parameter types taken from the arguments, return " +
         "type from the context) or property to the receiver's own type; CS0117 adds the missing static " +
         "member to the type it is accessed on; CS1501 / CS7036 add an overload whose signature is the call " +
-        "site (the arguments are the specification); CS0246 creates the type in the current namespace; " +
+        "site (the arguments are the specification); CS1729 adds the missing constructor to the type being " +
+        "constructed; CS0246 creates the type in the current namespace; " +
         "CS0103 creates a method on the enclosing type. Refused unless the project gains no compiler " +
         "error. Dry run by default.")]
     public static Task<object> CreateFromUsage(

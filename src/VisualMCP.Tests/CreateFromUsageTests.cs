@@ -72,6 +72,28 @@ public sealed class CreateFromUsageTests
     }
 
     [Fact]
+    public async Task Cs1729_AddsTheMissingConstructor()
+    {
+        const string source = """
+            internal class Order
+            {
+                public Order() { }
+            }
+
+            internal class C
+            {
+                public Order Create() => new Order(1, "x");
+            }
+            """;
+
+        using var workspace = await CreateAsync(source, 8);
+
+        var text = workspace.Read("C.cs");
+        Assert.Contains("public Order(int arg1, string arg2) { }", text);
+        Assert.Contains("public Order() { }", text);
+    }
+
+    [Fact]
     public async Task AnUnsupportedDiagnosticIsNamedWithTheSupportedSet()
     {
         const string source = """

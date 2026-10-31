@@ -11,7 +11,12 @@ namespace Snitch.Languages.CSharp.Refactoring;
 /// ReSharper's "Implement missing members": a type that declares an interface or derives from an
 /// abstract class but does not implement everything gets one stub per missing member, with the real
 /// signature taken from the symbol and a body that throws. The compiler gate then proves the
-/// CS0535/CS0534 errors are gone and nothing new appeared.
+/// CS0535/CS0534 (C#) or BC30149 (VB) errors are gone and nothing new appeared.
+/// <para>
+/// Visual Basic stubs carry the <c>Implements I.Member</c> clause the language requires; the check at
+/// the end is the missing-member count of the type, which is the same question in either language and
+/// does not depend on diagnostic messages (they are localized).
+/// </para>
 /// </summary>
 public interface IImplementMembersService
 {
@@ -22,7 +27,7 @@ public interface IImplementMembersService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class ImplementMembersService : IImplementMembersService
+public sealed partial class ImplementMembersService : IImplementMembersService
 {
     private readonly IRoslynWorkspace _workspace;
     private readonly IVisualMcpStore? _store;
@@ -54,8 +59,8 @@ public sealed class ImplementMembersService : IImplementMembersService
         var text = await document.GetTextAsync(cancellationToken);
         if (root is null || model is null) return new { error = $"Could not read {Path.GetFileName(document.FilePath)}." };
 
-        var declaration = root.DescendantNodes().OfType<TypeDeclarationSyntax>()
-            .FirstOrDefault(candidate => candidate.Identifier.ValueText == typeName);
+        var declaration = root.DescendantNodes().Where(IsTypeDeclaration)
+            .FirstOrDefault(candidate => NameOf(candidate) == typeName);
         if (declaration is null) return new { error = $"No type '{typeName}' in {Path.GetFileName(document.FilePath)}." };
 
         if (model.GetDeclaredSymbol(declaration, cancellationToken) is not INamedTypeSymbol type)
@@ -74,18 +79,18 @@ public sealed class ImplementMembersService : IImplementMembersService
                 note = "Nothing is missing: every interface and abstract member is already implemented.",
             };
 
-        var stubs = missing.Select(member => Render(member, model, declaration.SpanStart)).ToList();
+        var visualBasic = declaration.SyntaxTree.Options.Language == LanguageNames.VisualBasic;
+        var stubs = missing.Select(member => Render(member, type, model, declaration.SpanStart, visualBasic)).ToList();
         var newText = InsertMembers(text, declaration, stubs);
 
         var afterSolution = solution.WithDocumentText(document.Id, SourceText.From(newText));
         var gate = await RefactoringCompilerGate.CompareAsync(
             solution, afterSolution, new[] { document.Project.Id }, cancellationToken);
 
-        // A gate over the total alone would accept a stub that trades CS0535 for CS0103: require that
-        // the "does not implement" errors for this type actually went away.
-        var before = ImplementationErrors(await document.Project.GetCompilationAsync(cancellationToken), typeName);
-        var after = ImplementationErrors(
-            await afterSolution.GetProject(document.Project.Id)!.GetCompilationAsync(cancellationToken), typeName);
+        // A gate over the total alone would accept a stub that trades one error for another: require
+        // that the type's missing-member count actually went down.
+        var before = missing.Count;
+        var after = await MissingMemberCountAsync(afterSolution, document, typeName, cancellationToken);
 
         if (!gate.Passed || after >= before)
             return new
@@ -118,13 +123,29 @@ public sealed class ImplementMembersService : IImplementMembersService
         };
     }
 
-    /// <summary>CS0535 (interface) and CS0534 (abstract) diagnostics that name the type.</summary>
-    private static int ImplementationErrors(Compilation? compilation, string typeName) =>
-        compilation is null
-            ? 0
-            : compilation.GetDiagnostics()
-                .Count(diagnostic => diagnostic.Id is "CS0535" or "CS0534" &&
-                                     diagnostic.GetMessage().Contains(typeName, StringComparison.Ordinal));
+    /// <summary>
+    /// How many interface and abstract members the type still owes after the rewrite. It is the same
+    /// question the compiler asks, asked through the symbol model, so it works in both languages and
+    /// does not read a diagnostic message (which is localized).
+    /// </summary>
+    private static async Task<int> MissingMemberCountAsync(
+        Solution solution, Document original, string typeName, CancellationToken cancellationToken)
+    {
+        var document = solution.GetDocument(original.Id);
+        if (document is null) return int.MaxValue;
+
+        var root = await document.GetSyntaxRootAsync(cancellationToken);
+        var model = await document.GetSemanticModelAsync(cancellationToken);
+        if (root is null || model is null) return int.MaxValue;
+
+        var declaration = root.DescendantNodes().Where(IsTypeDeclaration)
+            .FirstOrDefault(candidate => NameOf(candidate) == typeName);
+        if (declaration is null) return int.MaxValue;
+
+        return model.GetDeclaredSymbol(declaration, cancellationToken) is INamedTypeSymbol type
+            ? MissingMembers(type).Count
+            : int.MaxValue;
+    }
 
     /// <summary>Every interface or abstract member the type does not implement yet.</summary>
     internal static List<ISymbol> MissingMembers(INamedTypeSymbol type)
@@ -206,7 +227,11 @@ public sealed class ImplementMembersService : IImplementMembersService
     /// insertion point, so they come out as <c>string</c>/<c>List&lt;int&gt;</c> and reuse the file's usings.
     /// <c>NotImplementedException</c> is fully qualified: no using to add, no implicit-usings dependency.
     /// </summary>
-    private static string Render(ISymbol member, SemanticModel model, int position)
+    private static string Render(
+        ISymbol member, INamedTypeSymbol type, SemanticModel model, int position, bool visualBasic) =>
+        visualBasic ? RenderVisualBasic(member, type, model, position) : RenderCSharp(member, model, position);
+
+    private static string RenderCSharp(ISymbol member, SemanticModel model, int position)
     {
         const string Throws = "throw new System.NotImplementedException();";
 
@@ -259,13 +284,25 @@ public sealed class ImplementMembersService : IImplementMembersService
         }
     }
 
+    /// <summary>Every type declaration a stub can be added to: a C# type, or a VB class, structure or module.</summary>
+    private static bool IsTypeDeclaration(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? IsVisualBasicTypeDeclaration(node)
+            : node is TypeDeclarationSyntax;
+
+    private static string? NameOf(SyntaxNode node) =>
+        node.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicTypeNameOf(node)
+            : ((TypeDeclarationSyntax)node).Identifier.ValueText;
+
     // ── text insertion ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Inserts the stubs on their own lines before the type's closing brace, indented like the members
-    /// already there. A one-line type has no such line, so the text between its braces is replaced.
+    /// Inserts the stubs on their own lines before the type's closing brace (C#) or <c>End Class</c>
+    /// (VB), indented like the members already there. A one-line C# type has no such line, so the text
+    /// between its braces is replaced.
     /// </summary>
-    internal static string InsertMembers(SourceText text, TypeDeclarationSyntax type, IReadOnlyList<string> members)
+    internal static string InsertMembers(SourceText text, SyntaxNode type, IReadOnlyList<string> members)
     {
         if (members.Count == 0) return text.ToString();
 
@@ -282,23 +319,29 @@ public sealed class ImplementMembersService : IImplementMembersService
             }
         }
 
-        var closing = type.CloseBraceToken.SpanStart;
+        var closing = ClosingPosition(type);
         var closingLine = text.Lines.GetLineFromPosition(closing);
         var beforeClosing = source[closingLine.Start..closing];
 
-        // The usual shape: `}` alone on its line — insert at the start of that line.
-        if (beforeClosing.Trim().Length == 0)
+        // The usual shape: the closing token alone on its line — insert at the start of that line.
+        if (beforeClosing.Trim().Length == 0 || type.SyntaxTree.Options.Language == LanguageNames.VisualBasic)
             return source[..closingLine.Start] + block + source[closingLine.Start..];
 
         // `public class C { }`: replace the whitespace between the braces with the members.
-        var open = type.OpenBraceToken.Span.End;
+        var open = ((TypeDeclarationSyntax)type).OpenBraceToken.Span.End;
         var closeIndentation = TypeIndentation(text, type);
         return source[..open] + newline + block.ToString().TrimEnd('\r', '\n') + newline +
                closeIndentation + source[closing..];
     }
 
+    /// <summary>Where a type body ends: the closing brace in C#, the first token of <c>End Class</c> in VB.</summary>
+    private static int ClosingPosition(SyntaxNode type) =>
+        type.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicEndBlockPosition(type)
+            : ((TypeDeclarationSyntax)type).CloseBraceToken.SpanStart;
+
     /// <summary>The indentation of the line the type declaration sits on.</summary>
-    internal static string TypeIndentation(SourceText text, TypeDeclarationSyntax type)
+    internal static string TypeIndentation(SourceText text, SyntaxNode type)
     {
         var line = text.Lines.GetLineFromPosition(type.SpanStart);
         var prefix = text.ToString(TextSpan.FromBounds(line.Start, type.SpanStart));
@@ -306,9 +349,9 @@ public sealed class ImplementMembersService : IImplementMembersService
     }
 
     /// <summary>The indentation of the first existing member, or four spaces past the type's own line.</summary>
-    internal static string MemberIndentation(SourceText text, TypeDeclarationSyntax type)
+    internal static string MemberIndentation(SourceText text, SyntaxNode type)
     {
-        var member = type.Members.FirstOrDefault();
+        var member = FirstMember(type);
         if (member is not null)
         {
             var line = text.Lines.GetLineFromPosition(member.SpanStart);
@@ -318,6 +361,11 @@ public sealed class ImplementMembersService : IImplementMembersService
 
         return TypeIndentation(text, type) + "    ";
     }
+
+    private static SyntaxNode? FirstMember(SyntaxNode type) =>
+        type.SyntaxTree.Options.Language == LanguageNames.VisualBasic
+            ? VisualBasicFirstMember(type)
+            : ((TypeDeclarationSyntax)type).Members.FirstOrDefault();
 
     private static Document? FindDocument(Solution solution, string filePath)
     {

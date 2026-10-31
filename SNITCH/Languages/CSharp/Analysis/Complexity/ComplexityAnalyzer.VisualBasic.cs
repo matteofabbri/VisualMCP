@@ -115,6 +115,29 @@ public static partial class ComplexityAnalyzer
             _ => (null, null, unit.Kind().ToString(), 0),
         };
 
+    /// <summary>
+    /// Scores a bare VB subtree — a block, a condition — as if it were a method body.
+    /// <c>ScoreSubtree</c> runs the C# walk, so this is its VB counterpart for the reducer's yardstick:
+    /// how much would leave the host method if this subtree moved out of it.
+    /// </summary>
+    public static ComplexityMetrics ScoreVisualBasicSubtree(SyntaxNode subtree)
+    {
+        var walker = new VisualBasicWalker(string.Empty, self: null, model: null);
+        walker.VisitNode(subtree, 0);
+
+        var span = subtree.GetLocation().GetLineSpan();
+        var firstLine = span.StartLinePosition.Line + 1;
+        var lastLine = span.EndLinePosition.Line + 1;
+        var lines = Math.Max(1, lastLine - firstLine + 1);
+        var volume = HalsteadVolume(subtree);
+
+        return new ComplexityMetrics(
+            subtree.Kind().ToString(), subtree.Kind().ToString(), null, firstLine, lastLine,
+            walker.Cyclomatic, walker.Cognitive, walker.MaxNesting, lines,
+            ParameterCount: 0, volume, MaintainabilityIndex(volume, walker.Cyclomatic, lines),
+            RiskOf(walker.Cyclomatic, walker.Cognitive), walker.Contributions);
+    }
+
     private static int ParametersOf(ParameterListSyntax? list) => list?.Parameters.Count ?? 0;
 
     /// <summary>
