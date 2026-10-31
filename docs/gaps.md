@@ -16,8 +16,8 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (eighth revision: the test workflow closes — `debug_test`, `list_tests`,
-`run_affected_tests`, `continuous_testing` and `find_flaky_tests`, 333 → 338). The
+Last updated: 2026-10-31 (ninth revision: diagrams and exploration — type-level dependency graph, `call_graph`,
+`sequence_diagram`, `control_flow_graph`, `track_value` and `localization_report`, 338 → 343). The
 style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -34,7 +34,7 @@ style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection
 | [Decompiled code as a workspace](#5-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
 | [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 26 action ids now (guards incl. dictionary/enum/index, wrap, braces, loops incl. invert, if→switch, both interpolation directions, digit separators, argument name); the long tail is still the long tail |
 | [Refactoring gaps](#7-refactoring-gaps) | ⚠️ | Low | 41 of Rider's main set are there (`remove_params` and bidirectional call hierarchy arrived); the remaining names are listed |
-| [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ❌ | Low | Text/graph export exists; visual exploration does not |
+| [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ✅ | — | Graph artifacts (project/namespace/type, call, sequence, control flow), value tracking, localization and the explorers exist as data; drawing them is the client's |
 | [Version control and collaboration](#9-version-control-and-collaboration) | ⚠️ | Low | Git (including worktrees, bisect and submodules) and GitHub are covered; the rest of the VCS ecosystem is not |
 | [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish exist; package search is covered; installers and deployment targets do not |
 | [UI-bound features](#11-ui-bound-features--not-applicable-by-design) | 💀 | — | Deliberately out of scope for an MCP server |
@@ -392,26 +392,30 @@ is absent or partial, with the closest tool.
 
 ## 8. Architecture, diagrams and exploration
 
-`export_dependency_graph` emits DOT or Mermaid, and `analyze_dependencies`,
-`analyze_circular_namespace_dependencies`, `analyze_namespace_coupling`, `check_layer_violations` and
-`get_cohesion_metrics` give the numbers. What does not exist is the visual, interactive side:
+The numbers and the diagram data are both here; what remains is the rendering, which an MCP server
+returns as text for the client (section 11):
 
-- type dependency diagram, project graph view, namespace graph view (only a text format for external
-  renderers);
-- sequence diagram, call graph visualisation, control-flow graph view;
-- **value tracking** (where a value comes from, origin → destination);
-- structure view / file structure popup, breadcrumbs, bookmarks, recent files/edits;
-- code vision (references/usages above a declaration), inlay hints;
-- spelling inspection, **localization analysis** (hard-coded strings, unused `.resx` entries, missing
-  translations);
-- assembly explorer, NuGet tool window, solution explorer.
+- **Graphs as artifacts**: `export_dependency_graph` at project, namespace and **type** level
+  (`analyze_dependencies`, `analyze_circular_namespace_dependencies`, `analyze_namespace_coupling` and
+  `check_layer_violations` remain the numbers); `call_graph` (incoming/outgoing, a depth, Mermaid/DOT);
+  `sequence_diagram` (static call order); `control_flow_graph` (Roslyn basic blocks, branch conditions and
+  try regions).
+- **Value tracking**: `track_value` lists the definitions (writes, including the declaration) and the uses
+  (reads) of a symbol under a position, each with file:line, member and snippet.
+- **Structure view / file structure**: `reference_index action=outline` (a file's declarations) and
+  `get_type_members`; breadcrumbs are the client's. Recent files/edits: `edit_history` and `command_log`.
+- **Code vision**: the data is `reference_index action=refs`/`callers`; inlay hints are editor UI.
+- **Localization analysis**: `localization_report` — unused `.resx` keys, missing translations per culture,
+  extra keys, and user-facing literals as candidates. Spelling: `find_spelling_issues`.
+- **Explorers**: an assembly explorer is `assembly_workspace`/`inspect_assembly`, the NuGet tool window is
+  `list_nuget_packages`/`check_nuget_updates`, the solution explorer is `solution_map`/`read_tree`.
 
 Implemented 2026-10-30: the **endpoints view** (`find_endpoints`), the **TODO explorer**
 (`find_todos`), **go to file** by fuzzy/CamelHumps name (`find_file`), **stack-trace analysis**
 (`analyze_stack_trace`) and the codebase map (`solution_map`).
 
 `plan_feature_change` produces an ordered text plan with impact counts; it is not a clickable impact
-graph.
+graph — `impact` counts plus `export_dependency_graph` are the data behind one.
 
 ---
 

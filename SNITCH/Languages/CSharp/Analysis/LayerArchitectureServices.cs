@@ -154,8 +154,8 @@ public sealed class CheckLayerViolationsService : ICheckLayerViolationsService
 
 /// <summary>
 /// Exports the dependency graph in a shape a diagram tool understands — Graphviz DOT or Mermaid — at
-/// project or namespace level. `analyze_dependencies` answers the question in JSON; this produces the
-/// artifact you paste into a document.
+/// project, namespace or type level. `analyze_dependencies` answers the question in JSON; this produces
+/// the artifact you paste into a document.
 /// </summary>
 public interface IExportDependencyGraphService
 {
@@ -164,6 +164,9 @@ public interface IExportDependencyGraphService
 
 public sealed class ExportDependencyGraphService : IExportDependencyGraphService
 {
+    /// <summary>Upper bound on type nodes: a diagram with more is unreadable, and the answer says so.</summary>
+    private const int MaxTypeNodes = 300;
+
     private readonly IRoslynWorkspace _workspace;
 
     public ExportDependencyGraphService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -175,30 +178,64 @@ public sealed class ExportDependencyGraphService : IExportDependencyGraphService
             return new { error = "format must be dot or mermaid." };
 
         var scope = (level ?? "projects").Trim().ToLowerInvariant();
-        if (scope is not ("projects" or "namespaces"))
-            return new { error = "level must be projects or namespaces." };
+        if (scope is not ("projects" or "namespaces" or "types"))
+            return new { error = "level must be projects, namespaces or types." };
 
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
 
         var edges = new List<(string From, string To)>();
+        var truncated = false;
+        var totalNodes = 0;
 
-        if (scope == "projects")
+        switch (scope)
         {
-            var names = solution.Projects.ToDictionary(project => project.Id, project => project.Name);
-            edges.AddRange(solution.Projects
-                .SelectMany(project => project.ProjectReferences
-                    .Where(reference => names.ContainsKey(reference.ProjectId))
-                    .Select(reference => (From: names[project.Id], To: names[reference.ProjectId]))));
-        }
-        else
-        {
-            var collected = await NamespaceEdges.CollectAsync(solution, null, cancellationToken);
-            edges.AddRange(collected.Select(edge => (edge.From, edge.To)).Distinct());
+            case "projects":
+            {
+                var names = solution.Projects.ToDictionary(project => project.Id, project => project.Name);
+                edges.AddRange(solution.Projects
+                    .SelectMany(project => project.ProjectReferences
+                        .Where(reference => names.ContainsKey(reference.ProjectId))
+                        .Select(reference => (From: names[project.Id], To: names[reference.ProjectId]))));
+                break;
+            }
+
+            case "namespaces":
+            {
+                var collected = await NamespaceEdges.CollectAsync(solution, null, cancellationToken);
+                edges.AddRange(collected.Select(edge => (edge.From, edge.To)).Distinct());
+                break;
+            }
+
+            default:
+            {
+                var collected = await TypeEdgesAsync(solution, cancellationToken);
+                totalNodes = collected.Nodes;
+                edges.AddRange(collected.Edges);
+                break;
+            }
         }
 
-        var nodes = edges.SelectMany(edge => new[] { edge.From, edge.To }).Distinct(StringComparer.Ordinal).OrderBy(name => name).ToList();
+        var allNodes = edges.SelectMany(edge => new[] { edge.From, edge.To }).Distinct(StringComparer.Ordinal).OrderBy(name => name).ToList();
+        if (allNodes.Count > MaxTypeNodes)
+        {
+            // Keep the most connected types: a graph cut at 300 nodes has to be the interesting 300.
+            var degree = allNodes.ToDictionary(name => name, _ => 0, StringComparer.Ordinal);
+            foreach (var (from, to) in edges)
+            {
+                degree[from]++;
+                degree[to]++;
+            }
+
+            var kept = allNodes.OrderByDescending(name => degree[name]).ThenBy(name => name, StringComparer.Ordinal)
+                .Take(MaxTypeNodes).ToHashSet(StringComparer.Ordinal);
+            edges = edges.Where(edge => kept.Contains(edge.From) && kept.Contains(edge.To)).ToList();
+            allNodes = kept.OrderBy(name => name, StringComparer.Ordinal).ToList();
+            truncated = true;
+        }
+
+        var nodes = allNodes;
         var graph = kind == "dot" ? Dot(nodes, edges) : Mermaid(nodes, edges);
 
         return new
@@ -208,9 +245,59 @@ public sealed class ExportDependencyGraphService : IExportDependencyGraphService
             level = scope,
             nodeCount = nodes.Count,
             edgeCount = edges.Distinct().Count(),
+            typeNodesFound = totalNodes > 0 ? totalNodes : (int?)null,
+            truncated,
             graph,
         };
     }
+
+    /// <summary>
+    /// The type-level edges: for each type declared in source, the types its own code names — fields,
+    /// parameters, returns, casts, creations and generic arguments all land in one edge set, deduplicated.
+    /// </summary>
+    private static async Task<(List<(string From, string To)> Edges, int Nodes)> TypeEdgesAsync(
+        Solution solution, CancellationToken cancellationToken)
+    {
+        var edges = new List<(string From, string To)>();
+        var nodes = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var project in solution.Projects)
+        {
+            foreach (var document in project.Documents.Where(document => document.SourceCodeKind == SourceCodeKind.Regular))
+            {
+                var root = await document.GetSyntaxRootAsync(cancellationToken);
+                var model = await document.GetSemanticModelAsync(cancellationToken);
+                if (root is null || model is null) continue;
+
+                foreach (var declaration in root.DescendantNodes().OfType<BaseTypeDeclarationSyntax>())
+                {
+                    if (model.GetDeclaredSymbol(declaration, cancellationToken) is not INamedTypeSymbol source) continue;
+                    var from = Display(source);
+                    nodes.Add(from);
+
+                    foreach (var name in declaration.DescendantNodes().OfType<SimpleNameSyntax>())
+                    {
+                        if (model.GetSymbolInfo(name, cancellationToken).Symbol is not INamedTypeSymbol target) continue;
+                        if (target.TypeKind is TypeKind.Error) continue;
+                        // Only types the solution declares: a metadata type is a dependency, not a node.
+                        if (target.DeclaringSyntaxReferences.Length == 0) continue;
+                        if (SymbolEqualityComparer.Default.Equals(target, source)) continue;
+
+                        var to = Display(target);
+                        if (to == from) continue;
+
+                        nodes.Add(to);
+                        edges.Add((from, to));
+                    }
+                }
+            }
+        }
+
+        return (edges.Distinct().ToList(), nodes.Count);
+    }
+
+    private static string Display(INamedTypeSymbol type) =>
+        type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 
     private static string Dot(IReadOnlyList<string> nodes, IReadOnlyList<(string From, string To)> edges)
     {

@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **338 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **343 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -125,7 +125,12 @@ Conventions:
 | `find_performance_anti_patterns` | Allocation shapes read out of the code with the type model: `string +=` in a loop, a LINQ materialiser inside a loop, a collection or constant-size array allocated per iteration |
 | `analyze_dependencies` | Project reference graph, cycles and root projects |
 | `check_layer_violations` | Layer rules over real type usage: every dependency that points back up, with file and line |
-| `export_dependency_graph` | The project or namespace dependency graph as Graphviz DOT or Mermaid |
+| `export_dependency_graph` | The project, namespace or type dependency graph as Graphviz DOT or Mermaid (the type graph is cut at 300 nodes, most connected first) |
+| `call_graph` | The call graph of a method as Mermaid/DOT: callers, callees or both, walked to a depth |
+| `sequence_diagram` | The static call order of a method as a Mermaid sequence diagram |
+| `control_flow_graph` | A method body's control-flow graph: Roslyn basic blocks, branch conditions, try/catch regions |
+| `track_value` | The definitions (writes) and uses (reads) of the symbol on a line, with file:line, member and snippet |
+| `localization_report` | Unused `.resx` keys, missing translations per culture, extra keys, and user-facing literals as candidates |
 | `analyze_circular_namespace_dependencies` | Namespace-level cycles, computed from actual type usage |
 | `analyze_dependency_injection` | Captive dependencies, duplicate registrations, unresolved services, constructor bloat, service locator |
 | `analyze_namespace_coupling` | Afferent/efferent coupling, instability, abstractness, distance from the main sequence |

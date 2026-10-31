@@ -130,6 +130,12 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Analysis.IFindMissingValidationService, Languages.CSharp.Analysis.FindMissingValidationService>();
         services.AddSingleton<Languages.CSharp.Analysis.IAnalyzeNullabilityService, Languages.CSharp.Analysis.AnalyzeNullabilityService>();
         services.AddSingleton<Languages.CSharp.Analysis.IFindBreakingChangesService, Languages.CSharp.Analysis.FindBreakingChangesService>();
+        // Diagrams and exploration: the graph artifacts a client renders (call graph, sequence, control flow),
+        // value tracking and the localization view.
+        services.AddSingleton<Languages.CSharp.Diagrams.ICallDiagramService, Languages.CSharp.Diagrams.CallDiagramService>();
+        services.AddSingleton<Languages.CSharp.Diagrams.IControlFlowGraphService, Languages.CSharp.Diagrams.ControlFlowGraphService>();
+        services.AddSingleton<Languages.CSharp.Navigation.IValueTrackingService, Languages.CSharp.Navigation.ValueTrackingService>();
+        services.AddSingleton<Languages.CSharp.Analysis.ILocalizationService, Languages.CSharp.Analysis.LocalizationService>();
         services.AddSingleton<Languages.CSharp.Analysis.Performance.IPerformanceAnalyzer, Languages.CSharp.Analysis.Performance.PerformancePatternAnalyzer>();
 
         // C# refactoring services (logic moved from the MCP tool layer).

@@ -54,7 +54,7 @@ static async Task RunServerAsync(string[] args)
         "assembly's surface is actually used for -> find_external_usages. Whether a change altered BEHAVIOUR (tests run on the " +
         "working tree and on a git revision in a detached worktree, outcomes diffed per test) -> verify_change.\n" +
         "- Architecture and quality questions: are the layer rules respected (a dependency pointing back up, with file:line) -> " +
-        "check_layer_violations; the dependency graph as a DOT/Mermaid diagram -> export_dependency_graph; is this class " +
+        "check_layer_violations; the dependency graph as a DOT/Mermaid diagram (projects, namespaces, TYPES) -> export_dependency_graph; is this class " +
         "really two classes (LCOM4) -> get_cohesion_metrics; test suite quality (no assert, empty, unreadable names, async void) -> " +
         "analyze_test_quality; public parameters that are never null-checked -> find_missing_validation; where nullable reference " +
         "types actually protect (suppressions, CS86xx) -> analyze_nullability; what a branch breaks in the public API -> " +
@@ -69,6 +69,10 @@ static async Task RunServerAsync(string[] args)
         "one call: it ranks the solution, lowers the worst methods with reduce_complexity's moves (extract block, name the " +
         "boolean, guard clause), re-measures and reports before/after — use reduce_complexity only when you already know the " +
         "exact method. Both are compiler-gated and preview by default.\n" +
+        "- See a shape instead of a list: the call graph of a method (Mermaid/DOT, incoming/outgoing, a depth) -> call_graph; " +
+        "the STATIC call order as a Mermaid sequence diagram -> sequence_diagram; a method's control-flow graph (blocks, " +
+        "branch conditions, try regions) -> control_flow_graph; where a value is written and read -> track_value; the " +
+        "localization view (.resx keys nothing references, missing translations, user-facing literals) -> localization_report.\n" +
         "- Razor pages/views (.cshtml) and Blazor components (.razor): list and outline them (kind, @page route, @model, " +
         "layout, sections, @inject, handlers) -> razor_pages; markup/accessibility/maintainability problems with file:line " +
         "and a fix -> analyze_razor_pages; security audit (XSS, CSRF, secrets, CSP) with CWE ids -> find_razor_vulnerabilities. " +
