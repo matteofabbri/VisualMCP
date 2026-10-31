@@ -159,6 +159,15 @@ Il database è `<solution>/.visualMCP/visualmcp.db`, SQLite, scoping per soluzio
 l'unica verità. Un dato senza hash di freschezza produce analisi stantie, e le analisi stantie sono
 peggiori della lentezza perché sono silenziose.
 
+Lo **schema è un modello EF Core**, non sei stringhe di `CREATE TABLE`: `SNITCH/Storage/Schema/`
+(`VisualMcpDbContext.cs` dichiara tabelle, chiavi, indici e colonne; `VisualMcpSchema.cs` genera lo script
+dal modello e crea solo ciò che manca). I sei store — `VisualMcpStore`, board, indice testuale, metacode,
+simboli, nativo — scrivono ancora SQL a mano sulle proprie connessioni, perché diversi percorsi
+(bulk insert dell'indice, transazioni, blob compressi) una query provider li renderebbe solo opachi; ma
+nessuno di loro possiede più il DDL. Le due eccezioni al modello sono dichiarate: `ti_line` è una tabella
+virtuale FTS5 e resta SQL in `VisualMcpSchema`, e `applied_edit.before_text` viene aggiunta in loco su un
+database creato prima che la colonna esistesse.
+
 | Dato | Stato | Chiave | A cosa serve |
 |---|---|---|---|
 | Report di ispezione | ✅ | path documento + mtime | non ricalcolare `inspect_code` a ogni chiamata |

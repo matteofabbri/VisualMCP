@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Snitch.Storage.Schema;
 
 namespace Snitch.Search;
 
@@ -37,33 +38,6 @@ public sealed record TextContextLine(int Line, string Text);
 /// </remarks>
 public sealed class TextIndexStore : IDisposable
 {
-    private const string Schema = """
-        CREATE TABLE IF NOT EXISTS ti_document (
-            path       TEXT PRIMARY KEY,
-            kind       TEXT NOT NULL,
-            length     INTEGER NOT NULL,
-            modified   INTEGER NOT NULL,
-            hash       TEXT NOT NULL,
-            lines      INTEGER NOT NULL,
-            indexed_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS ti_row (
-            path TEXT NOT NULL,
-            line INTEGER NOT NULL,
-            rowid INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ti_row_path ON ti_row (path);
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS ti_line USING fts5(
-            path  UNINDEXED,
-            line  UNINDEXED,
-            text  UNINDEXED,
-            words,
-            tokenize = 'unicode61 remove_diacritics 2'
-        );
-        """;
-
     /// <summary>The weight of the indexed column in bm25; the payload columns are not searchable.</summary>
     private const string Rank = "bm25(ti_line, 0.0, 0.0, 0.0, 1.0)";
 
@@ -104,11 +78,7 @@ public sealed class TextIndexStore : IDisposable
                     pragma.ExecuteNonQuery();
                 }
 
-                using (var schema = connection.CreateCommand())
-                {
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                }
+                VisualMcpSchema.Ensure(connection);
 
                 _connection = connection;
                 _path = databasePath;

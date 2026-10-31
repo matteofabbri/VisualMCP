@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using Snitch.Storage.Schema;
 using Snitch.Workspace;
 
 namespace Snitch.Storage;
@@ -119,67 +120,6 @@ public interface IVisualMcpStore
 /// </summary>
 public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 {
-    private const string Schema = """
-        CREATE TABLE IF NOT EXISTS context (
-            key        TEXT PRIMARY KEY,
-            value      TEXT NOT NULL,
-            stamp      TEXT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS command_log (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            occurred_at TEXT NOT NULL,
-            date        TEXT NOT NULL,
-            time        TEXT NOT NULL,
-            tool        TEXT NOT NULL,
-            arguments   TEXT NULL
-        );
-        CREATE INDEX IF NOT EXISTS command_log_at ON command_log (occurred_at DESC);
-
-        CREATE TABLE IF NOT EXISTS applied_edit (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            applied_at   TEXT NOT NULL,
-            tool         TEXT NOT NULL,
-            rules        TEXT NULL,
-            file         TEXT NOT NULL,
-            before_hash  TEXT NOT NULL,
-            after_hash   TEXT NOT NULL,
-            before_chars INTEGER NOT NULL,
-            after_chars  INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS applied_edit_file ON applied_edit (file, applied_at DESC);
-
-        CREATE TABLE IF NOT EXISTS package_fact (
-            project TEXT NOT NULL,
-            id      TEXT NOT NULL,
-            version TEXT NOT NULL,
-            tfm     TEXT NOT NULL,
-            direct  INTEGER NOT NULL,
-            PRIMARY KEY (project, id, tfm)
-        );
-
-        CREATE TABLE IF NOT EXISTS package_dependency (
-            project        TEXT NOT NULL,
-            parent_id      TEXT NOT NULL,
-            parent_version TEXT NOT NULL,
-            tfm            TEXT NOT NULL,
-            child_id       TEXT NOT NULL,
-            child_version  TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS package_dependency_parent ON package_dependency (project, parent_id);
-        CREATE INDEX IF NOT EXISTS package_dependency_child  ON package_dependency (project, child_id);
-
-        CREATE TABLE IF NOT EXISTS decompiled_artifact (
-            mvid       TEXT PRIMARY KEY,
-            assembly   TEXT NOT NULL,
-            name       TEXT NOT NULL,
-            directory  TEXT NOT NULL,
-            types      INTEGER NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        """;
-
     private readonly IRoslynWorkspace _workspace;
     private readonly object _gate = new();
     private SqliteConnection? _connection;
@@ -615,9 +555,11 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
                 using (var command = connection.CreateCommand())
                 {
-                    command.CommandText = Schema;
+                    command.CommandText = "PRAGMA busy_timeout=5000;";
                     command.ExecuteNonQuery();
                 }
+
+                VisualMcpSchema.Ensure(connection);
 
                 // A database created before the history kept file contents gains the column in place.
                 EnsureColumn(connection, "applied_edit", "before_text", "BLOB");

@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Snitch.Storage;
+using Snitch.Storage.Schema;
 
 namespace Snitch.Planning;
 
@@ -43,41 +44,6 @@ public sealed class BoardService : IBoardService
     public static readonly string[] Statuses = ["backlog", "todo", "in_progress", "review", "done"];
 
     private static readonly string[] Priorities = ["lowest", "low", "medium", "high", "highest"];
-
-    private const string Schema = """
-        CREATE TABLE IF NOT EXISTS board_item (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            title       TEXT NOT NULL,
-            description TEXT NULL,
-            status      TEXT NOT NULL,
-            priority    TEXT NOT NULL,
-            labels      TEXT NULL,
-            assignee    TEXT NULL,
-            position    INTEGER NOT NULL,
-            created_at  TEXT NOT NULL,
-            updated_at  TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS board_item_status ON board_item (status, position);
-
-        CREATE TABLE IF NOT EXISTS board_comment (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_id    INTEGER NOT NULL,
-            author     TEXT NULL,
-            body       TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS board_comment_item ON board_comment (item_id);
-
-        CREATE TABLE IF NOT EXISTS board_history (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_id   INTEGER NOT NULL,
-            field     TEXT NOT NULL,
-            old_value TEXT NULL,
-            new_value TEXT NULL,
-            at        TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS board_history_item ON board_history (item_id);
-        """;
 
     private readonly IVisualMcpStore _store;
 
@@ -734,11 +700,7 @@ public sealed class BoardService : IBoardService
         {
             using var connection = new SqliteConnection($"Data Source={path}");
             connection.Open();
-            using (var schema = connection.CreateCommand())
-            {
-                schema.CommandText = Schema;
-                schema.ExecuteNonQuery();
-            }
+            VisualMcpSchema.Ensure(connection);
 
             return Task.FromResult(work(connection));
         }

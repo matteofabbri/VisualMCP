@@ -28,7 +28,7 @@ service declared here. The library has no dependency on MCP, on a client, or on 
 | `Languages/` | the per-language layers — [Languages/README.md](Languages/README.md) |
 | `Libraries/` | the host-agnostic libraries — [Libraries/README.md](Libraries/README.md) |
 | `Search/` | `search_text` and the FTS5 full-text index over the solution store |
-| `Storage/` | `VisualMcpStore` (SQLite at `<solution>/.visualMCP/visualmcp.db`), command log, edit history |
+| `Storage/` | `VisualMcpStore` (SQLite at `<solution>/.visualMCP/visualmcp.db`), the EF Core schema model, command log, edit history |
 | `Execution/` | build, publish, pack, run, EF migrations, environment info, `run_command`, `stop_server` |
 | `Debugging/` | DAP client, netcoredbg discovery and installation, breakpoints, sessions |
 | `Git/`, `GitHub/`, `Docker/` | CLI wrappers that return structured results |
@@ -71,6 +71,12 @@ JIT-compiled. In a host, a `Microsoft.Build.*` package reference must carry
 **The store is derived data.** `<solution>/.visualMCP/visualmcp.db` holds facts reconstructed
 from the tree (indexes, package facts, logs, board, edit history) and never becomes the source of
 truth. It is git-ignored.
+
+**The schema is the model, not a string.** Every table of that database — the six stores that own
+tables included — is declared once in `Storage/Schema/VisualMcpDbContext.cs`, and
+`VisualMcpSchema.Ensure(connection)` creates from it whatever a file is missing. A store that needs a
+new table adds an entity, not a `CREATE TABLE`; the FTS5 virtual table (`ti_line`) is the one shape the
+relational model cannot express and stays raw SQL in `VisualMcpSchema`.
 
 ## Adding a service
 

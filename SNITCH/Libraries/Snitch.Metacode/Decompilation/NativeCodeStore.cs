@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Snitch.Metacode.Analysis;
 using Snitch.Metacode.Rendering;
 using Snitch.Storage;
+using Snitch.Storage.Schema;
 
 namespace Snitch.Metacode.Decompilation;
 
@@ -94,51 +95,6 @@ public interface INativeCodeStore
 /// </summary>
 public sealed class NativeCodeStore : INativeCodeStore, IDisposable
 {
-    private const string Schema = """
-        CREATE TABLE IF NOT EXISTS native_artifact (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            sha256     TEXT NOT NULL UNIQUE,
-            binary     TEXT NOT NULL,
-            path       TEXT NOT NULL,
-            image      TEXT NOT NULL,
-            language   TEXT NOT NULL,
-            entry      TEXT NOT NULL,
-            image_base TEXT NOT NULL,
-            functions  INTEGER NOT NULL,
-            size_bytes INTEGER NOT NULL,
-            ghidra     TEXT NULL,
-            headless   TEXT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS native_function (
-            artifact   INTEGER NOT NULL,
-            ordinal    INTEGER NOT NULL,
-            name       TEXT NOT NULL,
-            entry      TEXT NOT NULL,
-            signature  TEXT NOT NULL,
-            size       INTEGER NOT NULL,
-            decompiled TEXT NOT NULL,
-            pseudocode TEXT NOT NULL,
-            cyclomatic INTEGER NOT NULL,
-            cognitive  INTEGER NOT NULL,
-            max_nesting INTEGER NOT NULL,
-            statements INTEGER NOT NULL,
-            branches   INTEGER NOT NULL,
-            PRIMARY KEY (artifact, ordinal)
-        );
-        CREATE INDEX IF NOT EXISTS native_function_name ON native_function (artifact, name);
-        CREATE INDEX IF NOT EXISTS native_function_entry ON native_function (artifact, entry);
-
-        CREATE TABLE IF NOT EXISTS native_call (
-            artifact INTEGER NOT NULL,
-            caller   TEXT NOT NULL,
-            callee   TEXT NOT NULL,
-            PRIMARY KEY (artifact, caller, callee)
-        );
-        CREATE INDEX IF NOT EXISTS native_call_callee ON native_call (artifact, callee);
-        """;
-
     private const string ArtifactColumns = """
         id, sha256, binary, path, image, language, entry, image_base, functions, size_bytes,
         ghidra, headless, created_at
@@ -746,11 +702,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
                     pragma.ExecuteNonQuery();
                 }
 
-                using (var schema = connection.CreateCommand())
-                {
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                }
+                VisualMcpSchema.Ensure(connection);
 
                 _connection = connection;
                 _path = database;

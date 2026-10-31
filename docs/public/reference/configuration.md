@@ -142,9 +142,14 @@ with a freshness key goes in it; the source on disk stays the only truth.
 | Activity | `command_log`, `applied_edit`, `context` | Tool-call log; file writes with the previous text; cached inspection reports and settings such as `dashboard.port` |
 | Board | `board_item`, `board_comment`, `board_history` | Kanban cards, comments, change history |
 | Symbol index | `si_document`, `si_symbol`, `si_usage`, `si_metacode` | Documents with content hashes, declarations, typed usages, one metacode tree per declaration |
+| Metacode index | `mc_document`, `mc_tree`, `source_document` | Pseudocode trees with their complexity, and each file as its own language writes it |
 | Full-text index | `ti_document`, `ti_row`, `ti_line` (FTS5) | One row per line, identifiers split into words, BM25 ranking |
 | Packages | `package_fact`, `package_dependency` | Resolved NuGet graph from `obj/project.assets.json` |
-| Artifacts | `decompiled_artifact` | Decompiled assemblies keyed on MVID |
+| Artifacts | `decompiled_artifact`, `native_artifact`, `native_function`, `native_call` | Decompiled assemblies keyed on MVID; functions and call edges recovered from native binaries |
+
+The schema is defined once as an EF Core model (`SNITCH/Storage/Schema/VisualMcpDbContext.cs`) and created
+from it: opening a store adds the tables and indexes that file is missing, and creates no columns. The FTS5
+virtual table `ti_line` is the one shape the model cannot describe and stays raw SQL in `VisualMcpSchema`.
 
 Add `.visualMCP/` to `.gitignore`: it is a per-machine cache. Deleting it costs a rebuild of the indexes,
 not data — except the board, which is deliberate project data stored in the same file.

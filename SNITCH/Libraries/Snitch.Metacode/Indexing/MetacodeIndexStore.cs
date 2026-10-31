@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Snitch.Storage.Schema;
 
 namespace Snitch.Metacode.Indexing;
 
@@ -26,55 +27,6 @@ namespace Snitch.Metacode.Indexing;
 /// </remarks>
 public sealed class MetacodeIndexStore : IDisposable
 {
-    private const string Schema = """
-        CREATE TABLE IF NOT EXISTS mc_document (
-            path         TEXT PRIMARY KEY,
-            project      TEXT NOT NULL,
-            hash         TEXT NOT NULL,
-            mtime        INTEGER NOT NULL,
-            language     TEXT NOT NULL,
-            declarations INTEGER NOT NULL,
-            nodes        INTEGER NOT NULL,
-            diagnostics  INTEGER NOT NULL,
-            indexed_at   TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS mc_tree (
-            declaration_key TEXT NOT NULL,
-            path            TEXT NOT NULL,
-            kind            TEXT NOT NULL,
-            name            TEXT NOT NULL,
-            line            INTEGER NOT NULL,
-            col             INTEGER NOT NULL,
-            end_line        INTEGER NOT NULL,
-            cyclomatic      INTEGER NOT NULL,
-            cognitive       INTEGER NOT NULL,
-            max_nesting     INTEGER NOT NULL,
-            statements      INTEGER NOT NULL,
-            branches        INTEGER NOT NULL,
-            expressions     INTEGER NOT NULL,
-            text            BLOB NOT NULL,
-            doc_hash        TEXT NOT NULL,
-            PRIMARY KEY (declaration_key, path, line, name)
-        );
-        CREATE INDEX IF NOT EXISTS mc_tree_path ON mc_tree (path);
-        CREATE INDEX IF NOT EXISTS mc_tree_name ON mc_tree (name);
-        CREATE INDEX IF NOT EXISTS mc_tree_kind ON mc_tree (kind);
-        CREATE INDEX IF NOT EXISTS mc_tree_cc   ON mc_tree (cyclomatic);
-
-        CREATE TABLE IF NOT EXISTS source_document (
-            path       TEXT PRIMARY KEY,
-            project    TEXT NOT NULL,
-            language   TEXT NOT NULL,
-            hash       TEXT NOT NULL,
-            mtime      INTEGER NOT NULL,
-            chars      INTEGER NOT NULL,
-            lines      INTEGER NOT NULL,
-            text       TEXT NOT NULL,
-            indexed_at TEXT NOT NULL
-        );
-        """;
-
     private const string TreeColumns = """
         declaration_key, path, kind, name, line, col, end_line, cyclomatic, cognitive,
         max_nesting, statements, branches, expressions, text
@@ -127,11 +79,7 @@ public sealed class MetacodeIndexStore : IDisposable
                     pragma.ExecuteNonQuery();
                 }
 
-                using (var schema = connection.CreateCommand())
-                {
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                }
+                VisualMcpSchema.Ensure(connection);
 
                 _connection = connection;
                 _path = databasePath;

@@ -64,9 +64,16 @@ inputs**. The source on disk remains the only truth.
 | Activity | `command_log`, `applied_edit`, `context` | Every tool call; every file this server wrote (with the previous text, compressed); cached inspection reports and small settings |
 | Board | `board_item`, `board_comment`, `board_history` | A kanban card, its comments, its change history |
 | Symbol index | `si_document`, `si_symbol`, `si_usage`, `si_metacode` | Declarations, typed usages (call/read/write/…), and one metacode tree per declaration |
+| Metacode index | `mc_document`, `mc_tree`, `source_document` | One pseudocode tree per declaration, its complexity, and the file as its own language writes it |
 | Full-text index | `ti_document`, `ti_row`, `ti_line` (FTS5) | One row per line, identifiers split into words, BM25 ranking |
 | Packages | `package_fact`, `package_dependency` | The resolved NuGet graph from `obj/project.assets.json` |
-| Artifacts | `decompiled_artifact` | Decompiled assemblies keyed on their MVID |
+| Artifacts | `decompiled_artifact`, `native_artifact`, `native_function`, `native_call` | Decompiled assemblies keyed on their MVID; functions and call edges recovered from a native binary |
+
+The tables are created from one **EF Core model** (`SNITCH/Storage/Schema/VisualMcpDbContext.cs`), which is
+the schema's only definition: a fresh database and one written by an older build get the same tables, and
+opening a store adds whatever that file is missing without touching what is there. The one exception is
+`ti_line`, an FTS5 virtual table that a relational model cannot describe, so its DDL is kept in SQL. Reads
+and writes stay in tuned SQL on the stores' own connections; EF Core owns the schema, not the hot paths.
 
 Two consequences worth knowing:
 

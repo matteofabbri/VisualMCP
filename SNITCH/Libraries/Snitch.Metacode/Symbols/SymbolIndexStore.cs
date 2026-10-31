@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Snitch.Storage.Schema;
 
 namespace Snitch.Metacode.Symbols;
 
@@ -17,81 +18,6 @@ namespace Snitch.Metacode.Symbols;
 /// </remarks>
 public sealed class SymbolIndexStore : IDisposable
 {
-    private const string Schema = """
-        CREATE TABLE IF NOT EXISTS si_symbol (
-            symbol_key     TEXT NOT NULL,
-            name           TEXT NOT NULL,
-            display        TEXT NOT NULL,
-            signature      TEXT NOT NULL,
-            kind           TEXT NOT NULL,
-            accessibility  TEXT NOT NULL,
-            modifiers      TEXT NOT NULL,
-            container_key  TEXT NOT NULL,
-            container_name TEXT NOT NULL,
-            namespace      TEXT NOT NULL,
-            is_static      INTEGER NOT NULL,
-            is_abstract    INTEGER NOT NULL,
-            is_virtual     INTEGER NOT NULL,
-            is_override    INTEGER NOT NULL,
-            is_extension   INTEGER NOT NULL,
-            arity          INTEGER NOT NULL,
-            summary        TEXT NULL,
-            project        TEXT NOT NULL,
-            path           TEXT NOT NULL,
-            start          INTEGER NOT NULL,
-            length         INTEGER NOT NULL,
-            line           INTEGER NOT NULL,
-            col            INTEGER NOT NULL,
-            end_line       INTEGER NOT NULL,
-            end_col        INTEGER NOT NULL,
-            doc_hash       TEXT NOT NULL,
-            PRIMARY KEY (symbol_key, path, start)
-        );
-        CREATE INDEX IF NOT EXISTS si_symbol_name      ON si_symbol (name);
-        CREATE INDEX IF NOT EXISTS si_symbol_container ON si_symbol (container_key);
-        CREATE INDEX IF NOT EXISTS si_symbol_path      ON si_symbol (path);
-        CREATE INDEX IF NOT EXISTS si_symbol_kind      ON si_symbol (kind);
-
-        CREATE TABLE IF NOT EXISTS si_usage (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol_key    TEXT NOT NULL,
-            name          TEXT NOT NULL,
-            kind          TEXT NOT NULL,
-            container_key TEXT NOT NULL,
-            path          TEXT NOT NULL,
-            start         INTEGER NOT NULL,
-            length        INTEGER NOT NULL,
-            line          INTEGER NOT NULL,
-            col           INTEGER NOT NULL,
-            doc_hash      TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS si_usage_key       ON si_usage (symbol_key);
-        CREATE INDEX IF NOT EXISTS si_usage_container ON si_usage (container_key);
-        CREATE INDEX IF NOT EXISTS si_usage_kind      ON si_usage (kind);
-        CREATE INDEX IF NOT EXISTS si_usage_path      ON si_usage (path);
-
-        CREATE TABLE IF NOT EXISTS si_document (
-            path         TEXT PRIMARY KEY,
-            project      TEXT NOT NULL,
-            hash         TEXT NOT NULL,
-            declarations INTEGER NOT NULL,
-            usages       INTEGER NOT NULL,
-            indexed_at   TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS si_metacode (
-            symbol_key TEXT NOT NULL,
-            path       TEXT NOT NULL,
-            kind       TEXT NOT NULL,
-            name       TEXT NOT NULL,
-            line       INTEGER NOT NULL,
-            text       BLOB NOT NULL,
-            doc_hash   TEXT NOT NULL,
-            PRIMARY KEY (symbol_key, path)
-        );
-        CREATE INDEX IF NOT EXISTS si_metacode_path ON si_metacode (path);
-        """;
-
     private const string DeclarationColumns = """
         symbol_key, name, display, signature, kind, accessibility, modifiers, container_key, container_name,
         namespace, is_static, is_abstract, is_virtual, is_override, is_extension, arity, summary, project,
@@ -138,11 +64,7 @@ public sealed class SymbolIndexStore : IDisposable
                     pragma.ExecuteNonQuery();
                 }
 
-                using (var schema = connection.CreateCommand())
-                {
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                }
+                VisualMcpSchema.Ensure(connection);
 
                 _connection = connection;
                 _path = databasePath;
