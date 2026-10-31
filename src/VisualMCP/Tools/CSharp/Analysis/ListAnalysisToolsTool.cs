@@ -83,7 +83,31 @@ public static class ListAnalysisToolsTool
             {
                 name        = "find_unused_symbols",
                 trigger     = "Unused public API, dead types or methods, candidates for removal",
-                description = "Finds public/internal types and members with zero references in the solution. Slow on large solutions.",
+                description = "Finds public/internal types and members with zero references in the solution, and reports separately the ones a framework calls by convention (frameworkInvoked). Slow on large solutions.",
+            },
+            new
+            {
+                name        = "find_reflection_usage",
+                trigger     = "Is this symbol only reached by reflection? Activator/Type.GetType/GetMethod/Assembly.Load call sites",
+                description = "Lists the reflective lookups with the name each one uses, and resolves the names that match a declaration in the solution. A resolved name is what makes a dead-code result safe to read.",
+            },
+            new
+            {
+                name        = "list_generated_sources",
+                trigger     = "Is that type generated? Which source generators does the project use, and what did they emit",
+                description = "Reports the generator references and the syntax trees they produced per project. Generated trees exist in the compilation but not as documents, so navigation and read_symbol cannot address them.",
+            },
+            new
+            {
+                name        = "find_external_usages",
+                trigger     = "What do we use from a referenced library, which package members are actually called",
+                description = "Reports the types and members of assemblies outside the solution that it uses, with call sites and a per-assembly summary. Framework assemblies are excluded unless includeFramework=true.",
+            },
+            new
+            {
+                name        = "framework_entry_points",
+                trigger     = "Which members are called by a framework by convention (MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests)",
+                description = "Lists the framework-invoked members with the reason — the same classification find_unused_symbols applies. Use it to understand why a symbol with no references is not in the unused list.",
             },
             new
             {

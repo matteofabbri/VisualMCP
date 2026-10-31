@@ -56,6 +56,12 @@ public static class SnitchServiceCollectionExtensions
         // into the decompiler, which lives in Snitch.Metacode.
         services.AddSingleton<Languages.CSharp.Navigation.INavigationService, Languages.CSharp.Navigation.NavigationService>();
         services.AddSingleton<Languages.CSharp.Analysis.IRunCodeAnalysisService, Languages.CSharp.Analysis.RunCodeAnalysisService>();
+        // The boundaries of a static call graph, made explicit: reflective lookups, generated trees, the
+        // used surface of referenced assemblies, and the members frameworks call by convention.
+        services.AddSingleton<Languages.CSharp.Analysis.IFindReflectionUsageService, Languages.CSharp.Analysis.FindReflectionUsageService>();
+        services.AddSingleton<Languages.CSharp.Analysis.IGeneratedSourcesService, Languages.CSharp.Analysis.GeneratedSourcesService>();
+        services.AddSingleton<Languages.CSharp.Analysis.IExternalUsagesService, Languages.CSharp.Analysis.ExternalUsagesService>();
+        services.AddSingleton<Languages.CSharp.Analysis.IFrameworkEntryPointsService, Languages.CSharp.Analysis.FrameworkEntryPointsService>();
         services.AddSingleton<Execution.IBuildProjectService, Execution.BuildProjectService>();
         services.AddSingleton<Execution.IRunProjectService, Execution.RunProjectService>();
         services.AddSingleton<Execution.IRunCommandService, Execution.RunCommandService>();

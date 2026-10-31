@@ -34,6 +34,7 @@ public sealed class FindUnusedSymbolsService : IFindUnusedSymbolsService
             return new { error = $"Project '{projectName}' not found." };
 
         var unused = new List<object>();
+        var frameworkInvoked = new List<object>();
 
         foreach (var project in projects)
         {
@@ -58,19 +59,37 @@ public sealed class FindUnusedSymbolsService : IFindUnusedSymbolsService
                     var refs = await SymbolFinder.FindReferencesAsync(sym, solution);
                     var refCount = refs.Sum(r => r.Locations.Count());
 
-                    if (refCount == 0)
+                    if (refCount > 0) continue;
+
+                    var loc = sym.Locations.FirstOrDefault(l => l.IsInSource);
+
+                    // No reference in source is not the same as no caller: routing, DI, the test runner
+                    // and the component renderer call these by convention.
+                    var entry = FrameworkInvocation.Classify(sym);
+                    if (entry is not null)
                     {
-                        var loc = sym.Locations.FirstOrDefault(l => l.IsInSource);
-                        unused.Add(new
+                        frameworkInvoked.Add(new
                         {
                             Symbol        = sym.ToDisplayString(),
                             Kind          = sym.Kind.ToString(),
-                            Accessibility = sym.DeclaredAccessibility.ToString(),
+                            Framework     = entry.Framework,
+                            Reason        = entry.Reason,
                             Project       = project.Name,
                             loc?.SourceTree?.FilePath,
                             Line          = loc?.GetLineSpan().StartLinePosition.Line + 1,
                         });
+                        continue;
                     }
+
+                    unused.Add(new
+                    {
+                        Symbol        = sym.ToDisplayString(),
+                        Kind          = sym.Kind.ToString(),
+                        Accessibility = sym.DeclaredAccessibility.ToString(),
+                        Project       = project.Name,
+                        loc?.SourceTree?.FilePath,
+                        Line          = loc?.GetLineSpan().StartLinePosition.Line + 1,
+                    });
                 }
             }
         }
@@ -81,6 +100,13 @@ public sealed class FindUnusedSymbolsService : IFindUnusedSymbolsService
             kindsChecked  = kinds,
             unusedCount   = unused.Count,
             unused,
+            frameworkInvokedCount = frameworkInvoked.Count,
+            frameworkInvoked,
+            note = frameworkInvoked.Count == 0
+                ? null
+                : "frameworkInvoked lists the symbols with no in-solution reference that a framework calls by convention " +
+                  "(MVC actions, Razor Pages handlers, hub methods, hosted services, Blazor lifecycle and parameters, " +
+                  "EF overrides and DbSets, middleware, test methods). Call framework_entry_points for the full classification.",
         };
     }
 

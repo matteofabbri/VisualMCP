@@ -1,0 +1,177 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Snitch.Languages.CSharp.Analysis;
+using Xunit;
+
+namespace VisualMCP.Tests;
+
+/// <summary>
+/// The boundaries of a static call graph, each made explicit: reflective lookups, generated trees, the
+/// used surface of referenced assemblies, and the members a framework invokes by convention — plus the
+/// find_unused_symbols behaviour that follows from the classification.
+/// </summary>
+public sealed class AnalysisLimitsTests
+{
+    [Fact]
+    public async Task Reflection_lookups_are_listed_and_the_resolvable_ones_are_named()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", """
+            using System;
+
+            namespace Probe;
+
+            public class Foo { }
+
+            public class Uses
+            {
+                public object A() => Activator.CreateInstance(typeof(Foo))!;
+                public Type? B() => Type.GetType("Probe.Foo");
+                public string C() => new Foo().ToString();
+            }
+            """));
+
+        var result = ResultAssert.Json(await new FindReflectionUsageService(workspace).FindReflectionUsage());
+
+        Assert.Equal(2, result.GetProperty("totalLookups").GetInt32());
+        Assert.Equal(1, result.GetProperty("resolvedInSolution").GetInt32());
+        Assert.Contains("Foo", result.GetProperty("resolvedNames")[0].GetString());
+
+        var findings = result.GetProperty("findings");
+        Assert.Contains(findings.EnumerateArray(), finding =>
+            finding.GetProperty("Api").GetString() == "Activator.CreateInstance" &&
+            finding.GetProperty("ResolvedInSolution").GetBoolean());
+        Assert.Contains(findings.EnumerateArray(), finding =>
+            finding.GetProperty("Api").GetString() == "Type.GetType" &&
+            finding.GetProperty("Target").GetString() == "Probe.Foo");
+    }
+
+    [Fact]
+    public void Generated_trees_are_the_ones_no_document_points_at()
+    {
+        var document = CSharpSyntaxTree.ParseText("public class Visible { }", path: "/repo/Visible.cs");
+        var generated = CSharpSyntaxTree.ParseText(
+            "[System.CodeDom.Compiler.GeneratedCode(\"probe\", \"1.0\")]\npublic class Emitted { }",
+            path: "/repo/obj/generated/Emitted.g.cs");
+
+        var compilation = CSharpCompilation.Create(
+            "Probe",
+            [document, generated],
+            [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var found = GeneratedSourcesService.FindGeneratedTrees(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath("/repo/Visible.cs") },
+            compilation.SyntaxTrees);
+
+        var tree = Assert.Single(found);
+        Assert.EndsWith("Emitted.g.cs", tree.Path);
+        Assert.True(tree.HasGeneratedCodeAttribute);
+        Assert.Equal(["Emitted"], tree.Types);
+    }
+
+    [Fact]
+    public async Task A_framework_action_is_reported_apart_from_unused_symbols()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", """
+            namespace Microsoft.AspNetCore.Mvc
+            {
+                public abstract class ControllerBase { }
+            }
+
+            namespace Probe
+            {
+                public class OrdersController : Microsoft.AspNetCore.Mvc.ControllerBase
+                {
+                    public string GetOrders() => "orders";
+                }
+
+                public class Helper
+                {
+                    public int Compute(int value) => value + 1;
+                }
+            }
+            """));
+
+        var unusedResult = ResultAssert.Json(await new FindUnusedSymbolsService(workspace).FindUnusedSymbols());
+
+        var frameworkInvoked = unusedResult.GetProperty("frameworkInvoked");
+        Assert.Contains(frameworkInvoked.EnumerateArray(), entry =>
+            entry.GetProperty("Symbol").GetString()!.Contains("GetOrders") &&
+            entry.GetProperty("Framework").GetString() == "ASP.NET Core MVC");
+
+        var unused = unusedResult.GetProperty("unused");
+        Assert.DoesNotContain(unused.EnumerateArray(), entry =>
+            entry.GetProperty("Symbol").GetString()!.Contains("GetOrders"));
+
+        // A genuinely dead member is still reported: the classifier must not hide it.
+        Assert.Contains(unused.EnumerateArray(), entry =>
+            entry.GetProperty("Symbol").GetString()!.Contains("Compute"));
+    }
+
+    [Fact]
+    public async Task Framework_entry_points_are_listed_with_their_reason()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", """
+            namespace Microsoft.AspNetCore.SignalR
+            {
+                public abstract class Hub { }
+            }
+
+            namespace Probe
+            {
+                public class ChatHub : Microsoft.AspNetCore.SignalR.Hub
+                {
+                    public void Send(string message) { }
+                }
+            }
+            """));
+
+        var result = ResultAssert.Json(await new FrameworkEntryPointsService(workspace).ListAsync());
+
+        // The hub type (SignalR instantiates it) and its public method (the client calls it).
+        Assert.Equal(2, result.GetProperty("total").GetInt32());
+        Assert.Equal(2, result.GetProperty("byFramework").GetProperty("SignalR").GetInt32());
+
+        var send = result.GetProperty("entries").EnumerateArray()
+            .First(entry => entry.GetProperty("Symbol").GetString()!.Contains("Send"));
+        Assert.Equal("SignalR", send.GetProperty("Framework").GetString());
+        Assert.Contains("hub method", send.GetProperty("Reason").GetString());
+    }
+
+    [Fact]
+    public async Task External_usages_report_the_used_surface_and_hide_the_framework_by_default()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", """
+            using System.Text;
+
+            namespace Probe;
+
+            public class Uses
+            {
+                public string Build() => new StringBuilder().Append("x").ToString();
+            }
+            """));
+
+        var service = new ExternalUsagesService(workspace);
+
+        var externalOnly = ResultAssert.Json(await service.FindExternalUsages());
+        Assert.Equal(0, externalOnly.GetProperty("externalAssemblies").GetInt32());
+
+        var withFramework = ResultAssert.Json(await service.FindExternalUsages(includeFramework: true, maxResults: 100));
+        Assert.True(withFramework.GetProperty("externalAssemblies").GetInt32() > 0);
+        Assert.Contains(withFramework.GetProperty("usages").EnumerateArray(), usage =>
+            usage.GetProperty("Type").GetString()!.Contains("StringBuilder", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Generated_sources_report_is_empty_whenTheWorkspace_runs_no_generator()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", "namespace Probe; public class C { }"));
+
+        var result = ResultAssert.Json(await new GeneratedSourcesService(workspace).ListAsync());
+
+        Assert.Equal(0, result.GetProperty("generatedTreeCount").GetInt32());
+        Assert.Equal(1, result.GetProperty("projects").GetInt32());
+        Assert.Contains("No generated tree", result.GetProperty("note").GetString());
+    }
+}

@@ -31,11 +31,25 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
   reading the diff.
 - Several rules are **heuristics** with a stated confidence: `analyze_complexity` (Big-O), Razor rules,
   security scanning. A clean result is not a proof of correctness or safety.
-- **Reflection, source generators and framework conventions** are outside the call graph. Code that is
-  only invoked dynamically can look dead to `find_dead_code` or `find_unused_symbols`.
-- **Generated code** may appear as ordinary source, or be absent, depending on how the project emits it.
-- **Cross-solution analysis** is out of scope: the server analyses the loaded solution. An assembly that
-  is only referenced is metadata, not a project whose internals are analysed.
+- **Reflection is enumerated, not followed.** `find_reflection_usage` lists the reflective lookups
+  (`Activator.CreateInstance`, `Type.GetType`/`GetMethod`/`GetProperty`, `Assembly.Load`, …) with the name
+  each one uses, and resolves the names that match a declaration in the solution. A symbol reached only
+  through one of them still has no reference in the call graph, but the result names what to treat as live
+  before trusting a dead-code answer.
+- **Framework conventions are classified, not missed.** `find_unused_symbols` reports separately the
+  members a framework calls by convention — MVC actions, Razor Pages handlers, SignalR hub methods, hosted
+  services, Blazor lifecycle methods and parameters, EF Core overrides and DbSets, middleware `Invoke`,
+  test methods, `[JSInvokable]`, `[Inject]` — with the reason; the same classification is available on its
+  own as `framework_entry_points`. A convention the classifier does not know (a custom dispatcher, a
+  third-party plugin host, a serializer's unannotated constructor) still looks unused.
+- **Generated code is visible.** `list_generated_sources` reports the source generators a project
+  references and the syntax trees they emit. Those trees exist in the compilation but not as documents, so
+  `read_symbol`, the refactorings and the editors cannot address them; their types still take part in the
+  compilation, which is why a symbol can have no readable source at all.
+- **A referenced assembly's internals are not analysed; its used surface is.** `find_external_usages`
+  reports which types and members of assemblies outside the solution are called, with call sites and a
+  per-assembly summary (framework assemblies only with `includeFramework=true`). What those members do
+  internally, and behaviour that crosses the solution boundary, remain out of scope.
 
 ## The style engine (`simplify_code`)
 
@@ -154,8 +168,8 @@ Beyond languages, the same page records what is absent from the .NET workflow it
 engine-level only (16 `debug_*` tools; edit-and-continue, hot reload and debugging a unit test are
 missing), **no live/postfix/file templates**, inspection severity and suppression are written per rule
 but there is **no background analysis daemon** (`inspection_baseline` is the CI substitute), **no test
-debugging, continuous testing or mutation testing** (single-test runs, re-running the failures and test
-scaffolding exist), and decompiled code is now a **navigable Roslyn workspace** (`assembly_workspace`)
+debugging and no continuous testing** (single-test runs, re-running the failures, test scaffolding and
+`run_mutation_tests` exist), and decompiled code is now a **navigable Roslyn workspace** (`assembly_workspace`)
 with no IL view, no rename and no debugging inside it.
 
 ## Scope of the product

@@ -46,6 +46,12 @@ static async Task RunServerAsync(string[] args)
         "- Inspect a type's members or a symbol's signature/docs -> get_type_members, get_symbol_info.\n" +
         "- Dead code, code smells, complexity, metrics, security, DI, duplicate/async issues -> the Analysis tools " +
         "(reliable detection needs the control-flow graph, which only Roslyn can build — do NOT infer these by reading source).\n" +
+        "- Why does a symbol look unused/dead? Three boundaries of a static call graph, each with a tool: reflective lookups by " +
+        "name with the names that resolve to the solution -> find_reflection_usage; the members a framework calls by convention " +
+        "(MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests) -> framework_entry_points (and the " +
+        "frameworkInvoked list find_unused_symbols now reports instead of calling them unused); source generators and the trees " +
+        "they emit, which are in the compilation but not in project.Documents -> list_generated_sources. What a referenced " +
+        "assembly's surface is actually used for -> find_external_usages.\n" +
         "- Architecture and quality questions: are the layer rules respected (a dependency pointing back up, with file:line) -> " +
         "check_layer_violations; the dependency graph as a DOT/Mermaid diagram -> export_dependency_graph; is this class " +
         "really two classes (LCOM4) -> get_cohesion_metrics; test suite quality (no assert, empty, unreadable names, async void) -> " +

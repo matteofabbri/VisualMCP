@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **322 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **326 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -102,7 +102,11 @@ Conventions:
 | `get_metrics` | Per-method complexity, lines of code, nesting depth and parameter count |
 | `analyze_complexity` | Static Big-O estimate of time and space per callable, with loops, recursion shape, allocation sites and evidence |
 | `find_dead_code` | Unreachable statements and always-false branches, from the control-flow graph |
-| `find_unused_symbols` | Public/internal types and members with zero references in the solution |
+| `find_unused_symbols` | Public/internal types and members with zero references, with the framework-invoked ones reported separately (`frameworkInvoked`) |
+| `framework_entry_points` | The members a framework calls by convention — MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests — with the reason |
+| `find_reflection_usage` | Reflective lookups (`Activator`, `Type.GetType`/`GetMethod`, `Assembly.Load`, …) with the name each uses, and which names resolve to the solution |
+| `list_generated_sources` | Source generators a project references and the syntax trees they emit, which live in the compilation but not as documents |
+| `find_external_usages` | The used surface of assemblies outside the solution: types, members, call sites, per-assembly summary |
 | `find_breaking_changes` | Removed or re-signed public/protected members between a git revision and the working tree |
 | `find_duplicate_code` | Structural clone detection, normalised over names and literals |
 | `analyze_test_quality` | Tests that cannot fail: no assertion, empty body, unreadable name, `async void` |
