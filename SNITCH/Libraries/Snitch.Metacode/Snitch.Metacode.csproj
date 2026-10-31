@@ -15,6 +15,9 @@
          index needs SQLite: those are the only members of this library that do. -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <!-- The Visual Basic frontend parses .vb with Roslyn's VB syntax layer, so this library needs the VB
+         parser itself and not only the workspace package the engine already carries. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic" Version="5.9.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
     <!-- The ILSpy engine, at the version the Snitch assembly already used before the decompiler
          moved here: decompilation is a producer of metacode, not a separate capability. -->

@@ -40,15 +40,16 @@ lingue diverse **in un unico modello di pseudocodice**, esposta da **quattro too
 (due sorgenti → pseudocodice e diff riga per riga, che è il modo per dire "è lo stesso algoritmo?"),
 `decompile_to_metacode` (un assembly .NET → ILSpy → C# → lo stesso modello) e `analyze_native_binary`
 (un binario nativo → Ghidra headless → le funzioni recuperate nello stesso modello). La pipeline
-predefinita legge i **due linguaggi sorgente del prodotto** — **C#** (Roslyn, sola sintassi: nessuna
-compilazione, nessuna soluzione caricata) e **Razor** (`.cshtml`/`.razor`) — più i formati della
+predefinita legge i **tre linguaggi sorgente del prodotto** — **C#** e **Visual Basic** (Roslyn, sola
+sintassi: nessuna compilazione, nessuna soluzione caricata) e **Razor** (`.cshtml`/`.razor`) — più i formati
+della
 libreria stessa: **Ghidra** (lo snapshot JSON che esporta il servizio) e il testo canonico che la
 libreria stampa (`PseudocodeFrontend`), quindi qualunque altro linguaggio entra semplicemente
 producendo quel testo. **Python** (dump JSON del modulo `ast`) e **C++** (`clang -ast-dump=json`)
 hanno un lettore ma sono **opt-in**: nessun tool produce quei dump, quindi non stanno in
-`MetacodeTranslator.Default` e `metacode_translate` non offre le lingue. Visual Basic non ha un
-frontend (`MetacodeLanguage.VisualBasic` esiste ma nessun `ILanguageFrontend` lo legge):
-`metacode_translate` lo dice invece di restituire un `MC0007`.
+`MetacodeTranslator.Default` e `metacode_translate` non offre le lingue. Visual Basic ha il suo
+frontend (`VisualBasicFrontend`): `metacode_translate`, `metacode_compare`, `metacode_index` e
+`metacode_generate` leggono i `.vb`, e ciò che il modello non ha resta `RAW[vb]` con un diagnostico.
 
 Lo stesso algoritmo scritto in C#, Python e C++ esce con lo **stesso corpo**, riga per riga: è il test
 `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`, che per Python e C++ costruisce
@@ -192,6 +193,7 @@ politica delle porte, porta ricordata, e un listener reale che serve ogni pagina
 | Semplificazioni di stile | ✅ | `simplify_code` — 87 id IDE riscritti e 39 elencati con il motivo (tabella sotto), scope documento/progetto/soluzione, anteprima, gate: compilatore |
 | Semplificazioni di stile Visual Basic | ✅ | `simplify_vb_code` — 15 id della colonna VB (14 riscritture: IDE0001, IDE0002, IDE0003, IDE0004, IDE0049, IDE0041, IDE0029/IDE0030, IDE0031, IDE0047, IDE0054, IDE0100, IDE0075, IDE0084, IDE0081), 34 id VB non riscritti con il motivo; scope documento/progetto/soluzione, anteprima, gate: compilatore, id `IDE0084` guidato da `visual_basic_style_prefer_isnot_expression` |
 | Convert class to record | ✅ | `convert_to_record` — cambio di keyword, oppure forma posizionale (`record Point(int X, int Y)`) quando un costruttore assegna ogni parametro a un'auto-property omonima (gate: compilatore) |
+| Convert abstract class ↔ interface | ✅ | `convert_type_kind` — le due direzioni in un tool: la dichiarazione e ogni derivato/implementatore sono riscritti insieme (`override` tolto o aggiunto); stato d'istanza, struct, record e default interface method sono rifiutati con il motivo (gate: compilatore su tutti i progetti toccati) |
 | Flatten conditional / Remove nesting | ❌ | 🎯 |
 | Use pattern matching | ❌ | 🎯 |
 | Safe Delete | ✅ | `safe_delete` |
@@ -683,8 +685,8 @@ Restano, in ordine di impatto:
 | Diagrammi ed esplorazione: grafo tipi/progetti interattivo, sequence diagram, structure view, code vision, TODO explorer | 🟢 Bassa | ⚠️ `export_dependency_graph` esporta DOT/Mermaid; il resto è assente |
 | Resto della famiglia "create/generate" e context action: long tail (if→switch, pattern merging, LINQ shape, loop, interpolazione, nullable migration) e template live/postfix/file | 🟡 Media | ⚠️ `context_action` copre 13 id (import_type, guardie, wrap in try/catch/finally/if/using, string_to_raw/verbatim/regular); `implement_members`, `create_from_usage`, `generate_docs` coprono i casi frequenti |
 | Amministrazione delle ispezioni (severità per scope, soppressioni, `.DotSettings`, daemon con compilazione calda) | 🟡 Media | ⚠️ `inspection_baseline` dà il gate CI, non la configurazione |
-| Local history, merge assistito a 3 vie, GitLab/Azure DevOps | 🟢 Bassa | ❌ |
-| Refactoring minori: Extract Members to Partial, Inline Field, Transform Parameters, Abstract ↔ Interface, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Bassa | ❌ |
+| Local history, merge assistito a 3 vie, GitLab/Azure DevOps | 🟢 Bassa | ⚠️ `local_history` copre la cronologia per file (`snapshot`/`history`/`diff`/`restore`); restano merge a 3 vie e gli altri host Git |
+| Refactoring minori: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Bassa | ❌ |
 
 L'inventario completo — linguaggio per linguaggio e area per area, con cosa esiste oggi, cosa manca
 esattamente e il workaround — è in **[docs/gaps.md](docs/gaps.md)**. La fotografia ✅ categoria per

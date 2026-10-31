@@ -66,10 +66,10 @@ public sealed class CapabilityReportService : ICapabilityReportService
             layers = new
             {
                 csharp = "Snitch.Languages.CSharp (Roslyn: navigation, refactoring, style, inspections, testing)",
-                visualBasic = "Snitch.Languages.VB (style only: 15 ids)",
+                visualBasic = "Snitch.Languages.VB (style: 15 ids) + Snitch.Metacode's VisualBasicFrontend (trees, complexity, C# generation)",
                 razor = "Snitch.Languages.Razor (heuristic markup scanner, 28 rules)",
                 xaml = "Snitch.Languages.Xaml (markup + Roslyn code-behind: inventory, XAML0001-0009, navigation)",
-                metacode = "Snitch.Metacode (C#, Razor, pseudocode, Ghidra frontends; persisted index)",
+                metacode = "Snitch.Metacode (C#, Visual Basic, Razor, pseudocode, Ghidra frontends; persisted index)",
                 sql = "none: .sql is full-text only",
                 javascript = "none: .js/.ts/.jsx/.tsx are full-text only",
                 fsharp = "none: no semantic model (not a Roslyn language)",

@@ -13,8 +13,8 @@ public static class MetacodeIndexTool
         "facts computed over the model. It is generated when the solution opens and kept in step with saved files " +
         "(the background pass compares each file's timestamp, then its content hash, so only what changed is " +
         "translated). Every source is stored TWICE: its native text and language in source_document, its metacode in " +
-        "mc_document/mc_tree — a language no frontend reads (Visual Basic today) keeps the native row and has no " +
-        "metacode, which status reports as sources vs documents and the build report as unsupported. " +
+        "mc_document/mc_tree — a language no frontend reads keeps the native row and has no metacode, which status " +
+        "reports as sources vs documents and the build report as unsupported. C#, Visual Basic and Razor all have one. " +
         "The COMPLETE AST of every declaration is stored node by node in mc_node too: the parent link, the parent " +
         "property that holds the node, its position there, its depth, its span and the node's own payload as JSON — " +
         "so the tree is a SQL query, not a rendering to parse. " +
@@ -26,8 +26,9 @@ public static class MetacodeIndexTool
         "action=ast returns the complete stored AST of the matching declarations, nested, one node per class of the " +
         "model (If, Block, Invocation, Binary, …) with its span; " +
         "action=assemblies lists the binaries whose decompiled code the store also holds (metacoding action=decompile). " +
-        "The document set is decided by language, not by extension: C# and Razor pages/components have a frontend " +
-        "(.cshtml/.razor are read from disk, they are not Roslyn documents), other languages are recorded natively.")]
+        "The document set is decided by language, not by extension: C#, Visual Basic and Razor pages/components have " +
+        "a frontend (.cshtml/.razor are read from disk, they are not Roslyn documents), other languages are recorded " +
+        "natively.")]
     public static async Task<object> MetacodeIndex(
         IMetacodeIndexService index,
         [Description("status | build | complexity | trees | ast | assemblies (default: status).")]

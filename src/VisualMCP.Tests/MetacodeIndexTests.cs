@@ -222,7 +222,7 @@ public sealed class MetacodeIndexTests
     }
 
     [Fact]
-    public async Task A_language_with_no_reader_keeps_its_native_source_and_no_metacode()
+    public async Task A_Visual_Basic_file_is_read_like_any_other_source()
     {
         using var workspace = VbStyleTests.VisualBasicWorkspace.Create("Module1.vb", """
             Public Module Module1
@@ -238,19 +238,18 @@ public sealed class MetacodeIndexTests
 
         Assert.Null(report.Error);
         Assert.Equal(1, report.Scanned);
-        Assert.Equal(0, report.Indexed);
-        Assert.Equal(1, report.Unsupported);
-        Assert.Equal(1, report.Sources);
+        Assert.Equal(1, report.Indexed);
+        Assert.Equal(0, report.Unsupported);
 
-        // The file is in the store, in its own language, even though nothing could read it into the model.
+        // The native half: the file in its own language.
         var source = service.Source(workspace.PathOf("Module1.vb"));
         Assert.NotNull(source);
         Assert.Equal("vb", source.Value.Language);
         Assert.Contains("Public Module Module1", source.Value.Text);
 
-        // And the metacode half is honestly empty, rather than silently missing.
-        Assert.Empty(service.Trees(path: workspace.PathOf("Module1.vb")));
-        Assert.Equal(0, service.Status().Documents);
+        // The metacode half: a Visual Basic frontend reads it, so the trees are there.
+        Assert.NotEmpty(service.Trees(path: workspace.PathOf("Module1.vb")));
+        Assert.Equal(1, service.Status().Documents);
 
         // A second pass skips it on the timestamp, like any other unchanged file.
         var again = await service.BuildAsync();

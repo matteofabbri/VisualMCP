@@ -11,8 +11,10 @@ public static class MetacodeGenerateTool
 {
     [McpServerTool(Name = "metacode_generate"), Description(
         "Generate NEW code from metacode: C# in, C# out. The source is one of — text (canonical pseudocode by " +
-        "default, or C# with language='cs'), a symbol stored in the solution's metacode index, or a path (the " +
-        "stored tree of that file when the index has it, otherwise the file itself). This is the inverse of " +
+        "default, or C# with language='cs', or Visual Basic with language='vb'), a symbol stored in the solution's " +
+        "metacode index, or a path (the " +
+        "stored tree of that file when the index has it, otherwise the file itself; a .cs, .vb or .mc file is read " +
+        "directly). This is the inverse of " +
         "metacode_translate: the model is the source of truth and C# is the first target, so the same tree can " +
         "later be emitted to another language without re-reading the original source. Everything the model cannot " +
         "express in C# (a Python import, a comprehension with several for clauses, '**', a set or dictionary " +
@@ -21,9 +23,9 @@ public static class MetacodeGenerateTool
         "to round-trip a stored declaration back to readable C#. The output is real code, not JSON.")]
     public static object Generate(
         IMetacodeIndexService index,
-        [Description("Canonical pseudocode (default), or C# when language='cs'.")]
+        [Description("Canonical pseudocode (default), C# when language='cs', or Visual Basic when language='vb'.")]
         string? text = null,
-        [Description("For text: 'pseudo' (default) or 'cs'. C# is parsed with Roslyn's syntax only — no solution needed.")]
+        [Description("For text: 'pseudo' (default), 'cs' or 'vb'. Parsed with Roslyn's syntax only — no solution needed.")]
         string? language = null,
         [Description("A symbol stored in the metacode index: 'Divide', 'Calculator.Divide' or a declaration key.")]
         string? symbol = null,

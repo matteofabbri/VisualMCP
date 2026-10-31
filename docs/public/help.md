@@ -153,7 +153,8 @@ be reverted while the file is unchanged. Use a branch and a clean working tree f
 
 **Which languages are supported?**
 
-C# is the main surface. Visual Basic has a style layer (`simplify_vb_code`, 15 ids) plus the
+C# is the main surface. Visual Basic has a style layer (`simplify_vb_code`, 15 ids), the metacode
+frontend (`metacode_translate`, `metacode_index`, `metacode_generate`) and the
 language-neutral build/test/diagnostic tools — no refactorings, inspections or formatter. Razor and
 Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
@@ -181,7 +182,7 @@ present and skips it with a warning when not.
 
 **How many tools are there?**
 
-344 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
+346 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
 (everything, with schemas), or the [tool catalogue](tools.md).
 
 **How do I update?**

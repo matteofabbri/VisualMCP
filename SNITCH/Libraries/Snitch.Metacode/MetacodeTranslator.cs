@@ -13,9 +13,9 @@ namespace Snitch.Metacode;
 public sealed class MetacodeTranslator
 {
     /// <summary>
-    /// The pipeline this product runs, which is exactly what it can produce: the two source languages are
-    /// C# (Roslyn) and Razor (this repository's scanner), and canonical pseudocode and a Ghidra snapshot
-    /// are the library's own formats, written by its renderer and by its native pipeline.
+    /// The pipeline this product runs, which is exactly what it can produce: the three source languages are
+    /// C# and Visual Basic (Roslyn) and Razor (this repository's scanner), and canonical pseudocode and a
+    /// Ghidra snapshot are the library's own formats, written by its renderer and by its native pipeline.
     /// </summary>
     /// <remarks>
     /// Python and C++ are deliberately absent. <see cref="PythonFrontend"/> and <see cref="CppFrontend"/>
@@ -26,6 +26,7 @@ public sealed class MetacodeTranslator
     public static MetacodeTranslator Default { get; } = new(new ILanguageFrontend[]
     {
         new CSharpFrontend(),
+        new VisualBasicFrontend(),
         new RazorFrontend(),
         new PseudocodeFrontend(),
         new GhidraFrontend(),

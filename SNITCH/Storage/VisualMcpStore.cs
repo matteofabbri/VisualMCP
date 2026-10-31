@@ -469,6 +469,12 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         }
     }
 
+    /// <summary>The compressed whole-file text the local-history store shares with the edit history.</summary>
+    internal static byte[] CompressText(string text) => Compress(text);
+
+    /// <summary>The inverse of <see cref="CompressText"/>.</summary>
+    internal static string DecompressText(byte[] bytes) => Decompress(bytes);
+
     /// <summary>
     /// The pre-write text is kept compressed so an edit can actually be undone: a hash alone proves
     /// that something changed, it cannot restore it.

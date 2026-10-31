@@ -29,6 +29,8 @@ public sealed class VisualMcpDbContext : DbContext
 
     public DbSet<AppliedEditRow> AppliedEdits => Set<AppliedEditRow>();
 
+    public DbSet<FileSnapshotRow> FileSnapshots => Set<FileSnapshotRow>();
+
     public DbSet<PackageFactRow> PackageFacts => Set<PackageFactRow>();
 
     public DbSet<PackageDependencyRow> PackageDependencies => Set<PackageDependencyRow>();
@@ -89,6 +91,20 @@ public sealed class VisualMcpDbContext : DbContext
             row.HasIndex(edit => new { edit.File, edit.AppliedAt })
                 .HasDatabaseName("applied_edit_file")
                 .IsDescending(false, true);
+        });
+
+        // Local history: whole-file snapshots, newest first per path. The unique (file, hash) index is
+        // what makes a repeated snapshot of unchanged content a no-op instead of a duplicate row.
+        model.Entity<FileSnapshotRow>(row =>
+        {
+            row.ToTable("file_snapshot");
+            row.HasKey(snapshot => snapshot.Id);
+            row.HasIndex(snapshot => new { snapshot.File, snapshot.CapturedAt })
+                .HasDatabaseName("file_snapshot_file")
+                .IsDescending(false, true);
+            row.HasIndex(snapshot => new { snapshot.File, snapshot.Hash })
+                .IsUnique()
+                .HasDatabaseName("file_snapshot_content");
         });
 
         model.Entity<PackageFactRow>(row =>

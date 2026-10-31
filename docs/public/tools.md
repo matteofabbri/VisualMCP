@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **344 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **346 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -176,6 +176,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `add_params` | ✎ Add `params` to a method's last array parameter |
 | `convert_to_primary_constructor` | ✎ Constructor parameters move into the type header; assignments become initializers |
 | `convert_to_record` | ✎ Convert a class or struct to a record, optionally positional |
+| `convert_type_kind` | ✎ preview Abstract class ↔ interface in one tool: the declaration and every derived type or implementer are rewritten together (`override` dropped or added), compiler-gated; instance state, structs and default interface methods are refused by name |
 | `convert_anonymous_to_type` | ✎ Turn a `new { … }` into a real class in its own file |
 | `constructor_to_factory` | ✎ Make the constructor private, add a static `Create`, rewrite `new T(...)` |
 | `copy_type` | ✎ Duplicate a type under a new name, renaming its constructors |
@@ -385,7 +386,7 @@ proved — the notes say so.
 
 | Tool | What it does |
 |---|---|
-| `metacode_translate` | Lower C#, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed |
+| `metacode_translate` | Lower C#, Visual Basic, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed |
 | `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check |
 | `metacode_index` | The solution's metacode persisted in `.visualMCP/visualmcp.db`: status, build, model-level cyclomatic/cognitive complexity, stored trees, and the complete AST (`ast`: every node with parent link, property slot, position, depth, span and payload) |
 | `metacode_generate` | Generate C# from pseudocode, a stored tree or a file; what C# cannot express is lowered with a diagnostic |
@@ -506,6 +507,7 @@ the other actions change GitHub, and merges/deletes require `confirm=true`.
 | `command_log` | Read the tool-call log from the solution store (date, tool, arguments, redacted secrets) |
 | `edit_history` | Read every file write this server made, with tool, rules and hashes; says whether it is revertible |
 | `revert_edit` | ✎ Restore a file to the state before one recorded edit, refusing if it changed since |
+| `local_history` | ReSharper's Local History in the solution store: `snapshot` captures each changed source file (gzipped, deduplicated on its hash, newest 50 per file), `history` lists them, `diff` compares one with the current file or another snapshot, `restore` ✎ preview writes one back and snapshots the text it replaces |
 | `package_facts` | The resolved NuGet graph from `obj/project.assets.json` — refresh, list, dependencies |
 | `reference_index` | The persisted symbol index: build, status, find, describe, refs, callers, callees, hierarchy, outline, metacode, unused |
 | `host_system` | OS family, architecture, newline convention, case sensitivity, and the line-ending style resolved for a path |

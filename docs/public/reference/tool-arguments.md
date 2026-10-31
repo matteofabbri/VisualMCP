@@ -220,8 +220,9 @@ analyze_native_binary(binaryPath, function?, maxFunctions=0,
 installed on demand); the snapshot it leaves behind is an ordinary metacode input afterwards.
 Canonical pseudocode is itself an input (`language=pseudo`, or a `.mc` file), so a language
 without a frontend joins by emitting it. `language` is required for text and, with a path,
-overrides the extension — an unknown extension alone has no frontend. Visual Basic has no
-frontend: the tool answers with that reason. Grammar and limits:
+overrides the extension — an unknown extension alone has no frontend. Visual Basic is a source
+language (`language=vb`, or a `.vb` file, which `metacode_translate`, `metacode_compare`,
+`metacode_index` and `metacode_generate` read through Roslyn). Grammar and limits:
 [`../../metacode.md`](../../metacode.md).
 
 ## Modernization

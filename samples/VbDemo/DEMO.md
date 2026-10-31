@@ -33,8 +33,8 @@ behaviour. The analyses that are C#-only return nothing (or an explicit reason) 
 | `find_unused_symbols VbDemo.Core` | correct names (`Repository.All`, `Repository.Count`, `PlainThing`), each reported twice |
 | `solution_map` | 3 VB projects; `types: 0`, `areas: []`, `entryPoints: []`, 19 documents skipped |
 | `reference_index status` | 0 documents, 0 symbols: C# only |
-| `metacode_index status` | `sources: 19`, `documents: 0`: VB is stored natively, with no metacode |
-| `metacode_translate` | `MC0007` — no frontend in the pipeline reads Visual Basic |
+| `metacode_index status` | every `.vb` source becomes a document: pseudocode trees, the complete AST and language-neutral complexity |
+| `metacode_translate` | the module as canonical pseudocode (`MODULE`/`FUNCTION`/`IF`), through `VisualBasicFrontend` |
 | `complexity_report` | `No method, lambda or local function covers line 29` (C# syntax tree only) |
 | `analyze_complexity` | `methodCount: 0`: C# only |
 | `analyze_test_quality VbDemo.Tests` | `testCount: 0`: C# only |
@@ -95,7 +95,8 @@ line was added so the solution compiles; it is not part of the VB work.
 
 - `read_symbol` extracts a declaration body with C# syntax; on a VB type it returns the first line.
 - `solution_map` parses C# trees: VB projects appear, their types, namespaces and entry points do not.
-- `reference_index` and `metacode_index` have no VB frontend (the latter keeps the native text only).
+- `reference_index` has no VB frontend; `metacode_index` reads VB through `VisualBasicFrontend` (trees and
+  language-neutral complexity), while the C#-syntax analyses below still do not.
 - `complexity_report`, `analyze_complexity`, `analyze_test_quality` and `tests_covering_symbol` are C#-only.
 - `inspect_code` runs only the language-agnostic CA analyzers over VB.
 - `find_unused_symbols` works on VB but duplicates each symbol (see above).

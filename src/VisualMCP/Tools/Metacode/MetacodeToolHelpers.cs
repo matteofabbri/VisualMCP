@@ -35,26 +35,22 @@ internal static class MetacodeToolHelpers
 
         return Normalize(language) is { } textTag
             ? FromText(text, textTag, null, side)
-            : (null, $"{side}: text needs language='cs', 'razor', 'ghidra' or 'pseudo' — there is no path to infer it from.");
+            : (null, $"{side}: text needs language='cs', 'vb', 'razor', 'ghidra' or 'pseudo' — there is no path to infer it from.");
     }
 
-    // The product's source languages are C# and Razor; pseudocode and a Ghidra snapshot are this
-    // library's own formats. Python and C++ are not offered: their readers need an AST dump that
+    // The product's source languages are C#, Visual Basic and Razor; pseudocode and a Ghidra snapshot are
+    // this library's own formats. Python and C++ are not offered: their readers need an AST dump that
     // nothing here produces (see MetacodeTranslator.Default).
     private static (MetacodeSource? Source, string? Error) FromText(
         string text, string tag, string? path, string side) => tag switch
     {
         "cs" => (MetacodeSource.FromCSharp(text, path), null),
+        "vb" => (MetacodeSource.FromVisualBasic(text, path), null),
         "pseudo" => (MetacodeSource.FromPseudocode(text, path), null),
         "razor" => (MetacodeSource.FromRazor(text, path), null),
         // The snapshot analyze_native_binary leaves behind, and any older one: no Ghidra needed to read it.
         "ghidra" => (MetacodeSource.FromGhidra(text, path), null),
-        // The enum has a VisualBasic member, but no ILanguageFrontend reads it: MetacodeTranslator would
-        // answer MC0007. Say the real reason instead of letting the caller read that as a parse failure.
-        "vb" => (null, $"{side}: Visual Basic has no metacode frontend yet — MetacodeLanguage.VisualBasic " +
-                       "exists but no ILanguageFrontend can read it. Translate through C#/Razor or " +
-                       "canonical pseudocode."),
-        _ => (null, $"{side}: unknown language '{tag}'; use 'cs', 'razor', 'ghidra' or 'pseudo'."),
+        _ => (null, $"{side}: unknown language '{tag}'; use 'cs', 'vb', 'razor', 'ghidra' or 'pseudo'."),
     };
 
     /// <summary>

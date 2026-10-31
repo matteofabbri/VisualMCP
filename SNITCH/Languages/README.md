@@ -8,7 +8,7 @@ counts; this page is the map of the folders.
 | Layer | Folder | Surface |
 |---|---|---|
 | C# | `CSharp/` | the main surface: navigation, analysis, 50+ refactorings, style, inspections, testing, packages, modernization |
-| Visual Basic | `VB/` | style only — `simplify_vb_code`, 15 Microsoft code-style ids; everything else has no VB frontend |
+| Visual Basic | `VB/` | style — `simplify_vb_code`, 15 Microsoft code-style ids; the metacode frontend lives in `Snitch.Metacode/Frontends/VisualBasicFrontend.cs` |
 | Razor / Blazor | `Razor/` | page and component inventory, 11 security rules (`RZ1001`–`RZ1011`, CWE-tagged) and 17 markup rules (`RZ2001`–`RZ2017`), verified edits |
 | XAML | `Xaml/` | WPF/WinUI/MAUI/Avalonia/UWP inventory, `XAML0001`–`XAML0009`, name/resource/style navigation |
 | Style core | `Style/` | `StyleRewrite`, `IStyleRuleSet`, `IStyleLanguage`, `StyleRewriteService`, `.editorconfig` options — the language-neutral half of `simplify_code` |

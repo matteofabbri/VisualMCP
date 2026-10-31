@@ -16,9 +16,10 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (tenth revision: the ReSharper id question is answered with a measurement — 8 ids
-native in the opt-in `rider` inspection pack plus `resharper_inspection_map`, a curated id→capability map,
-343 → 344). The
+Last updated: 2026-10-31 (eleventh revision: three gaps closed — a Visual Basic metacode frontend, so
+`metacode_translate`, `metacode_compare`, `metacode_index` and `metacode_generate` read `.vb`;
+`convert_type_kind`, the abstract class ↔ interface conversion in both directions across the
+implementers; and `local_history`, whole-file snapshots in the solution store. 344 → 346). The
 style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -57,7 +58,7 @@ The full-text index deliberately accepts many extensions, so XAML, SQL, YAML, JS
 | Language / platform | What works today | What is missing |
 |---|---|---|
 | **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](public/reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
-| **Visual Basic** | `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`; the project's own analyzers through `run_code_analysis`; text search/index; Git and file tools | Everything dedicated: no VB refactorings, no VB inspections from the built-in packs, no VB formatter, no VB structural search, no VB style beyond the 15 ids, no VB metacode frontend, no VB symbol index |
+| **Visual Basic** | `simplify_vb_code` (15 ids, 34 refused with a reason); the **metacode frontend** (`metacode_translate`, `metacode_compare`, `metacode_index` trees and language-neutral complexity, `metacode_generate` emits C# from a `.vb` file); `build_project`, `run_tests`, `run_project`, `get_diagnostics`; the project's own analyzers through `run_code_analysis`; text search/index; Git and file tools | Everything dedicated: no VB refactorings, no VB inspections from the built-in packs, no VB formatter, no VB structural search, no VB style beyond the 15 ids, no VB symbol index |
 | **F#** | `.fs`/`.fsproj` are in the full-text index; `build_project`/`run_tests` work if the SDK does; Git and file tools | No semantic model at all — F# is not a Roslyn language, so no symbols, references, refactorings or inspections |
 | **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `.xaml`/`.axaml` are in the full-text index; the C# code-behind is fully analysed | No XAML parser, no markup diagnostics, no binding/resource/name analysis, no XAML navigation, no XAML refactorings, no designer or preview |
 | **JavaScript / TypeScript / JSX / TSX** | `.js`, `.mjs`, `.ts`, `.tsx`, `.jsx` are in the full-text index | No parser, no type checker, no module graph, no ESLint/Prettier, no npm/pnpm/yarn, no package.json auditing, no bundler or browser preview |
@@ -109,9 +110,9 @@ What is missing:
 | `format_code`, `optimize_usings`, `code_cleanup` | ❌ C# only (the services filter or cast to C# syntax) |
 | `inspect_code` packs, `inspection_baseline` | ❌ built-in packs are C# analyzers |
 | Symbol index (`reference_index`) | ❌ C# documents only (VB is counted as `unsupported`) |
-| Metacode index (`metacode_index`) | 🟡 VB is read natively and stored in `source_document`, and `build` reports it as `unsupported`: it has no frontend, so no trees. Razor has one. |
+| Metacode index (`metacode_index`) | ✅ a VB frontend reads the file, so its declarations are trees in `mc_document`/`mc_tree` and `action=complexity` ranks VB callables with the other languages |
 | Dead code, code smells, async/performance patterns, complexity report | ❌ the implementations walk C# syntax |
-| Metacode translate/generate | ❌ no VB frontend; the tool answers that it has none |
+| Metacode translate/generate | ✅ `VisualBasicFrontend` lowers modules, classes, structures, interfaces, enums, properties, methods, events and the statement/expression vocabulary; `With … End With`, `ReDim`, `On Error` and `RaiseEvent` stay `RAW[vb]` with a diagnostic, and `metacode_generate` emits C# from a `.vb` file |
 
 Workaround: use `simplify_vb_code`, `run_code_analysis` with the project's own analyzers, and the text
 tools; do refactoring in an IDE. If VB matters to you, this is a product decision to make explicitly,
@@ -378,14 +379,13 @@ project compiles no worse, and every other `CS####` still has no fix here.
 
 ## 7. Refactoring gaps
 
-46 of the ~51 in Rider's "main set" are implemented. The refactorings themselves are listed in
+47 of the ~51 in Rider's "main set" are implemented. The refactorings themselves are listed in
 [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md#refactorings); this table names only what
 is absent or partial, with the closest tool.
 
 | Missing operation | Closest today | What is missing |
 |---|---|---|
 | Transform parameters | `change_signature` | Reorder/add/remove only; no "transform" (e.g. wrap a parameter in a type, replace with a property) |
-| Abstract class ↔ interface | `extract_interface`, `extract_superclass` | Neither direction |
 | Make non-static | `make_static` | Only the reverse direction: a static method has no instance to convert its call sites to, so this one needs a design decision, not a rewrite |
 | Move type into another type | `move_type`, `move_to_folder` | Not implemented |
 | Generify | — | Not implemented |
@@ -430,7 +430,6 @@ structured surface (`gh_repo`, `gh_pr`, `gh_issue`, `gh_release`, `gh_actions`, 
 
 Missing:
 
-- **local history** (per-file snapshots independent of commits) — ReSharper's Local History;
 - **3-way merge assistant**: conflicts are reported by merge/rebase/cherry-pick and resolved by editing
   the files; there is no merge editor or conflict model;
 - **interactive rebase** (the squash tool covers the common case; `git_run` can do the rest, without a
@@ -526,7 +525,6 @@ runtime measurement.
 | Single test | `run_tests` with raw `dotnet test --filter` arguments, or `run_command` |
 | Inspection suppression | Edit `.editorconfig`/`SuppressMessage` by hand; `inspection_baseline` for a CI gate |
 | Decompiled symbol navigation | `inspect_assembly`/`find_assembly_api` and `decompile_type`; no cross-reference navigation |
-| Local history | Git: commit often, or a branch/stash; `edit_history` only covers writes this server made |
 
 ---
 

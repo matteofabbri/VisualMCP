@@ -1,7 +1,7 @@
 # Snitch.Metacode — un solo pseudocodice per alberi di lingue diverse
 
 `SNITCH/Libraries/Snitch.Metacode` trasforma un albero sintattico in **un unico modello** e lo stampa
-come pseudocodice canonico. La pipeline del prodotto legge **C#** (Roslyn) e **Razor**
+come pseudocodice canonico. La pipeline del prodotto legge **C#** e **Visual Basic** (Roslyn) e **Razor**
 (`.cshtml`/`.razor`), più i due formati della libreria stessa: il testo canonico e lo snapshot di
 Ghidra. Un tipo decompilato con ILSpy e un binario nativo entrano dalla stessa porta.
 
@@ -271,10 +271,10 @@ questo testo.
 2. Mappare ogni costrutto su un nodo del modello; ciò che non ha nodo diventa
    `MetacodeOpaque*` + `MetacodeDiagnostic`, con il testo originale.
 3. Aggiungerlo a `MetacodeTranslator.Default` **solo se il traduttore può leggere il sorgente
-   direttamente**: è la regola per cui C# e Razor sono lì e Python/C++ no. Un lettore che dipende da un
-   dump prodotto altrove si passa al costruttore (opt-in), com'è per `PythonFrontend` e `CppFrontend`;
-   se il prodotto sa produrre quel dump (come `translate_python_file` / `translate_cpp_file`), il tool
-   costruisce il traduttore con il lettore giusto e resta opt-in.
+   direttamente**: è la regola per cui C#, Visual Basic e Razor sono lì e Python/C++ no. Un lettore che
+   dipende da un dump prodotto altrove si passa al costruttore (opt-in), com'è per `PythonFrontend` e
+   `CppFrontend`; se il prodotto sa produrre quel dump (come `translate_python_file` / `translate_cpp_file`),
+   il tool costruisce il traduttore con il lettore giusto e resta opt-in.
 4. Aggiungere una fixture al test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`:
    è la definizione operativa di "stessa architettura".
 
@@ -291,6 +291,10 @@ questo testo.
 - **C#**: `fixed`, `unsafe`, `checked`, i `delegate`, le conversioni definite dall'utente e
   `goto case`/`goto default` sono opachi; i pattern complessi di `switch`
   (`case int n when n > 0`) restano testo dentro `CASE`.
+- **Visual Basic**: `With … End With`, `ReDim`, `Erase`, `On Error` (GoTo/Resume Next), `RaiseEvent`,
+  `AddHandler`/`RemoveHandler`, `Exit Try` e l'operatore `Like` sono `RAW[vb]` con un diagnostico;
+  `MyClass` si abbassa a `this` con un `LossyLowering` (sopprime il dispatch virtuale). La direzione di
+  un `For` con `Step` non costante è assunta positiva, e il diagnostico lo dice.
 - **Razor**: `@switch`, `@try`/`catch`/`finally` e `@do`/`while` restano **un solo** `RAW[razor]` con un
   diagnostico — le loro `case`/`catch`/`while` non sono blocchi `@`, quindi lo scanner non le vede come
   rami; un corpo di `@if`/`@foreach` senza graffe è markup, non un blocco. Il markup fra due costrutti è
@@ -535,6 +539,23 @@ Razor `else`/`else if` non hanno la `@`, quindi lo scanner non li riporta, e la 
 brace. Per lo stesso motivo `@switch`, `@try` e `@do` restano opachi: le loro `case`/`catch`/`while` sono
 markup, non rami che il modello possa rappresentare senza inventare.
 
+## Visual Basic: un modulo è una classe
+
+`VisualBasicFrontend` legge un `.vb` con il livello sintattico di Roslyn, come il C#: un parse, nessuna
+compilazione. Un `Module` diventa una `CLASS` con il modificatore `STATIC`; `Structure`, `Interface` ed
+`Enum` hanno i loro kind; `Inherits` e `Implements` confluiscono nella lista `EXTENDS`. Una proprietà con
+accessori espliciti diventa una `PROPERTY` con i due accessor, una automatica due accessor vuoti (`AUTO`).
+
+Le tre forme condizionali restano distinte e diventano ciò che dicono: `If(c, a, b)` un
+`MetacodeConditional`, `If(a, b)` un `??`, `If … Then` un `IF`. `For i = 0 To n` scende a `MetacodeFor`
+con il confronto nella direzione dello `Step` quando è una costante, `Select Case` diventa `SWITCH` con
+`To` e `Is >` come pattern testuali, `Do … Loop Until` un `REPEAT … UNTIL`, e `d!Name` un indice su
+stringa. Un `Dim x = 1` non porta tipo, come il `var` del C#: il modello li stampa allo stesso modo.
+
+Ciò che il modello non ha resta `RAW[vb]` con un diagnostico: `With … End With` (un ricevitore implicito
+non si abbassa senza duplicarne la valutazione), `ReDim`, `Erase`, `On Error`, `RaiseEvent`,
+`AddHandler`/`RemoveHandler`, `Exit Try` e `Like`. L'elenco completo è nei limiti noti.
+
 ## L'indice dei simboli
 
 `Symbols/` risponde, dal database invece che dalla soluzione, alle domande che in Visual Studio sono *Go To
@@ -700,10 +721,11 @@ rileggerlo dal testo costa un parse. Quello che il database conserva è quindi l
 suo hash), da cui il modello di Roslyn si ricostruisce identico — ed è quello che permette al workspace di
 usare tutte le feature di Roslyn sul documento, mentre il metacode resta la vista neutra dello stesso file.
 
-Una lingua che nessun frontend sa leggere — il Visual Basic oggi — **non sparisce**: `source_document`
-tiene il file, `mc_tree` non ha righe, `mc_document` non ha la riga. `metacode_index action=status` lo dice
-con `sources` accanto a `documents`, e il report della build con `unsupported`. Il giorno in cui esiste un
-`VbFrontend`, la passata successiva lo trova già letto (l'hash è quello giusto) e lo traduce.
+Una lingua che nessun frontend sa leggere — per esempio F#, Java o Rust — **non sparisce**:
+`source_document` tiene il file, `mc_tree` non ha righe, `mc_document` non ha la riga.
+`metacode_index action=status` lo dice con `sources` accanto a `documents`, e il report della build con
+`unsupported`. Visual Basic era in questa lista: dal frontend VB la passata successiva traduce i `.vb`
+già letti (l'hash è quello giusto) senza toccare `source_document`.
 
 Il lato semantico "nativo" — dichiarazioni, usi, relazione di override e di implementazione — è l'indice
 dei simboli nelle tabelle `si_*`, scritto dalla stessa apertura della soluzione e poi su richiesta di
@@ -781,6 +803,7 @@ suoi membri.
 | `MetacodeSource.cs`, `ILanguageFrontend` | input e contratto del frontend |
 | `MetacodeTranslator.cs` | la facciata: frontend giusto, passate, documento |
 | `Frontends/CSharpFrontend.cs`, `CSharpLowering.Expressions.cs` | Roslyn |
+| `Frontends/VisualBasicFrontend.cs`, `VisualBasicLowering.Expressions.cs` | Roslyn VB: moduli, tipi, membri, istruzioni ed espressioni di un `.vb` |
 | `Frontends/PythonFrontend.cs` | dump `ast` — lettore opt-in, non nella pipeline predefinita |
 | `Frontends/CppFrontend.cs` | dump `clang` — lettore opt-in, non nella pipeline predefinita |
 | `Frontends/RazorFrontend.cs` | pagine `.cshtml` e componenti `.razor`, sul modello dello scanner di `SNITCH/Languages/Razor` |

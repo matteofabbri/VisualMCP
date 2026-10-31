@@ -231,6 +231,9 @@ own convention, so you rarely need it.
   whether it is still revertible.
 - `revert_edit` — restore the file to its state before one recorded edit, refusing if the file changed
   after the edit.
+- `local_history` — whole-file snapshots independent of commits: `snapshot` captures each changed source
+  file, `history`/`diff` walk and compare them, `restore` writes one back (the replaced text is
+  snapshotted first).
 
 These read the solution store, so they are per solution, not global.
 

@@ -13,6 +13,7 @@ obj/
 
 # Test artifacts written by `dotnet test --artifacts-path`
 .artifacts-test/
+.artifacts/
 
 # Python bytecode from the audit scripts
 __pycache__/

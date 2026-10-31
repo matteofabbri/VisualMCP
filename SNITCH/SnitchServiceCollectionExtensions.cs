@@ -32,6 +32,9 @@ public static class SnitchServiceCollectionExtensions
         // expensive to recompute and useful across restarts.
         services.AddSingleton<Storage.IVisualMcpStore, Storage.VisualMcpStore>();
 
+        // Local history: whole-file snapshots in the same store, independent of commits.
+        services.AddSingleton<Storage.ILocalHistoryService, Storage.LocalHistoryService>();
+
         // Feature services.
         services.AddSingleton<Git.IGitService, Git.GitService>();
         services.AddSingleton<Docker.IDockerService, Docker.DockerService>();
@@ -190,6 +193,8 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Refactoring.IFixComplexityService, Languages.CSharp.Refactoring.FixComplexityService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IMoveToFolderService, Languages.CSharp.Refactoring.MoveToFolderService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IConvertToRecordService, Languages.CSharp.Refactoring.ConvertToRecordService>();
+        // The two directions of Rider's abstract-class ↔ interface conversion, gated on the compiler.
+        services.AddSingleton<Languages.CSharp.Refactoring.IConvertTypeKindService, Languages.CSharp.Refactoring.ConvertTypeKindService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IIntroducePartOfStringService, Languages.CSharp.Refactoring.IntroducePartOfStringService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IMoveStaticMembersService, Languages.CSharp.Refactoring.MoveStaticMembersService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IMoveInstanceMethodService, Languages.CSharp.Refactoring.MoveInstanceMethodService>();

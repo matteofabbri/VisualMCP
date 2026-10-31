@@ -45,13 +45,13 @@ baseline and the seven architecture/quality analyses).
 | Invert if | `invert_if` | ✅ |
 | Invert Boolean | — | ❌ |
 | Global usings / non-global usings / implicit usings | `global_usings`, `convert_to_non_global_using`, `implicit_usings` | ✅ |
-| Convert abstract class ↔ interface | — | ❌ |
+| Convert abstract class ↔ interface | `convert_type_kind` | ✅ both directions, implementers rewritten with it, compiler-gated |
 | Members to partial | `type_to_partial` | ⚠️ makes the type partial, does not move members |
 | Change type / change nullability / rename tuple component | `change_type`, `change_nullability`, `rename_tuple_component` | ✅ |
 | Generify | — | ❌ |
 | Structural search & replace as a refactoring | `structural_search` | ✅ |
 
-Of Rider's "main set" (~46 refactorings) about 38 are implemented; the missing ones are listed above.
+Of Rider's "main set" (~51 refactorings) about 47 are implemented; the missing ones are listed above.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
 `simplify_code` (97 IDE ids) and `simplify_vb_code` (15 VB ids), the fixes come from `apply_code_fix`.
 
@@ -80,6 +80,13 @@ ReSharper's **context actions** (1000+) are covered only in part: the style rewr
 | Remove regions | `remove_regions` | ✅ |
 | Cleanup profiles / on-save | — | ❌ (cleanup takes a step list instead) |
 | Formatting settings management, `.editorconfig` generation | — | ❌ |
+
+### Local history
+
+| Feature | Tool | Status |
+|---|---|---|
+| Per-file snapshots independent of commits | `local_history` | ✅ snapshot/history/diff/restore in the solution store |
+| Undo of a write this server made | `edit_history`, `revert_edit` | ✅ |
 
 ### Analysis & inspections
 
@@ -177,9 +184,9 @@ it matters — is [What is missing — the gap inventory](gaps.md). This section
    inside a decompiled assembly, and no IL view.
 7. **Diagrams and exploration** — `export_dependency_graph` emits DOT/Mermaid; there is no interactive
    type/project graph, sequence diagram, structure view, code vision or TODO explorer.
-8. **VCS extras** — local history, a 3-way merge assistant, GitLab/Azure DevOps.
+8. **VCS extras** — a 3-way merge assistant, GitLab/Azure DevOps.
 9. **Smaller refactorings** — Extract Members to Partial, Inline Field, Transform Parameters,
-   Abstract Class ↔ Interface, Extension → static, Invert Boolean, Make non-static, Move Type into
+   Extension → static, Invert Boolean, Make non-static, Move Type into
    Another Type, Generify, `params` removal.
 
 UI-bound features (editor, completion popups, tool windows, on-save cleanup, designers) are deliberately

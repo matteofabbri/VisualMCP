@@ -61,7 +61,7 @@ inputs**. The source on disk remains the only truth.
 
 | Area | Tables | What a row means |
 |---|---|---|
-| Activity | `command_log`, `applied_edit`, `context` | Every tool call; every file this server wrote (with the previous text, compressed); cached inspection reports and small settings |
+| Activity | `command_log`, `applied_edit`, `file_snapshot`, `context` | Every tool call; every file this server wrote (with the previous text, compressed); whole-file local-history snapshots, deduplicated on their hash; cached inspection reports and small settings |
 | Board | `board_item`, `board_comment`, `board_history` | A kanban card, its comments, its change history |
 | Symbol index | `si_document`, `si_symbol`, `si_usage`, `si_metacode` | Declarations, typed usages (call/read/write/…), and one metacode tree per declaration |
 | Metacode index | `mc_document`, `mc_tree`, `mc_node`, `source_document` | One pseudocode tree per declaration with its complexity, the complete AST of each declaration node by node (parent link, property slot, position, depth, span, payload), and the file as its own language writes it |

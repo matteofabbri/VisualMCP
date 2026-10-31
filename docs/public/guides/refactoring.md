@@ -77,7 +77,7 @@ pre-existing local.
 ### Signatures and types
 
 `change_signature`, `change_type`, `change_nullability`, `use_base_type`, `add_params`,
-`convert_to_primary_constructor`, `convert_to_record`, `convert_anonymous_to_type`,
+`convert_to_primary_constructor`, `convert_to_record`, `convert_type_kind`, `convert_anonymous_to_type`,
 `constructor_to_factory`, `copy_type`, `function_to_indexer`, `indexer_to_function`,
 `encapsulate_field`, `property_to_auto`, `property_to_function`, `function_to_property`.
 

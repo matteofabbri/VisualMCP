@@ -567,7 +567,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     private static MetacodeDocumentFacts Translate(
         string text, string project, string language, string path, string hash, long mtime)
     {
-        var translator = new MetacodeTranslator([new CSharpFrontend(), new RazorFrontend()]);
+        var translator = new MetacodeTranslator([new CSharpFrontend(), new VisualBasicFrontend(), new RazorFrontend()]);
         var model = translator.Translate(MetacodeSource.FromText(text, LanguageOf(path), path), MetacodeOptions.Default);
         var collected = MetacodeDeclarations.Collect(model, path);
         var hasReader = model.Diagnostics.All(diagnostic => diagnostic.Code != MetacodeDiagnosticCodes.NoFrontend);
@@ -755,12 +755,13 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
                 var source = tag switch
                 {
                     "cs" => MetacodeSource.FromCSharp(text),
+                    "vb" => MetacodeSource.FromVisualBasic(text),
                     "pseudo" => MetacodeSource.FromPseudocode(text),
                     _ => null,
                 };
 
                 if (source is null)
-                    return Failed($"language must be 'pseudo' or 'cs' for text — the target is C#, the source cannot be a Razor page here.", diagnostics);
+                    return Failed($"language must be 'pseudo', 'cs' or 'vb' for text — the target is C#, the source cannot be a Razor page here.", diagnostics);
 
                 return Emit(source, "text", diagnostics, options);
             }
@@ -790,8 +791,8 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
                     return Failed($"File not found: {path}", diagnostics);
 
                 var source = MetacodeSource.FromFile(path);
-                if (source.Language is not (MetacodeLanguage.CSharp or MetacodeLanguage.Pseudocode))
-                    return Failed($"Only C# and canonical pseudocode can be generated from; {path} is not one of them.", diagnostics);
+                if (source.Language is not (MetacodeLanguage.CSharp or MetacodeLanguage.VisualBasic or MetacodeLanguage.Pseudocode))
+                    return Failed($"Only C#, Visual Basic and canonical pseudocode can be generated from; {path} is not one of them.", diagnostics);
 
                 return Emit(source, "file", diagnostics, options);
             }
@@ -853,6 +854,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     {
         null or "" => null,
         "cs" or "c#" or "csharp" => "cs",
+        "vb" or "vbnet" or "visualbasic" or "visual-basic" => "vb",
         "pseudo" or "pseudocode" or "mc" or "metacode" => "pseudo",
         _ => language,
     };
