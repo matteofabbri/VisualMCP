@@ -4,13 +4,20 @@ using Microsoft.Diagnostics.NETCore.Client;
 namespace Snitch.Profiling.Runtime;
 
 /// <summary>An EventPipe provider set that answers one class of question.</summary>
+/// <remarks>
+/// <see cref="ExtraProviders"/> is for the providers that are not the CLR runtime: the task provider
+/// the async analysis reads, the data-access providers the Database tool reads, and the probe an
+/// instrumented assembly writes to. A provider that no process in the session implements is harmless:
+/// EventPipe simply has no events for it.
+/// </remarks>
 public sealed record TracePreset(
     string Id,
     string Description,
     long RuntimeKeywords,
     EventLevel Level,
     bool SampleProfiler,
-    bool RequestStackwalk);
+    bool RequestStackwalk,
+    IReadOnlyList<EventPipeProvider>? ExtraProviders = null);
 
 /// <summary>
 /// The keyword sets VisualMCP uses. <c>0x4C14FCCBD</c> is the runtime keyword mask dotnet-trace
@@ -38,6 +45,31 @@ public static class TracePresets
     private const long GCHeapSurvivalAndMovement = 0x400000;
     private const long GCHeapAndTypeNames = 0x1000000;
     private const long ThreadTransfer = 0x80000000;
+
+    // Declared before All on purpose: a static initializer runs in textual order, and the database
+    // preset reads DatabaseProviders while All is being built.
+    /// <summary>The provider the runtime writes its task and await events to.</summary>
+    public const string TaskProvider = "System.Threading.Tasks.TplEventSource";
+
+    /// <summary>The provider the instrumenter's probe writes to (see <c>Snitch.Profiling.Probe</c>).</summary>
+    public const string ProbeProvider = "Snitch-Profiling-Probe";
+
+    /// <summary>
+    /// The data-access EventSources the database preset turns on. A name no library in the process
+    /// implements produces no event and costs nothing.
+    /// </summary>
+    public static IReadOnlyList<string> DatabaseProviders { get; } =
+    [
+        "Microsoft.EntityFrameworkCore",
+        "Microsoft.Data.SqlClient.EventSource",
+        "System.Data.SqlClient.EventSource",
+        "Npgsql",
+        "MySqlConnector",
+        "MySql.Data",
+        "Microsoft.Data.Sqlite",
+        "Oracle.ManagedDataAccess",
+        "IBM.Data.DB2",
+    ];
 
     public static IReadOnlyList<TracePreset> All { get; } =
     [
@@ -67,6 +99,23 @@ public static class TracePresets
         new("diagnose",
             "Everything profile_diagnose needs in one trace: CPU samples plus Verbose allocation ticks with call stacks, GC, exceptions and contention. More data than 'runtime'.",
             CpuSamplingKeywords, EventLevel.Verbose, SampleProfiler: true, RequestStackwalk: true),
+
+        new("async",
+            "Task and await timeline: System.Threading.Tasks.TplEventSource at every task keyword, so profile_async can pair each await's start and resume and report the exact wait, plus the state machines that never completed.",
+            0, EventLevel.Informational, SampleProfiler: false, RequestStackwalk: false,
+            [new EventPipeProvider(TaskProvider, EventLevel.Informational, keywords: 0x1FF, arguments: null)]),
+
+        new("database",
+            "Data access: the EventSource of EF Core, SqlClient, Npgsql, MySql, SQLite, Oracle and Db2 at Verbose, so profile_database can list commands, durations and repeating shapes.",
+            0, EventLevel.Informational, SampleProfiler: false, RequestStackwalk: false,
+            DatabaseProviders
+                .Select(name => new EventPipeProvider(name, EventLevel.Verbose, keywords: -1, arguments: null))
+                .ToArray()),
+
+        new("instrumentation",
+            "The probe an assembly rewritten by profile_instrumentation writes to: exact enter/exit events, no sampling. Use it while the instrumented copy runs, then profile_instrumentation action=analyze.",
+            0, EventLevel.Informational, SampleProfiler: false, RequestStackwalk: false,
+            [new EventPipeProvider(ProbeProvider, EventLevel.Verbose, keywords: -1, arguments: null)]),
     ];
 
     public static TracePreset? Find(string id) =>
@@ -103,12 +152,15 @@ public static class TraceProviderBuilder
             ?? throw new ArgumentException(
                 $"Unknown profile '{profile}'. Use one of: {string.Join(", ", TracePresets.All.Select(p => p.Id))}, custom.");
 
-        var providers = new List<EventPipeProvider>
-        {
-            new(RuntimeProvider, preset.Level, preset.RuntimeKeywords, arguments: null),
-        };
+        var providers = new List<EventPipeProvider>();
+        if (preset.RuntimeKeywords != 0)
+            providers.Add(new EventPipeProvider(RuntimeProvider, preset.Level, preset.RuntimeKeywords, arguments: null));
+
         if (preset.SampleProfiler)
             providers.Add(new EventPipeProvider(SampleProfilerProvider, EventLevel.Informational, keywords: 0, arguments: null));
+
+        if (preset.ExtraProviders is { Count: > 0 } extra)
+            providers.AddRange(extra);
 
         var effectiveStackwalk = preset.RequestStackwalk && requestStackwalk;
         return (providers, preset with { RequestStackwalk = effectiveStackwalk });

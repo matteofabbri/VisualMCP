@@ -139,6 +139,16 @@ engine does not offer at all are tracked in
 - **ClrMD cannot attach to the server's own process.** Profile the application, not VisualMCP.
 - Inlining, async state machines and framework frames can hide the user code; the hot-path and I/O tools
   exist to surface it, but they are still reading a sampled stack.
+- **`profile_async` and `profile_database` need their presets.** These are EventSource providers, not CLR
+  runtime keywords: collect with `profile=async` / `profile=database`. An empty answer names the providers
+  the trace did contain and the command that fixes it; `profile_events` shows any provider's schema.
+- **`profile_root_cause` needs both halves.** PDBs for the measured side, a readable source file (C#,
+  Visual Basic or Razor under the solution) for the AST side. It translates the file from disk, so a
+  stale persisted index does not matter; a missing half is reported, never guessed.
+- **Instrumentation changes the binary.** `profile_instrumentation action=instrument` writes a rewritten
+  copy (never the original), which must run with `Snitch.Profiling.Probe.dll` beside it, and every call
+  costs two events. Methods whose IL cannot be wrapped safely are skipped and named; a strong-named
+  .NET Framework assembly may refuse the rewritten copy.
 
 ## Automation and safety
 

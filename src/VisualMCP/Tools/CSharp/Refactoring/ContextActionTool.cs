@@ -24,8 +24,14 @@ public static class ContextActionTool
         "foreach_to_for / for_to_foreach / invert_loop (loop conversions; invert_loop turns the canonical ascending for into a descending one) · " +
         "if_to_switch (an if/else-if chain over one selector into a switch) · " +
         "concat_to_interpolated / interpolated_to_concat (the two directions of string formatting) · " +
-        "digit_separators (group an integer literal with '_') · " +
+        "digit_separators (group an integer literal with '_') · remove_digit_separators · " +
         "remove_argument_name (a named argument becomes positional; `text` names it) · " +
+        "merge_sequential_checks / split_and_in_if (the two directions of an 'if (a) { if (b) }' chain) · " +
+        "join_null_check_with_usage (if (x != null) { x.M(); } → x?.M();) · " +
+        "use_var / use_explicit_type (a local declaration, one way or the other) · split_declaration · " +
+        "remove_braces (a one-statement block, refused when it would rebind an else or a declaration) · " +
+        "migrate_to_nullable (#nullable enable at the top, or a disable turned into it) · " +
+        "use_configure_await_false (append .ConfigureAwait(false) to the awaited expression) · " +
         "string_to_raw / string_to_verbatim / string_to_regular (re-encoded from the value the compiler sees). " +
         "Every action is refused when the projected edit would add a compiler error, and every write is recorded in the edit history.")]
     public static Task<object> ContextAction(

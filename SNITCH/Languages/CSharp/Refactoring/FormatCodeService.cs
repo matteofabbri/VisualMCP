@@ -57,6 +57,25 @@ internal static class DocumentScopes
 }
 
 /// <summary>
+/// The folder the per-solution settings files live under (<c>.visualMCP</c>): the loaded solution's
+/// directory, else the single project's, else the working directory. One definition, so a cleanup
+/// profile and a template store never resolve to two different solutions.
+/// </summary>
+internal static class SolutionPaths
+{
+    public static string DirectoryOf(Snitch.Workspace.IRoslynWorkspace workspace)
+    {
+        if (workspace.LoadedSolutionPath is { } solutionPath)
+            return Path.GetDirectoryName(Path.GetFullPath(solutionPath)) ?? Directory.GetCurrentDirectory();
+
+        var projectPath = workspace.CurrentSolution?.Projects.FirstOrDefault()?.FilePath;
+        if (projectPath is not null) return Path.GetDirectoryName(Path.GetFullPath(projectPath))!;
+
+        return Directory.GetCurrentDirectory();
+    }
+}
+
+/// <summary>
 /// ReSharper's "Reformat Code" as a tool of its own. The style engine used the Roslyn formatter only
 /// through the opt-in IDE0055 rule; this applies it directly to a document, a project or the whole
 /// solution, using the project's own options (including <c>.editorconfig</c>), and keeps each file's

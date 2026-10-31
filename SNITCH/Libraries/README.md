@@ -1,13 +1,14 @@
 # Libraries — the host-agnostic parts
 
-Two projects live here. Both are separate from `Snitch` on purpose: they take explicit paths,
+Three projects live here. They are separate from `Snitch` on purpose: they take explicit paths,
 process ids or text and have no workspace dependency, so a test host or a console application can
 use them without a loaded solution.
 
 | Project | Assembly | Used by |
 |---|---|---|
 | `Snitch.Metacode/` | `Snitch.Metacode` | the seven `metacode_*` tools, decompilation, the solution's metacode index |
-| `Snitch.Profiling/` | `Snitch.Profiling` | the 22 `profile_*` tools |
+| `Snitch.Profiling/` | `Snitch.Profiling` | the 27 `profile_*` tools |
+| `Snitch.Profiling.Probe/` | `Snitch.Profiling.Probe` | `netstandard2.0` EventSource the instrumenter injects calls to; copied next to an instrumented assembly |
 
 ## Snitch.Metacode
 
@@ -40,9 +41,10 @@ spawned. The external tools are only inspected or installed by `profile_tools`.
 
 | Folder | What it owns |
 |---|---|
-| `Runtime/` | process discovery, EventPipe trace sessions, EventCounter polling, managed stack walks |
+| `Runtime/` | process discovery, EventPipe trace sessions and their presets (`async`, `database` and `instrumentation` add non-CLR providers), EventCounter polling, managed stack walks |
 | `Snapshots/` | ClrMD: heap snapshots, retention/root chains, dump collection and analysis |
-| `Analysis/` | trace parsing (ETLX conversion for CPU stacks), allocation attribution, I/O attribution, hot paths and lines, source mapping through portable PDBs |
+| `Analysis/` | trace parsing (ETLX conversion for CPU stacks), allocation attribution, I/O attribution, hot paths and lines, source mapping through portable PDBs; the events-only reader plus the Events Viewer, async (TplEventSource) and database (EF Core/SqlClient/…) analyses; `RootCauseService`, the join of a measurement with the metacode AST through `ICodeStructureIndex` |
+| `Instrumentation/` | the IL instrumenter (Mono.Cecil + the probe) and the exact enter/exit analyzer behind `profile_instrumentation` |
 | `Verdicts/` | the tools that answer a question instead of printing a table: `profile_slowdown`, `profile_memory_growth`, `profile_threadpool`, `profile_review_change` |
 | `Tooling/` | the seven-tool catalogue, detection and installation |
 | `Symbols/`, `Monitor/` | dotnet-symbol and dotnet-monitor equivalents |

@@ -10,10 +10,14 @@ answerable **inside the agent loop**, in one or two calls, without installing a 
 without leaving the conversation:
 
 - Which method is burning CPU, and at which line?
+- Which code creates the problem — the loop, the LINQ call, the allocation per iteration?
 - What is the application allocating, and what survives to gen2?
 - Why is the process stuck — which thread holds the lock everyone wants?
 - Why is memory high — which type owns the heap?
 - Is the thread pool starving, and are exceptions being used for control flow?
+- What did the async code await, and did a state machine never complete?
+- Which database statements ran, and is one shape running per item of a list?
+- How many times did this method run, exactly? (instrumented, not sampled)
 
 ## The seven tools, native vs delegated
 
@@ -340,6 +344,9 @@ files) with the 10 MB / 20 % floor and the growing type as the driver.
 | `gc` | **Verbose** | no | yes | allocation ticks **with call stacks**, GC pauses, allocation sites |
 | `exceptions` | Informational | no | yes | exception throw sites |
 | `threading` | Informational | no | yes | contention + thread pool |
+| `async` | Informational | no | no | `System.Threading.Tasks.TplEventSource` (all task keywords): await durations and incomplete state machines |
+| `database` | **Verbose** | no | no | EF Core, SqlClient, Npgsql, MySql, SQLite, Oracle, Db2 EventSources: commands, durations, shapes |
+| `instrumentation` | Informational | no | no | the probe an instrumented assembly writes to (`Snitch-Profiling-Probe`) |
 | `custom` | from the provider string | per provider | `requestStackwalk` param (default true) | anything else |
 
 Allocation ticks are emitted only at Verbose, and call stacks are attached to allocation/exception
@@ -393,6 +400,60 @@ samples:
 Run `profile_symbols(action="download", modulePaths=[…])` first when a module was shipped without
 its PDB; it speaks the public symbol-server protocol (`<pdb>/<GUID><age>/<pdb>`) and caches the
 result.
+
+## Code, events and exact time
+
+Three layers sit on top of the trace readers.
+
+**The events-only reader** (`EventPipeTraceReader`) opens the `.nettrace` with `EventPipeEventSource`
+and no ETLX conversion, subscribing to `AllEvents`. EventPipe metadata already defines a template with
+the provider's own payload names, so every event arrives with its fields; no provider-specific parser
+is needed, which is what makes `profile_events` work on a provider nobody has written code for. It
+reads at most `maxEvents` (default 200 000) and reports truncation and lost events.
+
+- `EventInventoryService` groups by (provider, event), counts, rates, payload field names and one
+  sample event.
+- `AsyncFlowService` reads `System.Threading.Tasks.TplEventSource`: `TaskScheduled`,
+  `TaskExecute/Start|Stop`, `TaskWait/Send|Stop` (pairing the two gives the exact await duration, keyed
+  by thread + waiting task + awaited task — deliberately **not** by behavior, which only the send
+  carries), `TraceOperation/Start|Stop` and `IncompleteAsyncMethod` (whose
+  `stateMachineDescription` names the async method that never completed).
+- `DatabaseTraceService` reads the data-access EventSources and pairs `CommandExecuting`/`CommandExecuted`
+  by command id or activity id when the duration is not a payload field. Commands are grouped by a
+  normalised shape (string and numeric literals replaced, `IN (…)` collapsed), which is what turns
+  "same query, different arguments" into one row and exposes the N+1 pattern.
+
+**The metacode join** (`RootCauseService` + `ICodeStructureIndex`) is the static half of
+`profile_root_cause`. The host implements the interface with `MetacodeCodeStructureIndex`
+(`src/VisualMCP/Profiling/`), which translates each hot file with the same frontends the solution index
+uses — on demand, cached on the file's timestamp — and reports per declaration: span, cyclomatic and
+cognitive complexity, the loop chain with nesting depth and header, and the constructs a measurement
+can be attributed to (`loop`, `linq`, `allocation`, `string-concat`, `interpolation`, `await`, `lock`,
+`sync-over-async`, `throw`, `catch`). A site is matched to the **innermost declaration whose span
+contains its line**; a site without a line is matched by name only inside the same file, or left
+unmatched with a warning. The service ranks sites by share of their own metric, keeps the constructs
+that contain the line first, and writes the sentence that connects a measurement to a construct.
+
+**Instrumentation** (`AssemblyInstrumenter` + `InstrumentationAnalysisService`) is exact, not sampled.
+`Mono.Cecil` rewrites the selected methods:
+
+1. `ldc.i4 methodId; call Probe.Enter(int)` at the top (outside the protected region);
+2. every `ret` is mutated in place to `stloc result; leave end` (mutated, not removed, so an existing
+   exception-handler range that ends on it keeps pointing at a real instruction);
+3. a `fault` handler calls `Probe.Exit` and `endfinally`, and the normal exit calls `Probe.Exit` before
+   the `ret`.
+
+The handler **must** start where the try ends (`TryEnd == HandlerStart`) and sit before the leave
+target, the layout every compiler emits; placing the handler after the normal exit produced an
+`InvalidProgramException` at JIT time (the analyzer test now runs the rewritten assembly to catch it).
+Methods using `jmp`, or a `ret` inside a finally/fault block, are skipped and named. The probe is
+`Snitch.Profiling.Probe.dll` (`netstandard2.0`, an `EventSource` named `Snitch-Profiling-Probe`) and is
+copied next to the output; the `.map.json` maps id → `Namespace.Type.Method`.
+
+The analysis pairs enters and exits per thread as a stack: inclusive = exit − enter, exclusive =
+inclusive − the child frames that ran inside it, call count = frames that closed, and recursion is a
+stack of frames rather than a merged total. Compiler-generated names are cleaned
+(`<Foo>d__3.MoveNext` → `Foo (async)`).
 
 ## Findings
 
@@ -498,4 +559,14 @@ single-snapshot and stable verdicts, the five thread-pool states including a bur
 the change review (a CPU regression across different trace durations, the refusal on tiny windows,
 and heap growth as a regression). None of these tests need a live process; they assert on the
 verdict, the rank-1 evidence and the fields a tool reads.
+
+`src/VisualMCP.Tests/ProfilingCodeIntelligenceTests.cs` covers the code-intelligence layer: the
+root-cause join (a site inside two nested loops, an allocation inside a loop, a synchronous wait on a
+blocked site, and the measured-only answer when no AST is available), the metacode adapter on a real
+source file (loops and their depth, the LINQ materialiser, the allocations, `Task.Result`), the async
+pairing and incomplete state machines, the database pairing/shape grouping/N+1 finding, the events
+inventory and filter, and instrumented profiling. The instrumenter test is end to end: it compiles a
+small assembly with Roslyn, rewrites it, loads the rewritten copy and **runs** it (an invalid IL
+rewrite throws `InvalidProgramException` at JIT time), and checks that an exception still propagates
+through the injected fault handler.
 

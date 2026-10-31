@@ -355,11 +355,15 @@ semantica, non riscritture meccaniche.
 | Architecture rules / layer enforcement | ✅ | `check_layer_violations` |
 | LINQ anti-patterns | 🔧 | `find_performance_anti_patterns` (materializzazione dentro un loop) e le regole IDE0120/IDE0121 di `simplify_code`; nessun rule set completo |
 | Nullable reference analysis | ✅ | `analyze_nullability` — `!` abusati, nullable disabilitate, flussi non gestiti |
+| Qualità della suite di test | ✅ | `analyze_test_quality` — test senza assert, vuoti, nomi non descrittivi, `async void` |
+| Validazione degli input (parametri e DTO) | ✅ | `find_missing_validation` — parametri pubblici senza guard clause e DTO (classe/record pubblico senza comportamento, ≥2 proprietà settabili) con proprietà senza attributi `System.ComponentModel.DataAnnotations` |
+| Coesione (LCOM4) | ✅ | `get_cohesion_metrics` — quanti cluster di campi indipendenti ha una classe |
 | Data flow analysis | ❌ | 🎯 (il dataflow esiste solo dentro `simplify_code` per IDE0059) |
 | Taint analysis (sicurezza) | ❌ | 🎯 SonarQube-style |
-| Code churn / hotspot storico (git-aware) | ❌ | 🎯 CodeScene-style |
+| Code churn / hotspot storico (git-aware) | ✅ | `git_churn_hotspots` — git log (quante volte cambia un file) × complessità Roslyn del suo metodo peggiore, finestra limitata e sola lettura |
 | Cognitive complexity | ✅ | `complexity_report` e `get_complexity_hotspots` — McCabe e Sonar cognitive, con le righe che producono il punteggio |
 | API surface diff (breaking change detection) | ✅ | `find_breaking_changes` (confronto con un ref git) |
+| **Quality trend fra due revisioni** | ✅ | `get_quality_trend` — due revisioni (o `to=worktree`) misurate con UN set di regole sintattiche: complessità media per metodo, metodi oltre 10/20, metodi lunghi, TODO, con la dimensione come contesto; verdetto improved/regressed/unchanged, segnali con direzione e i file che si sono mossi di più. Non compila: una revisione che non builda è comunque confrontabile |
 
 ---
 
@@ -519,6 +523,11 @@ nativo con una spiegazione invece di lasciare che ILSpy fallisca nella metadata.
 | Verdetto "perché la memoria cresce" | ✅ | `profile_memory_growth` — growth/shrink/stable/single-snapshot; confronto di due heap JSON (`profile_heap writeJson=true`) o snapshot di un processo vivo che scrive il JSON per la volta dopo, con il tipo cresciuto correlato al sito di allocazione (`file:line`) quando c'è una traccia `gc` |
 | Verdetto "il thread pool è affamato" | ✅ | `profile_threadpool` — starved/at-risk/burst/healthy/inconclusive; richiede insieme coda piena **e** thread bloccati, nomina il sito bloccante con `file:line`; counters + traccia `runtime` + stack |
 | Verdetto "questa modifica è una regressione" | ✅ | `profile_review_change` — regression/improvement/unchanged/inconclusive su tassi normalizzati al secondo (CPU ms/s, allocazioni MB/s, eccezioni/s, …), soglie di significatività per metrica; è `inconclusive` solo quando le due finestre sono sotto 500 ms, mentre con meno di 100 campioni CPU la metrica CPU non entra nel giudizio (il verdetto può comunque venire dalle altre) |
+| Causa nel codice (join con l'AST metacode) | ✅ | `profile_root_cause` — ogni sito misurato (CPU, allocazioni, tempo bloccato, eccezioni) è agganciato alla dichiarazione che lo contiene nell'**AST metacode**: catena dei loop con profondità e header, materialiser LINQ per iterazione, allocazione/concatenazione dentro un loop, `await`/`lock` nel loop, `Task.Result`/`.Wait()`; la dichiarazione viene tradotta dal file su disco (frontend C#/VB/Razor), cache per timestamp |
+| Analisi .NET async | ✅ | `profile_async` — `System.Threading.Tasks.TplEventSource`: task scheduled/started/completed/exceptional, durate esatte degli `await` (coppie TaskWaitSend/Stop), operazioni async nominate, **state machine mai completate** (`IncompleteAsyncMethod`); preset `async` |
+| Analisi database | ✅ | `profile_database` — EventSource di EF Core/SqlClient/Npgsql/MySql/SQLite/Oracle/Db2: comandi con testo e durata, comandi lenti, forme normalizzate ripetute (segnale N+1), aperture di connessione, quota della finestra in data access; preset `database`; senza eventi indica i provider presenti e come ricatturare |
+| Events Viewer | ✅ | `profile_events` — inventario di QUALSIASI provider/evento: conteggio, rate, nomi dei campi del payload e un evento di esempio; nessun parser specifico richiesto, quindi funziona anche su provider custom |
+| Profiling instrumentato (esatto) | ✅ | `profile_instrumentation` — `action=instrument` riscrive l'IL (Mono.Cecil + probe EventSource iniettato, `.map.json`, DLL del probe accanto all'output, include/exclude wildcard), `action=analyze` legge le coppie enter/exit: **conteggi di chiamate e tempi inclusivi/esclusivi esatti**, nessun campionamento; preset `instrumentation` |
 | EventCounters live (dotnet-counters) | ✅ | `profile_counters` — serie temporali native con min/max/mean/last |
 | Stack managed + lock contesi (dotnet-stack) | ✅ | `profile_stacks` — ogni thread, monitor con thread proprietario, regole di blocco |
 | Dump collect/analyze (dotnet-dump) | ✅ | `profile_dump` — `WriteDump` + analisi ClrMD (heap, stack, sync block) |
@@ -664,6 +673,23 @@ confine scritto con il motivo. 355 → **373 tool**.
 
 ---
 
+## 18. ReSharper & CodeMaid: template, profili di cleanup, layout (2026-10-31)
+
+Chiude le ultime righe ❌/⚠️ di [docs/resharper-codemaid-coverage.md](docs/resharper-codemaid-coverage.md):
+**373 → 375 tool**.
+
+| Feature | Implementato | Note |
+|---------|:---:|-------|
+| Live / postfix / file template | ✅ | `templates` — 18 live, 10 postfix (`.if`, `.null`, `.var`, `.await`, …) e 8 file (class, interface, record, struct, enum, static class, abstract class, test xUnit); `expand` sostituisce la riga-scorciatoia o inserisce dopo l'ancora, `create` genera il file, `save`/`delete` mantengono lo store di squadra `.visualMCP/templates.json`; gate del compilatore |
+| Profili di cleanup con nome | ✅ | `code_cleanup profile=` — `full`/`reformat`/`style`/`usings`/`regions`/`reorder`/`safe` più i profili di squadra in `.visualMCP/cleanup-profiles.json`; `saveProfileAs` ne scrive uno |
+| Regole di layout di CodeMaid | ✅ | `layout_code` — reflow dei commenti `//` a una larghezza, join di un intervallo di righe (rifiutato se i token cambierebbero), normalizzazione delle righe vuote; gate del compilatore |
+| Ricerca fuzzy dei simboli | ✅ | `find_symbol` — oltre a exact/prefix/CamelHumps/contains, fallback a sottosequenza (`custord` → `CustomerOrder`) quando nulla combacia |
+| Context action: la seconda tranche | ✅ | `context_action` — 36 id: merge/split delle condizioni, null-check unito all'uso, `use_var`/`use_explicit_type`, split declaration, remove braces, `#nullable enable`, separatori di cifre, `ConfigureAwait(false)` |
+| Create from usage: le forme oltre CS1061 | ✅ | `create_from_usage` — CS0117 (membro statico), CS1501/CS7036 (overload dal call site) oltre a CS1061/CS0246/CS0103 |
+
+---
+
+
 ## Riepilogo per Categoria
 
 Conteggio: una riga ✅ e una riga ❌ per ciascuna tabella di sezione; le righe 🔧 (parziali) e 💀
@@ -692,9 +718,10 @@ Conteggio: una riga ✅ e una riga ❌ per ciascuna tabella di sezione; le righe
 | **TOTALE** | **212** | **41** | **84%** |
 
 Le tabelle delle sezioni sono ferme al 2026-10-30 e non contengono i **14 tool aggiunti quel giorno**
-(SSR, cleanup e formattazione, famiglia "create", baseline delle ispezioni, sette analisi) né i **18 chiusi
-il 2026-10-31** (9 Kubernetes/Helm, 7 Node/JS-TS, 2 SQL). Il conteggio vivo è `capability_report`:
-**373 tool**.
+(SSR, cleanup e formattazione, famiglia "create", baseline delle ispezioni, sette analisi), i **18 chiusi
+il 2026-10-31** (9 Kubernetes/Helm, 7 Node/JS-TS, 2 SQL), i **2 della sezione 18** (`templates`,
+`layout_code`) né `get_quality_trend` (2026-10-31, il trend di qualità fra due revisioni: la sezione 3
+riporta la sua riga). Il conteggio vivo è `capability_report`: **381 tool**.
 
 ---
 

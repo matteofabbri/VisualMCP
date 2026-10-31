@@ -103,6 +103,8 @@ When you need to go deeper:
 | This method is too complex — lower it | `reduce_complexity` | Plans and applies extract-block, name-boolean and guard-clause moves, re-measures, rolls back if a step breaks compilation |
 | Make the whole codebase simpler | `fix_complexity` | Ranks the solution, lowers the worst methods with the same moves, and reports before/after in one call |
 | Where does a refactoring pay first? | `git_churn_hotspots` | Joins git history (how often a file changes) with the complexity ranking (its worst method); read-only, and a file that only *looks* big is not a hotspot |
+| Did this branch make the code better or worse? | `get_quality_trend` | Two revisions (or `to=worktree`) measured with the same syntactic rule set, with a verdict and the files whose complexity moved most; nothing is compiled, so a revision that no longer builds is still comparable |
+| Are the inputs actually validated? | `find_missing_validation` | Public parameters never null-checked, and DTO-shaped classes/records whose properties carry no `System.ComponentModel.DataAnnotations` validation |
 | Is this code reachable? | `find_dead_code` | Control-flow graph, not heuristics over text |
 | Is this symbol used anywhere? | `find_unused_symbols` | Roslyn reference search across the solution |
 | Is this code duplicated? | `find_duplicate_code` | Structural clones, normalised over names and literals |

@@ -12,8 +12,10 @@ public static class ProfileCollectTool
         "of 'dotnet-trace collect' (the external tool does not need to be installed). " +
         "Profiles: 'cpu' (sample profiler stacks + runtime events, the usual first choice), 'gc' (Verbose: GC, heap stats, " +
         "allocation ticks with type names and call stacks), 'exceptions' (throw sites), 'threading' (contention + thread pool), " +
-        "'runtime' (general diagnostics), 'diagnose' (Verbose: CPU samples + allocation ticks with stacks + GC/exceptions/contention) " +
-        "or 'custom' with providers='Name:Keywords:Level,...'. Actions: 'collect' starts, waits durationSeconds and stops (default); " +
+        "'runtime' (general diagnostics), 'diagnose' (Verbose: CPU samples + allocation ticks with stacks + GC/exceptions/contention), " +
+        "'async' (System.Threading.Tasks.TplEventSource: task/await events for profile_async), 'database' (EF Core, SqlClient, Npgsql, " +
+        "MySql, SQLite, Oracle and Db2 EventSources for profile_database), 'instrumentation' (the probe an assembly rewritten by " +
+        "profile_instrumentation writes to), or 'custom' with providers='Name:Keywords:Level,...'. Actions: 'collect' starts, waits durationSeconds and stops (default); " +
         "'start' returns a sessionId for a long-running capture; 'stop' ends that session; 'sessions' lists open ones. " +
         "Feed the resulting .nettrace to profile_analyze for CPU hotspots, allocation sites, GC pauses, exceptions, " +
         "lock contention and JIT time, with file:line when the PDB is available.")]
@@ -22,7 +24,7 @@ public static class ProfileCollectTool
         IProfiledProcessService processes,
         [Description("Target process id. Omit if processName is given.")] int? processId = null,
         [Description("Target process name (or a substring); must match exactly one process.")] string? processName = null,
-        [Description("Preset: 'cpu' (default), 'gc', 'exceptions', 'threading', 'runtime', or 'custom'.")] string profile = "cpu",
+        [Description("Preset: 'cpu' (default), 'gc', 'exceptions', 'threading', 'runtime', 'diagnose', 'async', 'database', 'instrumentation' or 'custom'.")] string profile = "cpu",
         [Description("How long to collect when action='collect', in seconds.")] int durationSeconds = 10,
         [Description("Where to write the .nettrace. Default: <solution>/.visualMCP/profiling/trace-<process>-<pid>-<time>.nettrace.")] string? outputPath = null,
         [Description("Only for profile='custom': comma-separated 'Provider:Keywords:Level' entries.")] string? providers = null,

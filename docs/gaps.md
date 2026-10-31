@@ -16,8 +16,24 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (fifteenth revision: **the last ReSharper/CodeMaid rows in the coverage
-page are closed**. `templates` (18 live, 10 postfix and 8 file templates, plus a team store in
+Last updated: 2026-10-31 (seventeenth revision: **profiling closes the four Visual Studio gaps and joins
+the measurements with the metacode AST**. New tools: `profile_root_cause` (a CPU/allocation/blocked/
+exception site matched to the declaration the AST holds for that line, with the loop chain and nesting,
+the LINQ materialiser per iteration, the allocation or string concatenation inside the loop, the
+`Task.Result`/`.Wait()`; the file is translated from disk by the same frontends as the solution index),
+`profile_async` (`System.Threading.Tasks.TplEventSource`: exact await durations, exceptional tasks,
+`IncompleteAsyncMethod`), `profile_database` (EF Core/SqlClient/Npgsql/MySql/SQLite/Oracle/Db2 commands,
+durations, normalised shapes and the N+1 signal), `profile_events` (Events Viewer for any provider) and
+`profile_instrumentation` (Mono.Cecil IL rewrite with an injected EventSource probe, then exact
+inclusive/exclusive times; `action=instrument|analyze`). New presets `async`, `database` and
+`instrumentation`; a new `Snitch.Profiling.Probe` project. **376 → 381 tools.** The sixteenth revision closed the
+2026-06-03 analysis backlog: `get_quality_trend` compares two revisions — or `to=worktree` — measured with one syntactic rule set
+(average complexity per method, methods over 10/20, long methods, TODO markers, with size as context) and
+answers improved/regressed/unchanged with the files that moved; nothing is compiled, so a revision that no
+longer builds is still comparable. `find_missing_validation` gained the DTO half: a public class or record
+with no behaviour and at least two settable properties whose properties carry no
+`System.ComponentModel.DataAnnotations` attribute. **375 → 376 tools.** The fifteenth revision closed the last ReSharper/CodeMaid rows in the coverage
+page. `templates` (18 live, 10 postfix and 8 file templates, plus a team store in
 `.visualMCP/templates.json`) and `layout_code` (CodeMaid's comment reflow, line joining and blank-line
 rules) are new tools; `code_cleanup` takes a named **profile** (built-in and team, `saveProfileAs`
 writes one), `find_symbol` falls back to a fuzzy subsequence, `create_from_usage` covers CS0117 and
@@ -590,8 +606,7 @@ they are repeated here because they are also "what is missing" for a .NET team:
 |---|---|
 | Taint analysis (SQL injection/XSS across the data flow) | A data-flow engine; `find_security_issues` is pattern-based |
 | Mutation testing | ✅ `run_mutation_tests` (Stryker.NET) returns the mutation score and the survivors; the runner itself is an external tool the user installs |
-| Quality trend between commits | Storing findings per revision and diffing them; `inspection_baseline` only freezes one state |
-| Database profiling, async/event-source viewers, instrumentation profiling | The four Visual Studio profiling tools not covered (see [profiling.md](profiling.md)) |
+| Database profiling, async/event-source viewers, instrumentation profiling | ✅ Closed 2026-10-31: `profile_database` (EF Core/SqlClient/… commands, durations, N+1 shapes), `profile_async` (TplEventSource await durations, incomplete state machines), `profile_events` (any provider's inventory, the Events Viewer) and `profile_instrumentation` (IL rewrite with an injected probe: exact call counts and inclusive/exclusive times). `profile_root_cause` then joins the measurements with the solution's metacode AST to name the loop/LINQ/allocation that produced them. |
 
 The **Git-aware churn hotspot** row closed on 2026-10-30: `git_churn_hotspots` joins
 `git log --numstat` over a bounded window with the Roslyn complexity ranking and scores each file as
@@ -623,7 +638,6 @@ where the answer stops and why.
 | Inspection suppression and severity | `suppress_finding` (a `#pragma` around the member or a `SuppressMessage` attribute, compiler-gated) and `configure_inspection` (severity per scope); `inspection_baseline` gates CI (§3) |
 | Decompiled symbol navigation | `assembly_workspace` (load, search, source, references, outline over a Roslyn workspace) and `inspect_assembly`/`find_assembly_api`. Rename and debugging inside the decompiled code are not possible: there is no source to write (§5) |
 | Taint analysis across a data flow | Not here: `find_security_issues` is pattern-based (§12) |
-| Quality trend between commits | Not here: `inspection_baseline` freezes one state (§12) |
 | Real-time collaborative editing | A shared transport and an editor surface, not a local stdio tool (§11) |
 
 ---

@@ -16,11 +16,15 @@
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
     <!-- Managed state of a live process or a dump (dotnet-stack / gcdump / dump). -->
     <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="4.2.751201" />
+    <!-- Reads and REWRITES IL for the instrumented profile (profile_instrumentation). -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Snitch.csproj" />
+    <!-- The probe the instrumenter injects calls to; shipped next to the instrumented assembly. -->
+    <ProjectReference Include="..\Snitch.Profiling.Probe\Snitch.Profiling.Probe.csproj" />
   </ItemGroup>
 
 </Project>

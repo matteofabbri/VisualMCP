@@ -149,6 +149,8 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Analysis.IFindMissingValidationService, Languages.CSharp.Analysis.FindMissingValidationService>();
         services.AddSingleton<Languages.CSharp.Analysis.IAnalyzeNullabilityService, Languages.CSharp.Analysis.AnalyzeNullabilityService>();
         services.AddSingleton<Languages.CSharp.Analysis.IFindBreakingChangesService, Languages.CSharp.Analysis.FindBreakingChangesService>();
+        // The quality trend: two revisions measured with one syntactic rule set, compared metric by metric.
+        services.AddSingleton<Languages.CSharp.Analysis.QualityTrend.IQualityTrendService, Languages.CSharp.Analysis.QualityTrend.GetQualityTrendService>();
         // Diagrams and exploration: the graph artifacts a client renders (call graph, sequence, control flow),
         // value tracking and the localization view.
         services.AddSingleton<Languages.CSharp.Diagrams.ICallDiagramService, Languages.CSharp.Diagrams.CallDiagramService>();
@@ -209,6 +211,12 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Refactoring.IConvertToRecordService, Languages.CSharp.Refactoring.ConvertToRecordService>();
         // The two directions of Rider's abstract-class ↔ interface conversion, gated on the compiler.
         services.AddSingleton<Languages.CSharp.Refactoring.IConvertTypeKindService, Languages.CSharp.Refactoring.ConvertTypeKindService>();
+        // The refactorings Section 7 of docs/gaps.md listed as missing: the inverse of make_static, the
+        // transform-parameters family, a type moved into another type, and generify.
+        services.AddSingleton<Languages.CSharp.Refactoring.IMakeNonStaticService, Languages.CSharp.Refactoring.MakeNonStaticService>();
+        services.AddSingleton<Languages.CSharp.Refactoring.ITransformParametersService, Languages.CSharp.Refactoring.TransformParametersService>();
+        services.AddSingleton<Languages.CSharp.Refactoring.IMoveTypeToNestedScopeService, Languages.CSharp.Refactoring.MoveTypeToNestedScopeService>();
+        services.AddSingleton<Languages.CSharp.Refactoring.IGenerifyService, Languages.CSharp.Refactoring.GenerifyService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IIntroducePartOfStringService, Languages.CSharp.Refactoring.IntroducePartOfStringService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IMoveStaticMembersService, Languages.CSharp.Refactoring.MoveStaticMembersService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IMoveInstanceMethodService, Languages.CSharp.Refactoring.MoveInstanceMethodService>();
@@ -220,6 +228,12 @@ public static class SnitchServiceCollectionExtensions
         // Formatting as its own step, and the cleanup that composes the rewrite pipeline.
         services.AddSingleton<Languages.CSharp.Refactoring.IFormatCodeService, Languages.CSharp.Refactoring.FormatCodeService>();
         services.AddSingleton<Languages.CSharp.Refactoring.ICodeCleanupService, Languages.CSharp.Refactoring.CodeCleanupService>();
+        // CodeMaid's Format Document rules the Roslyn formatter does not implement: comment reflow,
+        // joining a line range, and blank-line normalisation. Compiler-gated per file.
+        services.AddSingleton<Languages.CSharp.Refactoring.ILayoutCodeService, Languages.CSharp.Refactoring.LayoutCodeService>();
+        // ReSharper's template family as data: live/postfix expansion at a line, file templates, and a
+        // team store in .visualMCP/templates.json.
+        services.AddSingleton<Languages.CSharp.Generation.ITemplateService, Languages.CSharp.Generation.TemplateService>();
         // The "create" family ReSharper's context actions cover: missing members, doc comments, and a
         // stub derived from a call site that does not exist yet.
         services.AddSingleton<Languages.CSharp.Refactoring.IImplementMembersService, Languages.CSharp.Refactoring.ImplementMembersService>();

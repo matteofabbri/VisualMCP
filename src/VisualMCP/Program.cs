@@ -39,7 +39,8 @@ static async Task RunServerAsync(string[] args)
         "ROUTING:\n" +
         "- Find where a symbol is used / who calls a method -> find_references, find_callers " +
         "(NOT grep — grep also hits comments, strings and unrelated same-named text).\n" +
-        "- Locate a class/method/interface by name -> find_symbol.\n" +
+        "- Locate a class/method/interface by name -> find_symbol (ranks exact > prefix > CamelHumps > contains, and " +
+        "falls back to a fuzzy subsequence when nothing matches, so 'custord' still finds CustomerOrder).\n" +
         "- Read the SOURCE of a declaration (the body of a type/method/property) -> read_symbol. " +
         "This replaces search_text + read_file when you want the code of a name you just saw.\n" +
         "- Find implementations of an interface or derived types -> find_implementations, find_derived_types.\n" +
@@ -56,9 +57,12 @@ static async Task RunServerAsync(string[] args)
         "- Architecture and quality questions: are the layer rules respected (a dependency pointing back up, with file:line) -> " +
         "check_layer_violations; the dependency graph as a DOT/Mermaid diagram (projects, namespaces, TYPES) -> export_dependency_graph; is this class " +
         "really two classes (LCOM4) -> get_cohesion_metrics; test suite quality (no assert, empty, unreadable names, async void) -> " +
-        "analyze_test_quality; public parameters that are never null-checked -> find_missing_validation; where nullable reference " +
+        "analyze_test_quality; public parameters that are never null-checked and DTO properties with no DataAnnotations " +
+        "validation -> find_missing_validation; where nullable reference " +
         "types actually protect (suppressions, CS86xx) -> analyze_nullability; what a branch breaks in the public API -> " +
-        "find_breaking_changes. Inspections judged against what the codebase already had (only new findings, for a CI gate) -> " +
+        "find_breaking_changes; whether a branch made the code BETTER or WORSE (two revisions measured with one syntactic " +
+        "rule set: average complexity, methods over 10/20, long methods, TODOs, with size as context) -> get_quality_trend. " +
+        "Inspections judged against what the codebase already had (only new findings, for a CI gate) -> " +
         "inspection_baseline (create once, check after each change).\n" +
         "- Allocation anti-patterns you can read out of the code (string += in a loop, a LINQ materialiser inside a loop, a " +
         "collection allocated per iteration) -> find_performance_anti_patterns. It is a reading, not a measurement: when a " +
@@ -78,16 +82,31 @@ static async Task RunServerAsync(string[] args)
         "and a fix -> analyze_razor_pages; security audit (XSS, CSRF, secrets, CSP) with CWE ids -> find_razor_vulnerabilities. " +
         "These read the files from disk, so they also take an explicit path.\n" +
         "- Rename, extract, change signature, move type, etc. -> the Refactoring tools (semantic and safe, " +
-        "they update every reference; do NOT hand-edit for these).\n" +
+        "they update every reference; do NOT hand-edit for these). Parameter transformations beyond a reorder " +
+        "(wrap several parameters in a parameter object, make them optional/required, retype one, replace one with a " +
+        "property assigned by each caller) -> transform_parameters. The inverse of make_static (call sites routed " +
+        "through an instance already in scope, refused when one is not) -> make_non_static. A type nested into " +
+        "another type, references rewritten -> move_type_to_nested_scope. A concrete type turned into a type " +
+        "parameter on a method or type, call sites and references updated -> generify.\n" +
         "- Find or rewrite code by SHAPE, not by name (\"every call to X\", \"every guard that throws\") -> " +
         "structural_search: ordinary C# with $holes$ matched on the syntax tree; pass replacement to rewrite " +
         "(compiler-gated). Clean a file/project/solution in one call (style → usings → regions → reorder → format) -> " +
-        "code_cleanup; formatting alone -> format_code. Create what the code already assumes -> implement_members " +
-        "(interface/abstract stubs), create_from_usage (the member or type a call site needs), generate_docs (XML comments).\n" +
+        "code_cleanup, which also takes profile= (full, reformat, style, usings, regions, reorder, safe, or a team " +
+        "profile from .visualMCP/cleanup-profiles.json; saveProfileAs writes one) instead of a step list; formatting " +
+        "alone -> format_code; CodeMaid's rules the Roslyn formatter lacks (reflow // comments to a width, join a line " +
+        "range, normalise blank lines) -> layout_code. Create what the code already assumes -> implement_members " +
+        "(interface/abstract stubs), create_from_usage (the member, static member or overload a call site needs — " +
+        "CS1061/CS0117/CS1501/CS7036/CS0246/CS0103), generate_docs (XML comments).\n" +
+        "- Scaffold code from a template: list the live/postfix/file templates (built-in plus the team's own in " +
+        ".visualMCP/templates.json), expand a live shortcut or a postfix like 'order.if' / 'value.null' / 'items.var' " +
+        "at a line, or create a new file from a file template (class, interface, record, struct, enum, static class, " +
+        "abstract class, xUnit test) -> templates (compiler-gated, preview by default).\n" +
         "- The context actions that are neither style rewrites nor refactorings — import the using a type on a line needs, " +
         "generate argument guards (null / all parameters / string not null or empty / collection not empty / variable null), " +
         "wrap a statement range in try/catch, try/finally, if or using, convert a string literal between regular, verbatim " +
-        "and raw -> context_action (action id + line; `text` carries the parameter, the condition or the resource; preview by " +
+        "and raw, merge or split an if chain, join a null check with its use, use var and back, split a declaration, remove " +
+        "braces, enable nullable in a file, add/remove digit separators and ConfigureAwait(false) -> context_action " +
+        "(action id + line; `text` carries the parameter, the condition or the resource; preview by " +
         "default, refused when the edit would add a compiler error).\n" +
         "- Apply Visual Basic style suggestions (15 rule ids, compiler-gated, preview by default) -> simplify_vb_code " +
         "(simplify_code rewrites C# only).\n" +
@@ -111,11 +130,20 @@ static async Task RunServerAsync(string[] args)
         "- Run BenchmarkDotNet benchmarks and get the summary table -> run_benchmarks; benchmark an arbitrary snippet without writing a [Benchmark] class -> quick_benchmark.\n" +
         "- Run a build/export/packaging script or any shell command — PowerShell, pwsh, cmd or bash (incl. nested shells, pipes, grep/sed, redirection, or commands too long for the normal shell) -> run_command.\n" +
         "- Profile a running .NET process (all native — do NOT shell out to dotnet-trace/counters/gcdump/dump/stack): " +
-        "find the process -> profile_processes; collect an EventPipe trace -> profile_collect (cpu/gc/exceptions/threading presets); " +
+        "find the process -> profile_processes; collect an EventPipe trace -> profile_collect (presets: cpu/gc/exceptions/threading/runtime/diagnose, " +
+        "plus async (task/await events), database (EF Core/SqlClient/Npgsql/MySql/SQLite/Oracle/Db2) and instrumentation (the probe) presets); " +
         "turn it into CPU hotspots, allocation sites, GC pauses, exceptions, contention and JIT time with file:line -> profile_analyze; " +
         "attribute allocations to the allocating method/line -> profile_allocations; see inclusive/exclusive CPU per call path and export folded stacks -> profile_calltree; " +
         "find and rank multiple hot paths at once, with the method/line fix list and the branch points where cost splits -> profile_hotpaths; " +
         "the exact LINE inside a method that burns the CPU (self time per source line with the code text; method= to scope it) -> profile_hotlines; " +
+        "WHY the measured code costs what it costs, joined with the solution's METACODE AST (the loop chain and its nesting, a LINQ " +
+        "materialiser per iteration, an allocation inside a loop, a string concatenation per element, an await/lock in a loop, " +
+        "Task.Result/.Wait()) -> profile_root_cause; " +
+        "the .NET async story (exact await durations from TplEventSource, tasks that threw, state machines that never completed) -> profile_async; " +
+        "the database story (commands with text and duration, the shapes that repeat — the N+1 signal — connection opens) -> profile_database; " +
+        "inventory ANY trace's providers/events/payload fields with a sample event (the Events Viewer; works on custom providers) -> profile_events; " +
+        "EXACT call counts and inclusive/exclusive times with no sampling (rewrite an assembly's IL with an injected probe, run the copy, then read the enter/exit pairs) -> " +
+        "profile_instrumentation action=instrument then action=analyze; " +
         "find where threads block on I/O (file/http/socket/database/pipes, sync-over-async, locks, sleep) with duration and call site -> profile_io; " +
         "compare two runs and get regressions -> profile_compare; run counters + trace + stacks + heap in one call and get correlated findings -> profile_diagnose; " +
         "live EventCounters -> profile_counters; managed stacks of every thread + contended locks -> profile_stacks; " +
@@ -318,6 +346,13 @@ static async Task RunServerAsync(string[] args)
             // installer for the external dotnet diagnostics toolchain.
             services.AddVisualMcpProfiling();
 
+            // The join between a profiler measurement and the code: a hot file is described with the
+            // solution's metacode AST, so profile_root_cause can name the loop/LINQ/allocation that
+            // produced a sample instead of only its line. Registered after AddVisualMcpProfiling so it
+            // replaces that extension's null-object (the last singleton registration wins).
+            services.AddSingleton<Snitch.Profiling.Model.ICodeStructureIndex,
+                                  VisualMCP.Profiling.MetacodeCodeStructureIndex>();
+
             // The debugger: DAP sessions over netcoredbg (installed on demand like the diagnostics
             // tools), with breakpoints, stepping, stacks, variables and expression evaluation.
             services.AddSnitchDebugging();
@@ -405,6 +440,13 @@ static async Task RunServerAsync(string[] args)
             // The refactoring added with the last batch: the inverse of add_params.
             services.AddSingleton<Snitch.Languages.CSharp.Refactoring.IRemoveParamsModifierService,
                                   Snitch.Languages.CSharp.Refactoring.RemoveParamsModifierService>();
+
+            // The inverse of make_static (call sites routed through an instance already in scope) and the
+            // Change Signature dialog's parameter transformations (wrap/optional/required/retype/property).
+            services.AddSingleton<Snitch.Languages.CSharp.Refactoring.IMakeNonStaticService,
+                                  Snitch.Languages.CSharp.Refactoring.MakeNonStaticService>();
+            services.AddSingleton<Snitch.Languages.CSharp.Refactoring.ITransformParametersService,
+                                  Snitch.Languages.CSharp.Refactoring.TransformParametersService>();
 
             // Decompiled code as a place to navigate: one type per Roslyn document in an AdhocWorkspace,
             // keyed on the module version id, so search/source/references/outline answer without decompiling again.

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- netstandard2.0 on purpose: the probe is copied next to an INSTRUMENTED application, and that
+         application can be any modern .NET or .NET Framework 4.6.1+ build. The injector (Snitch.Profiling)
+         references this project only to know where the DLL is. -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Snitch.Profiling.Probe</RootNamespace>
+    <AssemblyName>Snitch.Profiling.Probe</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

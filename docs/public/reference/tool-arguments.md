@@ -34,6 +34,7 @@ assembly references, and NuGet packages.
 find_symbol
   symbolName   – name to search for
   partialMatch – match any symbol whose name contains symbolName (default: false)
+  fuzzy        – when nothing matched, fall back to a subsequence match (default: true)
 
 read_symbol
   symbolName     – type or member name
@@ -107,7 +108,8 @@ profile_processes(nameFilter?)                       → pids, names, paths, wor
 profile_tools(tool?, action=status|install|update,
               scope=auto|global|local, version?, checkLatest?)
 
-profile_collect(processId? | processName?, profile=cpu|gc|exceptions|threading|runtime|diagnose|custom,
+profile_collect(processId? | processName?,
+                profile=cpu|gc|exceptions|threading|runtime|diagnose|async|database|instrumentation|custom,
                 durationSeconds=10, providers?, bufferMb=256, requestStackwalk=true,
                 action=collect|start|stop|sessions, sessionId?, outputPath?)
 
@@ -127,6 +129,37 @@ profile_hotpaths(tracePath, metric=cpu|allocations|exceptions|mixed,
                  top=10, minPercent=1, resolveSource=true, userCodeOnly=true)
                 → ranked user-method fix list, root-to-leaf hot paths,
                   branch points, findings
+
+profile_root_cause(tracePath, top=15, minShare=0.5, userCodeRoot?, resolveSource=true)
+                → each measured site (cpu | allocations | blocked | exceptions) joined
+                  with the metacode AST of the declaration that contains it: the loop
+                  chain and nesting depth, the LINQ materialiser, the allocation or
+                  string concatenation inside the loop, the await/lock, the
+                  Task.Result/.Wait(); plus per-site explanations and findings
+
+profile_async(tracePath)
+                → scheduled/started/completed/exceptional task counts, exact await
+                  durations (TaskWaitSend/TaskWaitStop pairs) with the longest first,
+                  named async operations, and the state machines still alive at the
+                  end of the trace (IncompleteAsyncMethod)
+
+profile_database(tracePath, top=15)
+                → commands with text and duration, the slowest ones, the normalised
+                  shapes that cost the most (the N+1 signal), connection opens,
+                  the share of the window in data access; no-event answers name the
+                  providers the trace did contain
+
+profile_events(tracePath, provider?, event?, top=50)
+                → every provider/event pair with count, rate, payload field names
+                  and one sample event; works on custom providers (Events Viewer)
+
+profile_instrumentation(action=instrument|analyze, assemblyPath?, outputPath?,
+                        include?, exclude?, tracePath?, mapPath?)
+                → instrument: rewrite the assembly's IL (Mono.Cecil, injected probe,
+                  .map.json, probe DLL copied beside the output), with wildcard
+                  include/exclude on the full method name
+                → analyze: exact call counts and inclusive/exclusive times from the
+                  enter/exit pairs, ranked by cost and by call count
 
 profile_io(tracePath, top=15, minPercent=1, resolveSource=true)
                 → I/O blocking sites by category/call site with blocked ms,
@@ -259,6 +292,36 @@ update_solution(targetFramework?, projectNames[]?, includePrerelease=false,
                   gate with a full rollback
 ```
 
+## Templates, style and layout
+
+```
+templates(action=list|expand|create|save|delete, template?, filePath?, line=1, values?,
+          name?, projectName?, namespaceName?, directory?, kind?, body?, description?,
+          dryRun=true)
+                → values are the $holes$ of the template, "key=value;key2=value2";
+                  expand replaces the line when its trimmed text is the live shortcut,
+                  otherwise inserts after it; a postfix template needs the line to end
+                  with '.name' (order.if, value.null, GetOrders().var). create writes a
+                  file template (class, interface, record, struct, enum, static-class,
+                  abstract-class, xunit-test) and adds the document to the project;
+                  save/delete keep the team's .visualMCP/templates.json
+
+code_cleanup(scope=document|project|solution, filePath?, projectName?, steps?, profile?,
+             saveProfileAs?, dryRun=true)
+                → steps or profile, never both; the built-in profiles are full,
+                  reformat, style, usings, regions, reorder and safe, and the team's
+                  own live in .visualMCP/cleanup-profiles.json
+                  ({"profiles":{"team":{"steps":["style","usings","format"]}}}).
+                  saveProfileAs records the effective step list there.
+
+layout_code(scope=document|project|solution, filePath?, projectName?,
+            rules=comments,blank_lines, maxCommentWidth=120, fromLine?, toLine?,
+            dryRun=true)
+                → join needs fromLine and toLine; an edit that would change the token
+                  stream is refused (a multi-line string, a comment); comments and
+                  blank lines apply to C# and Visual Basic
+```
+
 ## Version control and collaboration
 
 ```
@@ -316,6 +379,19 @@ code_review(baseRef=HEAD, path?, maxFiles=100, includeInspections=false,
                   new TODO/FIXME markers with their new-file line, the worst
                   methods of each changed C# file and, with includeInspections,
                   the inspection findings inside the changed files
+
+get_quality_trend(from=HEAD~1, to=HEAD, repoPath?, path?, top=10)
+                → both sides measured with ONE syntactic rule set (a revision
+                  through `git archive`, the working tree from disk): average
+                  complexity per method, methods over 10 and 20, long methods
+                  (over 40 lines), TODO markers — files/lines/types/methods and
+                  the complexity total are context and never change the verdict
+                → returns improved|regressed|unchanged, every signal with its
+                  direction and percent delta, the files whose complexity moved
+                  most in each direction, and the added/removed files
+                → to=worktree measures the uncommitted tree; a path narrows the
+                  measurement to one folder or .cs file. Nothing is compiled, so
+                  a revision that no longer builds is still comparable
 ```
 
 `code_review` is the brief, not the review: `run_affected_tests` runs the tests the change reaches,

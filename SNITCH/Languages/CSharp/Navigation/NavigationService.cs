@@ -6,7 +6,7 @@ namespace Snitch.Languages.CSharp.Navigation;
 
 public interface INavigationService
 {
-    Task<object> FindSymbolAsync(string symbolName, bool partialMatch);
+    Task<object> FindSymbolAsync(string symbolName, bool partialMatch, bool fuzzy = true);
     Task<object> FindReferencesAsync(string symbolName, string? kind);
     Task<object> FindImplementationsAsync(string interfaceName);
     Task<object> FindCallersAsync(string symbolName, string? containingType);
@@ -29,7 +29,7 @@ public sealed class NavigationService : INavigationService
     }
 
     // ── find_symbol ───────────────────────────────────────────────────────────
-    public async Task<object> FindSymbolAsync(string symbolName, bool partialMatch)
+    public async Task<object> FindSymbolAsync(string symbolName, bool partialMatch, bool fuzzy = true)
     {
         var (solution, err) = await SolutionAsync();
         if (err is not null) return err;
@@ -75,6 +75,18 @@ public sealed class NavigationService : INavigationService
             Collect(humps, _ => 2);
         }
 
+        // Fuzzy: only as a fallback, when nothing above matched. The query is a subsequence of the
+        // name ('custord' → CustomerOrder), which is the typo/memory-assist case a fuzzy search is for;
+        // running it on every lookup would enumerate every declaration to add noise to a good result.
+        var fuzzyFallback = false;
+        if (collected.Count == 0 && fuzzy && symbolName.Length >= 2)
+        {
+            fuzzyFallback = true;
+            var approximate = await SymbolFinder.FindSourceDeclarationsAsync(
+                solution!, name => IsSubsequence(name, symbolName), SymbolFilter.TypeAndMember);
+            Collect(approximate, _ => 0);
+        }
+
         var matches = collected.Values
             .OrderByDescending(entry => entry.Rank)
             .ThenBy(entry => entry.Symbol.Name, StringComparer.OrdinalIgnoreCase)
@@ -96,7 +108,8 @@ public sealed class NavigationService : INavigationService
                         4 => "exact",
                         3 => "prefix",
                         2 => "camelHumps",
-                        _ => "contains",
+                        1 => "contains",
+                        _ => "fuzzy",
                     },
                 };
             })
@@ -107,13 +120,31 @@ public sealed class NavigationService : INavigationService
             symbolName,
             partialMatch,
             camelHumps = symbolName.Count(char.IsUpper) >= 2,
+            fuzzyFallback,
             matchCount = matches.Count,
             matches,
+            hint = fuzzyFallback && matches.Count == 0
+                ? "No declaration matched, even approximately. Check the spelling, or search the text with text_index."
+                : null,
         };
     }
 
     /// <summary>The uppercase letters of a name: 'CheckParameterSafety' → 'CPS'.</summary>
     private static string CamelHumps(string name) => new(name.Where(char.IsUpper).ToArray());
+
+    /// <summary>Whether every character of <paramref name="query"/> appears in <paramref name="name"/>, in order.</summary>
+    private static bool IsSubsequence(string name, string query)
+    {
+        var position = 0;
+        foreach (var character in name)
+        {
+            if (position < query.Length && char.ToLowerInvariant(character) == char.ToLowerInvariant(query[position]))
+                position++;
+            if (position == query.Length) return true;
+        }
+
+        return false;
+    }
 
     // ── find_references ───────────────────────────────────────────────────────
     public async Task<object> FindReferencesAsync(string symbolName, string? kind)

@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **373 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **381 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -117,10 +117,11 @@ Conventions:
 | `find_external_usages` | The used surface of assemblies outside the solution: types, members, call sites, per-assembly summary |
 | `verify_change` | Run the suite on the working tree and on a git revision in a detached worktree, then diff the outcomes test by test: regressions, fixes, new/removed tests, verdict |
 | `find_breaking_changes` | Removed or re-signed public/protected members between a git revision and the working tree |
+| `get_quality_trend` | Did a branch make the code better or worse: two revisions (or `to=worktree`) measured with one syntactic rule set — average complexity per method, methods over 10/20, long methods, TODOs, size as context — with improved/regressed/unchanged and the files that moved most. Nothing is compiled, so a revision that no longer builds is still comparable |
 | `find_duplicate_code` | Structural clone detection, normalised over names and literals |
 | `analyze_test_quality` | Tests that cannot fail: no assertion, empty body, unreadable name, `async void` |
 | `find_code_smells` | `async void`, empty catch, await-in-lock, long methods, deep nesting, large classes |
-| `find_missing_validation` | Public methods taking a reference-type/string parameter with no null guard |
+| `find_missing_validation` | Public methods taking a reference-type/string parameter with no null guard, plus DTO-shaped public classes/records whose properties carry no `System.ComponentModel.DataAnnotations` validation |
 | `analyze_nullability` | Where nullable reference types actually protect: enabled context, `!` suppressions with lines, CS86xx warnings |
 | `find_security_issues` | CWE-tagged scan: SQL/command injection, weak crypto, secrets, unsafe deserialization, SSRF, XXE, TLS bypass, path traversal |
 | `find_async_anti_patterns` | `.Result`/`.Wait()`, `async void`, await in loops, `Task.Run` over sync code, missing `ConfigureAwait` |
@@ -303,8 +304,13 @@ dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
 |---|---|
 | `profile_processes` | List .NET processes that expose a diagnostics endpoint |
 | `profile_tools` | Status, install and update the seven external diagnostics tools |
-| `profile_collect` | Collect a real `.nettrace` through EventPipe: cpu/gc/exceptions/threading/runtime/diagnose/custom, bounded or start/stop |
+| `profile_collect` | Collect a real `.nettrace` through EventPipe: cpu/gc/exceptions/threading/runtime/diagnose/async/database/instrumentation/custom, bounded or start/stop |
 | `profile_analyze` | CPU hotspots and stacks, allocation sites, GC pauses, exceptions with throw sites, contention, thread pool, JIT, timeline, findings, report |
+| `profile_root_cause` | Why the measured code costs what it costs, joined with the solution's metacode AST: the loop chain and nesting, a LINQ materialiser per iteration, an allocation inside a loop, a string concatenation per element, an await/lock in a loop, `Task.Result`/`.Wait()` |
+| `profile_async` | The .NET async story: exact await durations (TplEventSource pairs), tasks that threw, named async operations, and state machines that never completed |
+| `profile_database` | The database story: commands with text and duration, the shapes that repeat (the N+1 signal), connection opens, the share of the window spent in data access |
+| `profile_events` | The Events Viewer: every provider/event pair of a trace with counts, payload field names and one sample event — works on custom providers |
+| `profile_instrumentation` | Exact call counts and inclusive/exclusive times, no sampling: rewrite an assembly's IL with an injected probe (`action=instrument`), run the copy, read the enter/exit pairs (`action=analyze`) |
 | `profile_counters` | EventCounter time series (System.Runtime, ASP.NET Core, Kestrel, HTTP, sockets, gRPC) |
 | `profile_stacks` | Every managed thread's stack, plus contended monitors and the holding thread |
 | `profile_heap` | Managed heap by type, LOH and pinned bytes, finalizable objects, largest objects, duplicate strings |

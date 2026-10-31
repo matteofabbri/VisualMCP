@@ -50,6 +50,16 @@ public sealed partial class ContextActionService : IContextActionService
         ("check_enum_defined", "Check enum value is defined"),
         ("invert_loop", "Invert loop direction"),
         ("check_index_range", "Check index for out of range"),
+        ("merge_sequential_checks", "Merge sequential checks"),
+        ("split_and_in_if", "Split '&&' condition in if"),
+        ("join_null_check_with_usage", "Join null check with usage"),
+        ("use_var", "Use 'var'"),
+        ("use_explicit_type", "Use explicit type"),
+        ("split_declaration", "Split declaration"),
+        ("remove_braces", "Remove braces"),
+        ("migrate_to_nullable", "Migrate to nullable reference types"),
+        ("remove_digit_separators", "Remove digit separators"),
+        ("use_configure_await_false", "Use ConfigureAwait(false)"),
     ];
 
     public async Task<object> Apply(
@@ -148,6 +158,16 @@ public sealed partial class ContextActionService : IContextActionService
         "check_enum_defined" => CheckEnumDefined(target, text),
         "invert_loop" => InvertLoop(target),
         "check_index_range" => CheckIndexRange(target, text),
+        "merge_sequential_checks" => MergeSequentialChecks(target),
+        "split_and_in_if" => SplitAndInIf(target),
+        "join_null_check_with_usage" => JoinNullCheckWithUsage(target),
+        "use_var" => UseVar(target),
+        "use_explicit_type" => UseExplicitType(target),
+        "split_declaration" => SplitDeclaration(target),
+        "remove_braces" => RemoveBraces(target),
+        "migrate_to_nullable" => MigrateToNullable(target),
+        "remove_digit_separators" => RemoveDigitSeparators(target),
+        "use_configure_await_false" => UseConfigureAwaitFalse(target),
         _ => Outcome.Fail($"'{id}' has no implementation."),
     };
 

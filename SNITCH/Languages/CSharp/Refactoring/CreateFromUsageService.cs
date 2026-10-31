@@ -65,7 +65,8 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
                                      .Contains(memberName, StringComparison.Ordinal) == true)
             .ToList();
 
-        var target = diagnostics.FirstOrDefault(diagnostic => diagnostic.Id is "CS1061" or "CS0246" or "CS0103");
+        var target = diagnostics.FirstOrDefault(diagnostic =>
+            diagnostic.Id is "CS1061" or "CS0246" or "CS0103" or "CS0117" or "CS1501" or "CS7036");
         if (target is null)
             return new
             {
@@ -73,7 +74,15 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
                     ? $"No compiler error on line {line}" + (memberName is null ? "." : $" mentioning '{memberName}'.")
                     : $"The error on line {line} is not one this tool can satisfy: " +
                       string.Join("; ", diagnostics.Select(diagnostic => diagnostic.Id + " " + diagnostic.GetMessage())),
-                supported = new[] { "CS1061 member not found", "CS0246 type not found", "CS0103 unknown name used as a call" },
+                supported = new[]
+                {
+                    "CS1061 member not found",
+                    "CS0117 static member not found on a type",
+                    "CS1501 no overload takes these arguments",
+                    "CS7036 a required argument is missing",
+                    "CS0246 type not found",
+                    "CS0103 unknown name used as a call",
+                },
             };
 
         var node = root.FindNode(target.Location.SourceSpan, getInnermostNodeForTie: true);
@@ -81,6 +90,8 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
         var edit = target.Id switch
         {
             "CS1061" => await MemberFromUsageAsync(node, model, solution, document, cancellationToken),
+            "CS0117" => await StaticMemberOnTypeAsync(node, model, solution, document, cancellationToken),
+            "CS1501" or "CS7036" => await OverloadFromUsageAsync(node, model, solution, document, cancellationToken),
             "CS0246" => await TypeFromUsageAsync(node, solution, document, cancellationToken),
             _ => await StaticMemberFromUsageAsync(node, model, document, cancellationToken),
         };
@@ -218,6 +229,114 @@ public sealed class CreateFromUsageService : ICreateFromUsageService
                converted.SpecialType == SpecialType.System_Object
             ? "object"
             : converted.ToMinimalDisplayString(model, expression.SpanStart);
+    }
+
+    // ── CS0117: a static member missing from a type that is in the solution ──
+
+    private static async Task<Edit> StaticMemberOnTypeAsync(
+        SyntaxNode node, SemanticModel model, Solution solution, Document document, CancellationToken cancellationToken)
+    {
+        var access = node.AncestorsAndSelf().OfType<MemberAccessExpressionSyntax>().FirstOrDefault();
+        if (access is null)
+            return Fail("The missing member is not used as `Type.Member`, so there is no type to add it to.");
+
+        var name = access.Name.Identifier.ValueText;
+        var type = model.GetSymbolInfo(access.Expression, cancellationToken).Symbol as INamedTypeSymbol
+                   ?? model.GetTypeInfo(access.Expression, cancellationToken).Type as INamedTypeSymbol;
+        if (type is null) return Fail($"The type of `{access.Expression}` could not be resolved.");
+
+        return await InsertStubAsync(type, name, access.Parent as InvocationExpressionSyntax,
+            isStatic: true, model, solution, document, cancellationToken);
+    }
+
+    // ── CS1501 / CS7036: the method exists, the arguments do not ─────────────
+
+    private static async Task<Edit> OverloadFromUsageAsync(
+        SyntaxNode node, SemanticModel model, Solution solution, Document document, CancellationToken cancellationToken)
+    {
+        var invocation = node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+        if (invocation is null)
+            return Fail("The error is not on a method call, so there is no overload to add.");
+
+        var name = invocation.Expression switch
+        {
+            MemberAccessExpressionSyntax member => member.Name.Identifier.ValueText,
+            IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+            _ => null,
+        };
+        if (name is null) return Fail("The called member has no simple name.");
+
+        INamedTypeSymbol? type = null;
+        if (invocation.Expression is MemberAccessExpressionSyntax access)
+        {
+            type = model.GetSymbolInfo(access.Expression, cancellationToken).Symbol as INamedTypeSymbol
+                   ?? model.GetTypeInfo(access.Expression, cancellationToken).Type as INamedTypeSymbol;
+        }
+
+        var candidates = model.GetSymbolInfo(invocation, cancellationToken).CandidateSymbols
+            .OfType<IMethodSymbol>()
+            .ToList();
+
+        type ??= candidates.Select(method => method.ContainingType).FirstOrDefault(containing => containing is not null)
+                ?? model.GetEnclosingSymbol(invocation.SpanStart)?.ContainingType;
+
+        if (type is null) return Fail("The receiver's type could not be resolved.");
+
+        var calledOnTypeName = invocation.Expression is MemberAccessExpressionSyntax staticAccess &&
+                               model.GetSymbolInfo(staticAccess.Expression, cancellationToken).Symbol is INamedTypeSymbol;
+        var allStatic = candidates.Count > 0 && candidates.All(method => method.IsStatic);
+
+        return await InsertStubAsync(type, name, invocation, calledOnTypeName || allStatic,
+            model, solution, document, cancellationToken);
+    }
+
+    /// <summary>
+    /// The shared tail of CS0117 and CS1501/CS7036: find the type's declaration in the solution, build
+    /// the stub from the call site (parameter types and names, return type from the context) and insert
+    /// it with the same helper implement_members uses.
+    /// </summary>
+    private static async Task<Edit> InsertStubAsync(
+        INamedTypeSymbol type, string name, InvocationExpressionSyntax? invocation, bool isStatic,
+        SemanticModel model, Solution solution, Document document, CancellationToken cancellationToken)
+    {
+        var reference = type.DeclaringSyntaxReferences.FirstOrDefault();
+        if (reference is null)
+            return Fail($"'{type.ToDisplayString()}' is not declared in the solution, so a member cannot be added to it.");
+
+        var targetDocument = solution.GetDocument(reference.SyntaxTree) ?? document;
+        var targetRoot = await targetDocument.GetSyntaxRootAsync(cancellationToken);
+        var targetText = await targetDocument.GetTextAsync(cancellationToken);
+        if (targetRoot is null) return Fail("Could not read the file that declares the receiver's type.");
+
+        var declaration = targetRoot.DescendantNodes().OfType<TypeDeclarationSyntax>()
+            .FirstOrDefault(candidate => candidate.Identifier.ValueText == type.Name);
+        if (declaration is null) return Fail($"Could not find the declaration of '{type.Name}'.");
+
+        string stub;
+        string kind;
+
+        if (invocation is not null)
+        {
+            var parameters = invocation.ArgumentList.Arguments
+                .Select((argument, index) =>
+                    $"{TypeOf(argument.Expression, model)} " +
+                    $"{argument.NameColon?.Name.Identifier.ValueText ?? "arg" + (index + 1)}")
+                .ToList();
+
+            var returnType = IsVoidContext(invocation) ? "void" : ConvertedTypeOf(invocation, model);
+            var modifier = isStatic ? "static " : string.Empty;
+            stub = $"public {modifier}{returnType} {name}({string.Join(", ", parameters)}) {{ {Throws} }}";
+            kind = "method";
+        }
+        else
+        {
+            var modifier = isStatic ? "static " : string.Empty;
+            stub = $"public {modifier}object {name} {{ get => {Throws} set => {Throws} }}";
+            kind = "property";
+        }
+
+        var newText = ImplementMembersService.InsertMembers(targetText, declaration, new[] { stub });
+        return new Edit(targetDocument, newText, targetText.ToString(), name, kind, stub, null);
     }
 
     // ── CS0246: the type does not exist ──────────────────────────────────────

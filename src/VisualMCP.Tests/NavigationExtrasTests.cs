@@ -46,6 +46,34 @@ public sealed class NavigationExtrasTests
     }
 
     [Fact]
+    public async Task FindSymbol_FallsBackToASubsequenceMatchWhenNothingElseMatches()
+    {
+        var workspace = FakeWorkspace.Create(("Chain.cs", Chain));
+        using var scope = workspace;
+        var navigation = new NavigationService(workspace);
+
+        var result = ResultAssert.Json(await navigation.FindSymbolAsync("ChkPrmSfty", false));
+
+        Assert.True(result.GetProperty("fuzzyFallback").GetBoolean());
+        var match = result.GetProperty("matches").EnumerateArray()
+            .First(candidate => candidate.GetProperty("name").GetString() == "CheckParameterSafety");
+        Assert.Equal("fuzzy", match.GetProperty("matchKind").GetString());
+    }
+
+    [Fact]
+    public async Task FindSymbol_FuzzyCanBeTurnedOff()
+    {
+        var workspace = FakeWorkspace.Create(("Chain.cs", Chain));
+        using var scope = workspace;
+        var navigation = new NavigationService(workspace);
+
+        var result = ResultAssert.Json(await navigation.FindSymbolAsync("ChkPrmSfty", false, fuzzy: false));
+
+        Assert.False(result.GetProperty("fuzzyFallback").GetBoolean());
+        Assert.Equal(0, result.GetProperty("matchCount").GetInt32());
+    }
+
+    [Fact]
     public async Task CallHierarchy_ReturnsCallersAndCallees()
     {
         var workspace = FakeWorkspace.Create(("Chain.cs", Chain));

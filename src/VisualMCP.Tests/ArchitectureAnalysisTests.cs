@@ -178,6 +178,59 @@ public sealed class ArchitectureAnalysisTests
     }
 
     [Fact]
+    public async Task Missing_validation_flags_a_dto_whose_properties_carry_no_data_annotations()
+    {
+        using var workspace = FakeWorkspace.Create(("Dtos.cs", """
+            using System.ComponentModel.DataAnnotations;
+
+            public class CustomerDto
+            {
+                public string Name { get; set; } = "";
+                public string Email { get; set; } = "";
+            }
+
+            public record CustomerRecord(string Name, string Email);
+
+            public class ValidatedDto
+            {
+                [Required] public string Name { get; set; } = "";
+                [EmailAddress] public string Email { get; set; } = "";
+            }
+
+            public class WithBehaviour
+            {
+                public string First { get; set; } = "";
+                public string Second { get; set; } = "";
+                public int Compute() => First.Length + Second.Length;
+            }
+            """));
+
+        var result = await new FindMissingValidationService(workspace).Find(null, 10);
+        ResultAssert.Succeeded(result);
+
+        var json = ResultAssert.Json(result);
+
+        // The two payloads are shapes the scan saw; WithBehaviour is not a DTO and ValidatedDto is validated.
+        Assert.Equal(3, json.GetProperty("dtoShapes").GetInt32());
+        Assert.Equal(2, json.GetProperty("dtoCount").GetInt32());
+
+        var flagged = json.GetProperty("dtoTypes").EnumerateArray()
+            .Select(entry => entry.GetProperty("Type").GetString()!)
+            .ToList();
+
+        Assert.Contains("CustomerDto", flagged);
+        Assert.Contains("CustomerRecord", flagged);
+        Assert.DoesNotContain("ValidatedDto", flagged);
+        Assert.DoesNotContain("WithBehaviour", flagged);
+
+        var dto = json.GetProperty("dtoTypes").EnumerateArray()
+            .Single(entry => entry.GetProperty("Type").GetString() == "CustomerDto");
+
+        Assert.Equal(["Email", "Name"], dto.GetProperty("Unvalidated").EnumerateArray().Select(name => name.GetString()));
+        Assert.Empty(dto.GetProperty("Validated").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Nullability_counts_the_suppressions()
     {
         using var workspace = FakeWorkspace.Create(("Probe.cs", """

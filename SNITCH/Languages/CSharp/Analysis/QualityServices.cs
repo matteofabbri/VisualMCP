@@ -143,7 +143,7 @@ public sealed class AnalyzeTestQualityService : IAnalyzeTestQualityService
 /// </summary>
 public interface IFindMissingValidationService
 {
-    Task<object> Find(string? projectName, int top, CancellationToken cancellationToken = default);
+    Task<object> Find(string? projectName, int top, bool includeDtos = true, CancellationToken cancellationToken = default);
 }
 
 public sealed class FindMissingValidationService : IFindMissingValidationService
@@ -153,7 +153,7 @@ public sealed class FindMissingValidationService : IFindMissingValidationService
     public FindMissingValidationService(IRoslynWorkspace workspace) => _workspace = workspace;
 
     public async Task<object> Find(
-        string? projectName, int top, CancellationToken cancellationToken = default)
+        string? projectName, int top, bool includeDtos = true, CancellationToken cancellationToken = default)
     {
         var limit = top <= 0 ? 100 : top;
 
@@ -162,8 +162,11 @@ public sealed class FindMissingValidationService : IFindMissingValidationService
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
 
         var methods = new List<object>();
+        var dtos = new List<DtoValidationFinding>();
         var parametersChecked = 0;
         var unguarded = 0;
+        var dtoShapes = 0;
+        var dtoCount = 0;
 
         foreach (var project in solution.Projects)
         {
@@ -209,6 +212,20 @@ public sealed class FindMissingValidationService : IFindMissingValidationService
                         unguarded = missing,
                     });
                 }
+
+                if (!includeDtos) continue;
+
+                foreach (var declaration in root.DescendantNodes().OfType<TypeDeclarationSyntax>())
+                {
+                    var finding = DtoValidationScanner.Scan(declaration, model, cancellationToken);
+                    if (finding is null) continue;
+
+                    dtoShapes++;
+                    if (finding.Unvalidated.Count < 2) continue;
+
+                    dtoCount++;
+                    dtos.Add(finding);
+                }
             }
         }
 
@@ -219,8 +236,19 @@ public sealed class FindMissingValidationService : IFindMissingValidationService
             parametersChecked,
             unguardedCount = unguarded,
             methods,
+            dtoShapes,
+            dtoCount,
+            dtoTypes = dtos
+                .OrderByDescending(finding => finding.Unvalidated.Count)
+                .ThenBy(finding => finding.Type, StringComparer.Ordinal)
+                .Take(limit)
+                .ToList(),
             note = "A guard counts when the parameter is checked in this method: `if (x is null) throw`, " +
-                   "`ArgumentNullException.ThrowIfNull(x)`, `x ?? throw`, or a pattern with `is null`.",
+                   "`ArgumentNullException.ThrowIfNull(x)`, `x ?? throw`, or a pattern with `is null`. " +
+                   "A DTO is a public class or record with no behaviour and at least two public settable " +
+                   "properties; a property counts as validated when it carries a " +
+                   "System.ComponentModel.DataAnnotations attribute (or a subclass of ValidationAttribute), " +
+                   "and a type is reported when at least two of its properties carry none.",
         };
     }
 

@@ -117,6 +117,18 @@ public static class ListAnalysisToolsTool
             },
             new
             {
+                name        = "get_quality_trend",
+                trigger     = "Did this branch make the code better or worse? Quality between two commits, a regression in code health",
+                description = "Compares two revisions (or `to=worktree`) measured with one syntactic rule set: average complexity per method, methods over 10/20, long methods, TODO markers, with size as context. Returns improved/regressed/unchanged, each signal with its direction, and the files whose complexity moved most. Nothing is compiled, so a revision that no longer builds is still comparable.",
+            },
+            new
+            {
+                name        = "find_missing_validation",
+                trigger     = "Public parameters that are never null-checked, DTOs with no DataAnnotations validation",
+                description = "Two halves of the missing contract: public methods taking a reference-type parameter with no guard, and DTO-shaped public classes/records (no behaviour, two or more settable properties) whose properties carry no System.ComponentModel.DataAnnotations attribute.",
+            },
+            new
+            {
                 name        = "analyze_dependencies",
                 trigger     = "Project reference graph, which projects depend on which, project-level circular references",
                 description = "Builds the project dependency graph, detects project-level cycles, and identifies root projects.",
