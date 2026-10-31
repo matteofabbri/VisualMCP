@@ -1,3 +1,3 @@
 # Memory Index
 
-- [Missing analysis tools backlog](project_missing_tools.md) — Tools identified as missing for deep code analysis; medium/low priority backlog after the first 3 were implemented
+- [Missing analysis tools backlog](project_missing_tools.md) — CLOSED 2026-10-31: every row shipped; keep as the map of which tool closed which gap, not as a to-do

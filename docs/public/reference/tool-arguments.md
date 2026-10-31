@@ -258,6 +258,65 @@ language (`language=vb`, or a `.vb` file, which `metacode_translate`, `metacode_
 `metacode_index` and `metacode_generate` read through Roslyn). Grammar and limits:
 [`../../metacode.md`](../../metacode.md).
 
+## Build, run and publish settings
+
+These six tools turn the build-side files an IDE normally edits — a binary log, the evaluated MSBuild
+project, `launchSettings.json`, a `.pubxml`, a saved run configuration, the NuGet source list — into
+data, and where they write, into previewed, compiler-gated or NuGet-mediated writes.
+
+```
+analyze_binlog(binlogPath?, projectName?, configuration=Debug, top=25, timeoutSeconds=300)
+                → errors/warnings with project, file and line; the duration of every
+                  project and every target; the target that dominates the wall clock;
+                  the project graph. Without binlogPath it runs `dotnet build -bl`
+                  first and keeps the log under .visualMCP/binlogs.
+
+project_properties(action=get|set|unset, projectName?|projectPath?,
+                   properties[]?, items[]?, configuration?, platform?,
+                   property?, value?, scope=project|props, dryRun=true,
+                   buildGate=true, timeoutSeconds=120)
+                → get: the EVALUATED view (dotnet msbuild -getProperty / -getItem),
+                  so what Directory.Build.props and conditions contribute is visible,
+                  not the literal csproj text. set/unset: one property in the .csproj
+                  (scope=project) or the nearest Directory.Build.props (scope=props);
+                  previewed, build-gated (the file is restored when the solution
+                  stops compiling) and recorded in the edit history.
+
+run_config(action=list|save|delete, name?, project?, args?, configuration=?,
+           noBuild=false, environment?)
+                → the saved launch shapes in .visualMCP/run-configs.json.
+                  run_project configName=<name> applies project, arguments,
+                  configuration and environment variables; a parameter passed to
+                  run_project still wins over the saved value.
+
+launch_settings(action=list|set|remove, projectName?|projectPath?, profileName?,
+                commandName?, applicationUrl?, commandLineArgs?,
+                environmentVariables?, replaceEnvironmentVariables=false,
+                dryRun=true, confirm=false)
+                → Properties/launchSettings.json as data: profiles with command name,
+                  applicationUrl, arguments and environment variables. set preserves
+                  $schema, iisSettings and the profiles nobody touched; remove needs
+                  confirm=true.
+
+publish_profile(action=list|set|delete, projectName?|projectPath?, profileName?,
+                properties?, createIfMissing=true, dryRun=true, confirm=false)
+                → Properties/PublishProfiles/*.pubxml as data; properties are the
+                  MSBuild keys `dotnet publish -p:PublishProfile=<name>` reads
+                  (PublishDir, RuntimeIdentifier, SelfContained, PublishSingleFile, …);
+                  delete needs confirm=true.
+
+nuget_sources(action=list|add|update|remove|enable|disable, name?, url?,
+              username?, password?, storePasswordInClearText=false,
+              configFile?, timeoutSeconds=120)
+                → the package sources through the .NET CLI, with their enabled state.
+                  Credentials are passed to NuGet and never echoed back (the reported
+                  command has the password redacted; NuGet encrypts it by default, and
+                  storePasswordInClearText is only for a feed that requires it).
+```
+
+`launch_settings` and `publish_profile` are the setters of two files that otherwise stay text:
+read/write a single profile without reformatting the document, and preview the result first.
+
 ## Modernization
 
 `aspire` installs and scaffolds Aspire on demand; `update_framework` and `update_solution` move

@@ -1,9 +1,13 @@
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Snitch.Metacode.Analysis;
 using Snitch.Metacode.Rendering;
 using Snitch.Storage;
 using Snitch.Storage.Schema;
+using SchemaArtifactRow = Snitch.Storage.Schema.NativeArtifactRow;
+using SchemaCallRow = Snitch.Storage.Schema.NativeCallRow;
+using SchemaFunctionRow = Snitch.Storage.Schema.NativeFunctionRow;
 
 namespace Snitch.Metacode.Decompilation;
 
@@ -95,11 +99,6 @@ public interface INativeCodeStore
 /// </summary>
 public sealed class NativeCodeStore : INativeCodeStore, IDisposable
 {
-    private const string ArtifactColumns = """
-        id, sha256, binary, path, image, language, entry, image_base, functions, size_bytes,
-        ghidra, headless, created_at
-        """;
-
     private readonly IVisualMcpStore _store;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
@@ -167,156 +166,97 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            var existing = ReadArtifact(connection, sha);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var existing = context.NativeArtifacts.FirstOrDefault(row => row.Sha256 == sha);
             if (existing is not null && !force)
             {
-                return existing with
+                return Shape(existing, stored: false, database) with
                 {
                     Binary = binary,
                     Path = analysis.BinaryPath,
                     SizeBytes = size,
                     Headless = analysis.HeadlessPath,
-                    Database = database,
-                    Stored = false,
                 };
             }
 
-            using var transaction = connection.BeginTransaction();
+            var now = DateTimeOffset.UtcNow;
+            using var transaction = context.Database.BeginTransaction();
 
-            long id;
-            var now = DateTimeOffset.UtcNow.ToString("O");
-
+            SchemaArtifactRow artifact;
             if (existing is not null)
             {
-                id = existing.Id;
-                using (var deleteFunctions = connection.CreateCommand())
-                {
-                    deleteFunctions.Transaction = transaction;
-                    deleteFunctions.CommandText = "DELETE FROM native_function WHERE artifact = $artifact;";
-                    deleteFunctions.Parameters.AddWithValue("$artifact", id);
-                    deleteFunctions.ExecuteNonQuery();
-                }
+                context.NativeFunctions.Where(row => row.Artifact == existing.Id).ExecuteDelete();
+                context.NativeCalls.Where(row => row.Artifact == existing.Id).ExecuteDelete();
 
-                using (var deleteCalls = connection.CreateCommand())
-                {
-                    deleteCalls.Transaction = transaction;
-                    deleteCalls.CommandText = "DELETE FROM native_call WHERE artifact = $artifact;";
-                    deleteCalls.Parameters.AddWithValue("$artifact", id);
-                    deleteCalls.ExecuteNonQuery();
-                }
-
-                using (var update = connection.CreateCommand())
-                {
-                    update.Transaction = transaction;
-                    update.CommandText = """
-                        UPDATE native_artifact SET
-                            binary = $binary, path = $path, image = $image, language = $language,
-                            entry = $entry, image_base = $imageBase, functions = $functions,
-                            size_bytes = $size, ghidra = $ghidra, headless = $headless, created_at = $at
-                        WHERE id = $id;
-                        """;
-                    BindArtifact(update, analysis, snapshot.Image, snapshot.Language, snapshot.Entry,
-                        snapshot.ImageBase, snapshot.Functions.Count, size, sha, binary, ghidraVersion, now);
-                    update.Parameters.AddWithValue("$id", id);
-                    update.ExecuteNonQuery();
-                }
+                existing.Binary = binary;
+                existing.Path = analysis.BinaryPath;
+                existing.Image = snapshot.Image;
+                existing.Language = snapshot.Language;
+                existing.Entry = snapshot.Entry;
+                existing.ImageBase = snapshot.ImageBase;
+                existing.Functions = snapshot.Functions.Count;
+                existing.SizeBytes = size;
+                existing.Ghidra = ghidraVersion;
+                existing.Headless = analysis.HeadlessPath;
+                existing.CreatedAt = now;
+                artifact = existing;
             }
             else
             {
-                using (var insert = connection.CreateCommand())
+                artifact = new SchemaArtifactRow
                 {
-                    insert.Transaction = transaction;
-                    insert.CommandText = """
-                        INSERT INTO native_artifact
-                            (sha256, binary, path, image, language, entry, image_base, functions, size_bytes,
-                             ghidra, headless, created_at)
-                        VALUES ($sha, $binary, $path, $image, $language, $entry, $imageBase, $functions, $size,
-                                $ghidra, $headless, $at);
-                        """;
-                    BindArtifact(insert, analysis, snapshot.Image, snapshot.Language, snapshot.Entry,
-                        snapshot.ImageBase, snapshot.Functions.Count, size, sha, binary, ghidraVersion, now);
-                    insert.ExecuteNonQuery();
-                }
+                    Sha256 = sha,
+                    Binary = binary,
+                    Path = analysis.BinaryPath,
+                    Image = snapshot.Image,
+                    Language = snapshot.Language,
+                    Entry = snapshot.Entry,
+                    ImageBase = snapshot.ImageBase,
+                    Functions = snapshot.Functions.Count,
+                    SizeBytes = size,
+                    Ghidra = ghidraVersion,
+                    Headless = analysis.HeadlessPath,
+                    CreatedAt = now,
+                };
 
-                using (var lastId = connection.CreateCommand())
-                {
-                    lastId.Transaction = transaction;
-                    lastId.CommandText = "SELECT last_insert_rowid();";
-                    id = Convert.ToInt64(lastId.ExecuteScalar());
-                }
+                context.NativeArtifacts.Add(artifact);
+
+                // The child rows are keyed on the identity the database assigns.
+                context.SaveChanges();
             }
 
-            using (var function = connection.CreateCommand())
+            var id = artifact.Id;
+
+            context.NativeFunctions.AddRange(rows.Functions.Select(row => new SchemaFunctionRow
             {
-                function.Transaction = transaction;
-                function.CommandText = """
-                    INSERT INTO native_function
-                        (artifact, ordinal, name, entry, signature, size, decompiled, pseudocode,
-                         cyclomatic, cognitive, max_nesting, statements, branches)
-                    VALUES ($artifact, $ordinal, $name, $entry, $signature, $size, $decompiled, $pseudocode,
-                            $cyclomatic, $cognitive, $nesting, $statements, $branches);
-                    """;
-                var artifact = function.Parameters.Add("$artifact", SqliteType.Integer);
-                var ordinal = function.Parameters.Add("$ordinal", SqliteType.Integer);
-                var name = function.Parameters.Add("$name", SqliteType.Text);
-                var entry = function.Parameters.Add("$entry", SqliteType.Text);
-                var signature = function.Parameters.Add("$signature", SqliteType.Text);
-                var functionSize = function.Parameters.Add("$size", SqliteType.Integer);
-                var decompiled = function.Parameters.Add("$decompiled", SqliteType.Text);
-                var pseudocode = function.Parameters.Add("$pseudocode", SqliteType.Text);
-                var cyclomatic = function.Parameters.Add("$cyclomatic", SqliteType.Integer);
-                var cognitive = function.Parameters.Add("$cognitive", SqliteType.Integer);
-                var nesting = function.Parameters.Add("$nesting", SqliteType.Integer);
-                var statements = function.Parameters.Add("$statements", SqliteType.Integer);
-                var branches = function.Parameters.Add("$branches", SqliteType.Integer);
+                Artifact = id,
+                Ordinal = row.Ordinal,
+                Name = row.Name,
+                Entry = row.Entry,
+                Signature = row.Signature,
+                Size = row.Size,
+                Decompiled = row.Decompiled,
+                Pseudocode = row.Pseudocode,
+                Cyclomatic = row.Cyclomatic,
+                Cognitive = row.Cognitive,
+                MaxNesting = row.MaxNesting,
+                Statements = row.Statements,
+                Branches = row.Branches,
+            }));
 
-                foreach (var row in rows.Functions)
-                {
-                    artifact.Value = id;
-                    ordinal.Value = row.Ordinal;
-                    name.Value = row.Name;
-                    entry.Value = row.Entry;
-                    signature.Value = row.Signature;
-                    functionSize.Value = row.Size;
-                    decompiled.Value = row.Decompiled;
-                    pseudocode.Value = row.Pseudocode;
-                    cyclomatic.Value = row.Cyclomatic;
-                    cognitive.Value = row.Cognitive;
-                    nesting.Value = row.MaxNesting;
-                    statements.Value = row.Statements;
-                    branches.Value = row.Branches;
-                    function.ExecuteNonQuery();
-                }
-            }
-
-            using (var call = connection.CreateCommand())
+            context.NativeCalls.AddRange(rows.Calls.Select(edge => new SchemaCallRow
             {
-                call.Transaction = transaction;
-                call.CommandText = """
-                    INSERT OR IGNORE INTO native_call (artifact, caller, callee)
-                    VALUES ($artifact, $caller, $callee);
-                    """;
-                var artifact = call.Parameters.Add("$artifact", SqliteType.Integer);
-                var caller = call.Parameters.Add("$caller", SqliteType.Text);
-                var callee = call.Parameters.Add("$callee", SqliteType.Text);
+                Artifact = id,
+                Caller = edge.Caller,
+                Callee = edge.Callee,
+            }));
 
-                foreach (var edge in rows.Calls)
-                {
-                    artifact.Value = id;
-                    caller.Value = edge.Caller;
-                    callee.Value = edge.Callee;
-                    call.ExecuteNonQuery();
-                }
-            }
-
+            context.SaveChanges();
             transaction.Commit();
 
-            return new NativeArtifactRecord(
-                id, sha, binary, analysis.BinaryPath, snapshot.Image, snapshot.Language, snapshot.Entry,
-                snapshot.ImageBase, snapshot.Functions.Count, size, ghidraVersion, analysis.HeadlessPath,
-                DateTimeOffset.Parse(now), Stored: true, Database: database);
+            return Shape(artifact, stored: true, database);
         }
-        catch (SqliteException exception)
+        catch (Exception exception) when (exception is SqliteException or DbUpdateException)
         {
             return Failed(analysis.BinaryPath, "the solution database refused the write: " + exception.Message, sha, database);
         }
@@ -337,7 +277,12 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            return ReadArtifact(connection, sha256.Trim().ToLowerInvariant());
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var row = context.NativeArtifacts
+                .AsNoTracking()
+                .FirstOrDefault(artifact => artifact.Sha256 == sha256.Trim().ToLowerInvariant());
+
+            return row is null ? null : Shape(row);
         }
         catch (SqliteException)
         {
@@ -358,14 +303,17 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT {ArtifactColumns} FROM native_artifact ORDER BY created_at DESC LIMIT $limit;";
-            command.Parameters.AddWithValue("$limit", limit);
+            using var context = VisualMcpSchema.CreateContext(connection);
 
-            var artifacts = new List<NativeArtifactRecord>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) artifacts.Add(ReadArtifact(reader, stored: true));
-            return artifacts;
+            // SQLite cannot ORDER BY a DateTimeOffset through EF; artifacts are few, so the page is
+            // ordered after it is read.
+            return context.NativeArtifacts
+                .AsNoTracking()
+                .ToList()
+                .OrderByDescending(artifact => artifact.CreatedAt)
+                .Take(limit)
+                .Select(artifact => Shape(artifact))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -386,28 +334,21 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = string.IsNullOrWhiteSpace(filter)
-                ? """
-                  SELECT artifact, ordinal, name, entry, signature, size, decompiled, pseudocode,
-                         cyclomatic, cognitive, max_nesting, statements, branches
-                  FROM native_function WHERE artifact = $artifact ORDER BY ordinal LIMIT $limit;
-                  """
-                : """
-                  SELECT artifact, ordinal, name, entry, signature, size, decompiled, pseudocode,
-                         cyclomatic, cognitive, max_nesting, statements, branches
-                  FROM native_function
-                  WHERE artifact = $artifact AND (name LIKE $filter OR entry LIKE $filter)
-                  ORDER BY ordinal LIMIT $limit;
-                  """;
-            command.Parameters.AddWithValue("$artifact", artifactId);
-            command.Parameters.AddWithValue("$limit", limit);
-            if (!string.IsNullOrWhiteSpace(filter)) command.Parameters.AddWithValue("$filter", "%" + filter.Trim() + "%");
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var query = context.NativeFunctions.AsNoTracking().Where(row => row.Artifact == artifactId);
 
-            var functions = new List<NativeFunctionRecord>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) functions.Add(ReadFunction(reader));
-            return functions;
+            if (!string.IsNullOrWhiteSpace(filter))
+            {
+                var needle = "%" + filter.Trim() + "%";
+                query = query.Where(row => EF.Functions.Like(row.Name, needle) || EF.Functions.Like(row.Entry, needle));
+            }
+
+            return query
+                .OrderBy(row => row.Ordinal)
+                .Take(limit)
+                .ToList()
+                .Select(Shape)
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -431,20 +372,17 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT artifact, ordinal, name, entry, signature, size, decompiled, pseudocode,
-                       cyclomatic, cognitive, max_nesting, statements, branches
-                FROM native_function
-                WHERE artifact = $artifact AND (name = $name COLLATE NOCASE OR entry = $entry COLLATE NOCASE)
-                ORDER BY ordinal LIMIT 1;
-                """;
-            command.Parameters.AddWithValue("$artifact", artifactId);
-            command.Parameters.AddWithValue("$name", wanted);
-            command.Parameters.AddWithValue("$entry", address);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var row = context.NativeFunctions
+                .AsNoTracking()
+                .Where(function =>
+                    function.Artifact == artifactId &&
+                    (EF.Functions.Collate(function.Name, "NOCASE") == wanted ||
+                     EF.Functions.Collate(function.Entry, "NOCASE") == address))
+                .OrderBy(function => function.Ordinal)
+                .FirstOrDefault();
 
-            using var reader = command.ExecuteReader();
-            return reader.Read() ? ReadFunction(reader) : null;
+            return row is null ? null : Shape(row);
         }
         catch (SqliteException)
         {
@@ -465,19 +403,16 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT artifact, caller, callee FROM native_call
-                WHERE artifact = $artifact ORDER BY caller, callee LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$artifact", artifactId);
-            command.Parameters.AddWithValue("$limit", limit);
-
-            var edges = new List<NativeCallRecord>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-                edges.Add(new NativeCallRecord(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
-            return edges;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.NativeCalls
+                .AsNoTracking()
+                .Where(row => row.Artifact == artifactId)
+                .OrderBy(row => row.Caller)
+                .ThenBy(row => row.Callee)
+                .Take(limit)
+                .ToList()
+                .Select(row => new NativeCallRecord(row.Artifact, row.Caller, row.Callee))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -497,10 +432,8 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM native_function WHERE artifact = $artifact;";
-            command.Parameters.AddWithValue("$artifact", artifactId);
-            return Convert.ToInt32(command.ExecuteScalar());
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.NativeFunctions.Count(row => row.Artifact == artifactId);
         }
         catch (SqliteException)
         {
@@ -583,34 +516,6 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
             0, sha ?? string.Empty, Path.GetFileName(path), path, string.Empty, string.Empty, string.Empty,
             string.Empty, 0, 0, null, null, DateTimeOffset.UtcNow, Stored: false, Database: database, Error: error);
 
-    private static void BindArtifact(
-        SqliteCommand command,
-        GhidraAnalysis analysis,
-        string image,
-        string language,
-        string entry,
-        string imageBase,
-        int functions,
-        long size,
-        string sha,
-        string binary,
-        string? ghidraVersion,
-        string at)
-    {
-        command.Parameters.AddWithValue("$sha", sha);
-        command.Parameters.AddWithValue("$binary", binary);
-        command.Parameters.AddWithValue("$path", analysis.BinaryPath);
-        command.Parameters.AddWithValue("$image", image);
-        command.Parameters.AddWithValue("$language", language);
-        command.Parameters.AddWithValue("$entry", entry);
-        command.Parameters.AddWithValue("$imageBase", imageBase);
-        command.Parameters.AddWithValue("$functions", functions);
-        command.Parameters.AddWithValue("$size", size);
-        command.Parameters.AddWithValue("$ghidra", (object?)ghidraVersion ?? DBNull.Value);
-        command.Parameters.AddWithValue("$headless", (object?)analysis.HeadlessPath ?? DBNull.Value);
-        command.Parameters.AddWithValue("$at", at);
-    }
-
     /// <summary>The version the tools folder names: <c>.../ghidra_12.2_PUBLIC/support/analyzeHeadless</c>.</summary>
     private static string? VersionOf(string? headless)
     {
@@ -629,48 +534,14 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         return end > start ? folder[start..end] : folder[start..];
     }
 
-    private static NativeArtifactRecord? ReadArtifact(SqliteConnection connection, string sha)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {ArtifactColumns} FROM native_artifact WHERE sha256 = $sha;";
-        command.Parameters.AddWithValue("$sha", sha);
+    private static NativeArtifactRecord Shape(SchemaArtifactRow row, bool stored = true, string? database = null) =>
+        new(row.Id, row.Sha256, row.Binary, row.Path, row.Image, row.Language, row.Entry,
+            row.ImageBase, row.Functions, row.SizeBytes, row.Ghidra, row.Headless, row.CreatedAt,
+            stored, database);
 
-        using var reader = command.ExecuteReader();
-        return reader.Read() ? ReadArtifact(reader, stored: true) : null;
-    }
-
-    private static NativeArtifactRecord ReadArtifact(SqliteDataReader reader, bool stored) =>
-        new(
-            reader.GetInt64(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetString(4),
-            reader.GetString(5),
-            reader.GetString(6),
-            reader.GetString(7),
-            reader.GetInt32(8),
-            reader.GetInt64(9),
-            reader.IsDBNull(10) ? null : reader.GetString(10),
-            reader.IsDBNull(11) ? null : reader.GetString(11),
-            DateTimeOffset.TryParse(reader.GetString(12), out var created) ? created : DateTimeOffset.MinValue,
-            stored);
-
-    private static NativeFunctionRecord ReadFunction(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            reader.GetInt32(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetString(4),
-            reader.GetInt32(5),
-            reader.GetString(6),
-            reader.GetString(7),
-            reader.GetInt32(8),
-            reader.GetInt32(9),
-            reader.GetInt32(10),
-            reader.GetInt32(11),
-            reader.GetInt32(12));
+    private static NativeFunctionRecord Shape(SchemaFunctionRow row) =>
+        new(row.Artifact, row.Ordinal, row.Name, row.Entry, row.Signature, row.Size, row.Decompiled,
+            row.Pseudocode, row.Cyclomatic, row.Cognitive, row.MaxNesting, row.Statements, row.Branches);
 
     // ── connection ───────────────────────────────────────────────────────────────────
 

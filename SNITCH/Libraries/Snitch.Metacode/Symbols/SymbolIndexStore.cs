@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -23,12 +24,6 @@ namespace Snitch.Metacode.Symbols;
 /// </remarks>
 public sealed class SymbolIndexStore : IDisposable
 {
-    private const string DeclarationColumns = """
-        symbol_key, name, display, signature, kind, accessibility, modifiers, container_key, container_name,
-        namespace, is_static, is_abstract, is_virtual, is_override, is_extension, arity, summary, project,
-        path, start, length, line, col, end_line, end_col, doc_hash
-        """;
-
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
     private string? _path;
@@ -127,174 +122,97 @@ public sealed class SymbolIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var transaction = connection.BeginTransaction();
+            using var context = VisualMcpSchema.CreateContext(connection);
+            using var transaction = context.Database.BeginTransaction();
 
-            foreach (var table in new[] { "si_symbol", "si_usage", "si_metacode" })
-            {
-                using var delete = connection.CreateCommand();
-                delete.Transaction = transaction;
-                delete.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-                delete.Parameters.AddWithValue("$path", facts.Path);
-                delete.ExecuteNonQuery();
-            }
+            context.Symbols.Where(row => row.Path == facts.Path).ExecuteDelete();
+            context.SymbolUsages.Where(row => row.Path == facts.Path).ExecuteDelete();
+            context.SymbolMetacode.Where(row => row.Path == facts.Path).ExecuteDelete();
 
-            using (var insert = connection.CreateCommand())
-            {
-                insert.Transaction = transaction;
-                insert.CommandText = """
-                    INSERT OR REPLACE INTO si_symbol
-                        (symbol_key, name, display, signature, kind, accessibility, modifiers, container_key,
-                         container_name, namespace, is_static, is_abstract, is_virtual, is_override,
-                         is_extension, arity, summary, project, path, start, length, line, col, end_line,
-                         end_col, doc_hash)
-                    VALUES ($key, $name, $display, $signature, $kind, $accessibility, $modifiers, $container,
-                            $containerName, $namespace, $static, $abstract, $virtual, $override, $extension,
-                            $arity, $summary, $project, $path, $start, $length, $line, $col, $endLine,
-                            $endCol, $hash);
-                    """;
-                var key = insert.Parameters.Add("$key", SqliteType.Text);
-                var name = insert.Parameters.Add("$name", SqliteType.Text);
-                var display = insert.Parameters.Add("$display", SqliteType.Text);
-                var signature = insert.Parameters.Add("$signature", SqliteType.Text);
-                var kind = insert.Parameters.Add("$kind", SqliteType.Text);
-                var accessibility = insert.Parameters.Add("$accessibility", SqliteType.Text);
-                var modifiers = insert.Parameters.Add("$modifiers", SqliteType.Text);
-                var container = insert.Parameters.Add("$container", SqliteType.Text);
-                var containerName = insert.Parameters.Add("$containerName", SqliteType.Text);
-                var space = insert.Parameters.Add("$namespace", SqliteType.Text);
-                var isStatic = insert.Parameters.Add("$static", SqliteType.Integer);
-                var isAbstract = insert.Parameters.Add("$abstract", SqliteType.Integer);
-                var isVirtual = insert.Parameters.Add("$virtual", SqliteType.Integer);
-                var isOverride = insert.Parameters.Add("$override", SqliteType.Integer);
-                var isExtension = insert.Parameters.Add("$extension", SqliteType.Integer);
-                var arity = insert.Parameters.Add("$arity", SqliteType.Integer);
-                var summary = insert.Parameters.Add("$summary", SqliteType.Text);
-                var project = insert.Parameters.Add("$project", SqliteType.Text);
-                var path = insert.Parameters.Add("$path", SqliteType.Text);
-                var start = insert.Parameters.Add("$start", SqliteType.Integer);
-                var length = insert.Parameters.Add("$length", SqliteType.Integer);
-                var line = insert.Parameters.Add("$line", SqliteType.Integer);
-                var col = insert.Parameters.Add("$col", SqliteType.Integer);
-                var endLine = insert.Parameters.Add("$endLine", SqliteType.Integer);
-                var endCol = insert.Parameters.Add("$endCol", SqliteType.Integer);
-                var hash = insert.Parameters.Add("$hash", SqliteType.Text);
-
-                foreach (var declaration in facts.Declarations)
+            context.Symbols.AddRange(facts.Declarations
+                .GroupBy(declaration => (declaration.Key, declaration.Path, declaration.Start))
+                .Select(group => group.Last())
+                .Select(declaration => new SchemaSymbolRow
                 {
-                    key.Value = declaration.Key;
-                    name.Value = declaration.Name;
-                    display.Value = declaration.Display;
-                    signature.Value = declaration.Signature;
-                    kind.Value = declaration.Kind;
-                    accessibility.Value = declaration.Accessibility;
-                    modifiers.Value = declaration.Modifiers;
-                    container.Value = declaration.ContainerKey;
-                    containerName.Value = declaration.ContainerName;
-                    space.Value = declaration.Namespace;
-                    isStatic.Value = declaration.IsStatic ? 1 : 0;
-                    isAbstract.Value = declaration.IsAbstract ? 1 : 0;
-                    isVirtual.Value = declaration.IsVirtual ? 1 : 0;
-                    isOverride.Value = declaration.IsOverride ? 1 : 0;
-                    isExtension.Value = declaration.IsExtension ? 1 : 0;
-                    arity.Value = declaration.Arity;
-                    summary.Value = (object?)declaration.Summary ?? DBNull.Value;
-                    project.Value = declaration.Project;
-                    path.Value = declaration.Path;
-                    start.Value = declaration.Start;
-                    length.Value = declaration.Length;
-                    line.Value = declaration.Line;
-                    col.Value = declaration.Column;
-                    endLine.Value = declaration.EndLine;
-                    endCol.Value = declaration.EndColumn;
-                    hash.Value = declaration.DocumentHash;
-                    insert.ExecuteNonQuery();
-                }
-            }
+                    SymbolKey = declaration.Key,
+                    Name = declaration.Name,
+                    Display = declaration.Display,
+                    Signature = declaration.Signature,
+                    Kind = declaration.Kind,
+                    Accessibility = declaration.Accessibility,
+                    Modifiers = declaration.Modifiers,
+                    ContainerKey = declaration.ContainerKey,
+                    ContainerName = declaration.ContainerName,
+                    Namespace = declaration.Namespace,
+                    IsStatic = declaration.IsStatic,
+                    IsAbstract = declaration.IsAbstract,
+                    IsVirtual = declaration.IsVirtual,
+                    IsOverride = declaration.IsOverride,
+                    IsExtension = declaration.IsExtension,
+                    Arity = declaration.Arity,
+                    Summary = declaration.Summary,
+                    Project = declaration.Project,
+                    Path = declaration.Path,
+                    Start = declaration.Start,
+                    Length = declaration.Length,
+                    Line = declaration.Line,
+                    Col = declaration.Column,
+                    EndLine = declaration.EndLine,
+                    EndCol = declaration.EndColumn,
+                    DocHash = declaration.DocumentHash,
+                }));
 
-            using (var insert = connection.CreateCommand())
+            context.SymbolUsages.AddRange(facts.Usages.Select(usage => new SchemaUsageRow
             {
-                insert.Transaction = transaction;
-                insert.CommandText = """
-                    INSERT INTO si_usage (symbol_key, name, kind, container_key, path, start, length, line, col, doc_hash)
-                    VALUES ($key, $name, $kind, $container, $path, $start, $length, $line, $col, $hash);
-                    """;
-                var key = insert.Parameters.Add("$key", SqliteType.Text);
-                var name = insert.Parameters.Add("$name", SqliteType.Text);
-                var kind = insert.Parameters.Add("$kind", SqliteType.Text);
-                var container = insert.Parameters.Add("$container", SqliteType.Text);
-                var path = insert.Parameters.Add("$path", SqliteType.Text);
-                var start = insert.Parameters.Add("$start", SqliteType.Integer);
-                var length = insert.Parameters.Add("$length", SqliteType.Integer);
-                var line = insert.Parameters.Add("$line", SqliteType.Integer);
-                var col = insert.Parameters.Add("$col", SqliteType.Integer);
-                var hash = insert.Parameters.Add("$hash", SqliteType.Text);
+                SymbolKey = usage.SymbolKey,
+                Name = usage.Name,
+                Kind = usage.Kind,
+                ContainerKey = usage.ContainerKey,
+                Path = usage.Path,
+                Start = usage.Start,
+                Length = usage.Length,
+                Line = usage.Line,
+                Col = usage.Column,
+                DocHash = usage.DocumentHash,
+            }));
 
-                foreach (var usage in facts.Usages)
+            var document = context.SymbolDocuments.FirstOrDefault(row => row.Path == facts.Path);
+            if (document is null)
+            {
+                context.SymbolDocuments.Add(new SchemaDocumentRow
                 {
-                    key.Value = usage.SymbolKey;
-                    name.Value = usage.Name;
-                    kind.Value = usage.Kind;
-                    container.Value = usage.ContainerKey;
-                    path.Value = usage.Path;
-                    start.Value = usage.Start;
-                    length.Value = usage.Length;
-                    line.Value = usage.Line;
-                    col.Value = usage.Column;
-                    hash.Value = usage.DocumentHash;
-                    insert.ExecuteNonQuery();
-                }
+                    Path = facts.Path,
+                    Project = facts.Project,
+                    Hash = facts.Hash,
+                    Declarations = facts.Declarations.Count,
+                    Usages = facts.Usages.Count,
+                    IndexedAt = DateTimeOffset.UtcNow,
+                });
+            }
+            else
+            {
+                document.Project = facts.Project;
+                document.Hash = facts.Hash;
+                document.Declarations = facts.Declarations.Count;
+                document.Usages = facts.Usages.Count;
+                document.IndexedAt = DateTimeOffset.UtcNow;
             }
 
-            using (var stamp = connection.CreateCommand())
-            {
-                stamp.Transaction = transaction;
-                stamp.CommandText = """
-                    INSERT INTO si_document (path, project, hash, declarations, usages, indexed_at)
-                    VALUES ($path, $project, $hash, $declarations, $usages, $at)
-                    ON CONFLICT(path) DO UPDATE SET
-                        project = excluded.project,
-                        hash = excluded.hash,
-                        declarations = excluded.declarations,
-                        usages = excluded.usages,
-                        indexed_at = excluded.indexed_at;
-                    """;
-                stamp.Parameters.AddWithValue("$path", facts.Path);
-                stamp.Parameters.AddWithValue("$project", facts.Project);
-                stamp.Parameters.AddWithValue("$hash", facts.Hash);
-                stamp.Parameters.AddWithValue("$declarations", facts.Declarations.Count);
-                stamp.Parameters.AddWithValue("$usages", facts.Usages.Count);
-                stamp.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-                stamp.ExecuteNonQuery();
-            }
-
-            using (var insert = connection.CreateCommand())
-            {
-                insert.Transaction = transaction;
-                insert.CommandText = """
-                    INSERT OR REPLACE INTO si_metacode (symbol_key, path, kind, name, line, text, doc_hash)
-                    VALUES ($key, $path, $kind, $name, $line, $text, $hash);
-                    """;
-                var key = insert.Parameters.Add("$key", SqliteType.Text);
-                var path = insert.Parameters.Add("$path", SqliteType.Text);
-                var kind = insert.Parameters.Add("$kind", SqliteType.Text);
-                var name = insert.Parameters.Add("$name", SqliteType.Text);
-                var line = insert.Parameters.Add("$line", SqliteType.Integer);
-                var text = insert.Parameters.Add("$text", SqliteType.Blob);
-                var hash = insert.Parameters.Add("$hash", SqliteType.Text);
-
-                foreach (var tree in facts.Trees)
+            context.SymbolMetacode.AddRange(facts.Trees
+                .GroupBy(tree => (tree.SymbolKey, tree.Path))
+                .Select(group => group.Last())
+                .Select(tree => new SchemaMetacodeRow
                 {
-                    key.Value = tree.SymbolKey;
-                    path.Value = tree.Path;
-                    kind.Value = tree.Kind;
-                    name.Value = tree.Name;
-                    line.Value = tree.Line;
-                    text.Value = Compress(tree.Text);
-                    hash.Value = tree.DocumentHash;
-                    insert.ExecuteNonQuery();
-                }
-            }
+                    SymbolKey = tree.SymbolKey,
+                    Path = tree.Path,
+                    Kind = tree.Kind,
+                    Name = tree.Name,
+                    Line = tree.Line,
+                    Text = Compress(tree.Text),
+                    DocHash = tree.DocumentHash,
+                }));
 
+            context.SaveChanges();
             transaction.Commit();
         }
         catch (SqliteException)
@@ -310,29 +228,72 @@ public sealed class SymbolIndexStore : IDisposable
     // ── queries ─────────────────────────────────────────────────────────────
 
     /// <summary>Declarations by symbol name, optionally a substring search and/or one kind.</summary>
-    public IReadOnlyList<SymbolDeclaration> DeclarationsByName(string name, bool partial, string? kind, int limit) =>
-        Declarations(
-            "($partial = 0 AND name = $name) OR ($partial = 1 AND name LIKE $pattern ESCAPE '\\')",
-            name,
-            partial,
-            kind,
-            limit,
-            "ORDER BY name, path, start");
+    public IReadOnlyList<SymbolDeclaration> DeclarationsByName(string name, bool partial, string? kind, int limit)
+    {
+        var pattern = "%" + Escape(name) + "%";
+
+        return partial
+            ? QueryDeclarations(
+                row => EF.Functions.Like(row.Name, pattern, "\\") && (kind == null || row.Kind == kind),
+                QueryDeclarationsByName,
+                limit)
+            : QueryDeclarations(
+                row => row.Name == name && (kind == null || row.Kind == kind),
+                QueryDeclarationsByName,
+                limit);
+    }
 
     /// <summary>Every declaration of one key (a partial type has more than one).</summary>
     public IReadOnlyList<SymbolDeclaration> DeclarationsByKey(string key, int limit = 50) =>
-        Declarations("symbol_key = $name", key, false, null, limit, "ORDER BY path, start");
+        QueryDeclarations(
+            row => row.SymbolKey == key,
+            query => query.OrderBy(row => row.Path).ThenBy(row => row.Start),
+            limit);
 
     public IReadOnlyList<SymbolDeclaration> DeclarationsByPath(string path, int limit) =>
-        Declarations("path = $name", path, false, null, limit, "ORDER BY start");
+        QueryDeclarations(
+            row => row.Path == path,
+            query => query.OrderBy(row => row.Start),
+            limit);
 
     public IReadOnlyList<SymbolDeclaration> DeclarationsInContainer(string containerKey, int limit) =>
-        Declarations("container_key = $name", containerKey, false, null, limit, "ORDER BY start");
+        QueryDeclarations(
+            row => row.ContainerKey == containerKey,
+            query => query.OrderBy(row => row.Start),
+            limit);
 
-    public IReadOnlyList<SymbolUsage> UsagesOf(string symbolKey, string? kind, int limit) =>
-        Usages(
-            "WHERE symbol_key = $key AND ($kind IS NULL OR kind = $kind) ORDER BY path, line, col",
-            symbolKey, kind, limit);
+    public IReadOnlyList<SymbolUsage> UsagesOf(string symbolKey, string? kind, int limit)
+    {
+        var connection = Open();
+        if (connection is null) return [];
+
+        _gate.Wait();
+        try
+        {
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var query = context.SymbolUsages.AsNoTracking().Where(row => row.SymbolKey == symbolKey);
+            if (kind is not null) query = query.Where(row => row.Kind == kind);
+
+            return query
+                .OrderBy(row => row.Path)
+                .ThenBy(row => row.Line)
+                .ThenBy(row => row.Col)
+                .Take(Clamp(limit))
+                .ToList()
+                .Select(row => new SymbolUsage(
+                    row.SymbolKey, row.Name, row.Kind, row.ContainerKey, row.Path,
+                    row.Start, row.Length, row.Line, row.Col, row.DocHash))
+                .ToList();
+        }
+        catch (SqliteException)
+        {
+            return [];
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
     /// <summary>The uses of a symbol grouped by the member they happen inside — VS's "find all references", grouped.</summary>
     public IReadOnlyList<SymbolContainerCount> ContainersOf(string symbolKey, int limit)
@@ -343,21 +304,21 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT container_key, COUNT(*) AS uses, GROUP_CONCAT(DISTINCT kind) AS kinds
-                FROM si_usage
-                WHERE symbol_key = $key AND kind NOT IN ('override', 'implement')
-                GROUP BY container_key ORDER BY uses DESC, container_key LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$key", symbolKey);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var rows = context.SymbolUsages
+                .AsNoTracking()
+                .Where(row => row.SymbolKey == symbolKey && row.Kind != "override" && row.Kind != "implement")
+                .Select(row => new { row.ContainerKey, row.Kind })
+                .ToList();
 
-            var counts = new List<SymbolContainerCount>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-                counts.Add(new SymbolContainerCount(reader.GetString(0), reader.GetInt32(1), reader.GetString(2)));
-            return counts;
+            return rows
+                .GroupBy(row => row.ContainerKey)
+                .Select(group => new SymbolContainerCount(
+                    group.Key, group.Count(), string.Join(",", group.Select(row => row.Kind).Distinct().OrderBy(kind => kind, StringComparer.Ordinal))))
+                .OrderByDescending(count => count.Count)
+                .ThenBy(count => count.ContainerKey, StringComparer.Ordinal)
+                .Take(Clamp(limit))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -378,21 +339,22 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT symbol_key, name, COUNT(*) AS uses, GROUP_CONCAT(DISTINCT kind) AS kinds
-                FROM si_usage
-                WHERE container_key = $key AND kind <> 'override'
-                GROUP BY symbol_key ORDER BY uses DESC, name LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$key", containerKey);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var rows = context.SymbolUsages
+                .AsNoTracking()
+                .Where(row => row.ContainerKey == containerKey && row.Kind != "override")
+                .Select(row => new { row.SymbolKey, row.Name, row.Kind })
+                .ToList();
 
-            var counts = new List<SymbolTargetCount>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-                counts.Add(new SymbolTargetCount(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetString(3)));
-            return counts;
+            return rows
+                .GroupBy(row => new { row.SymbolKey, row.Name })
+                .Select(group => new SymbolTargetCount(
+                    group.Key.SymbolKey, group.Key.Name, group.Count(),
+                    string.Join(",", group.Select(row => row.Kind).Distinct().OrderBy(kind => kind, StringComparer.Ordinal))))
+                .OrderByDescending(count => count.Count)
+                .ThenBy(count => count.Name, StringComparer.Ordinal)
+                .Take(Clamp(limit))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -413,17 +375,17 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT kind, COUNT(*) AS uses FROM si_usage WHERE symbol_key = $key
-                GROUP BY kind ORDER BY uses DESC, kind;
-                """;
-            command.Parameters.AddWithValue("$key", symbolKey);
-
-            var counts = new List<SymbolKindCount>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) counts.Add(new SymbolKindCount(reader.GetString(0), reader.GetInt32(1)));
-            return counts;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.SymbolUsages
+                .AsNoTracking()
+                .Where(row => row.SymbolKey == symbolKey)
+                .GroupBy(row => row.Kind)
+                .Select(group => new { Kind = group.Key, Uses = group.Count() })
+                .OrderByDescending(entry => entry.Uses)
+                .ThenBy(entry => entry.Kind)
+                .ToList()
+                .Select(entry => new SymbolKindCount(entry.Kind, entry.Uses))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -447,23 +409,18 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            var names = new List<string>(keys.Count);
-            for (var index = 0; index < keys.Count; index++)
-            {
-                var parameter = "$k" + index;
-                names.Add(parameter);
-                command.Parameters.AddWithValue(parameter, keys[index]);
-            }
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var rows = context.SymbolUsages
+                .AsNoTracking()
+                .Where(row =>
+                    row.Kind != "override" && row.Kind != "implement" && keys.Contains(row.SymbolKey))
+                .GroupBy(row => row.SymbolKey)
+                .Select(group => new { Key = group.Key, Uses = group.Count() })
+                .ToList();
 
-            command.CommandText = $"""
-                SELECT symbol_key, COUNT(*) FROM si_usage
-                WHERE kind NOT IN ('override', 'implement') AND symbol_key IN ({string.Join(", ", names)})
-                GROUP BY symbol_key;
-                """;
+            foreach (var row in rows)
+                totals[row.Key] = row.Uses;
 
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) totals[reader.GetString(0)] = reader.GetInt32(1);
             return totals;
         }
         catch (SqliteException)
@@ -489,24 +446,33 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = incoming
-                ? """
-                  SELECT DISTINCT container_key, '' FROM si_usage
-                  WHERE symbol_key = $key AND kind = $kind ORDER BY container_key LIMIT $limit;
-                  """
-                : """
-                  SELECT DISTINCT symbol_key, name FROM si_usage
-                  WHERE container_key = $key AND kind = $kind ORDER BY name, symbol_key LIMIT $limit;
-                  """;
-            command.Parameters.AddWithValue("$key", key);
-            command.Parameters.AddWithValue("$kind", kind);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
+            using var context = VisualMcpSchema.CreateContext(connection);
 
-            var edges = new List<(string, string)>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) edges.Add((reader.GetString(0), reader.GetString(1)));
-            return edges;
+            if (incoming)
+            {
+                return context.SymbolUsages
+                    .AsNoTracking()
+                    .Where(row => row.SymbolKey == key && row.Kind == kind)
+                    .Select(row => row.ContainerKey)
+                    .Distinct()
+                    .OrderBy(container => container)
+                    .Take(Clamp(limit))
+                    .ToList()
+                    .Select(container => (container, string.Empty))
+                    .ToList();
+            }
+
+            return context.SymbolUsages
+                .AsNoTracking()
+                .Where(row => row.ContainerKey == key && row.Kind == kind)
+                .Select(row => new { row.SymbolKey, row.Name })
+                .Distinct()
+                .OrderBy(edge => edge.Name)
+                .ThenBy(edge => edge.SymbolKey)
+                .Take(Clamp(limit))
+                .ToList()
+                .Select(edge => (edge.SymbolKey, edge.Name))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -520,11 +486,11 @@ public sealed class SymbolIndexStore : IDisposable
 
     /// <summary>The metacode tree of one declaration, or none when it has no body the model can render.</summary>
     public IReadOnlyList<SymbolMetacode> MetacodeOf(string symbolKey, int limit = 5) =>
-        Metacode("symbol_key = $key ORDER BY path LIMIT $limit", symbolKey, limit);
+        Metacode(query => query.Where(row => row.SymbolKey == symbolKey).OrderBy(row => row.Path), limit);
 
     /// <summary>Every tree the index holds for a file, in source order: the file as metacode.</summary>
     public IReadOnlyList<SymbolMetacode> MetacodeInPath(string path, int limit = 200) =>
-        Metacode("path = $key ORDER BY line LIMIT $limit", path, limit);
+        Metacode(query => query.Where(row => row.Path == path).OrderBy(row => row.Line), limit);
 
     /// <summary>Non-public declarations nothing in the index uses.</summary>
     public IReadOnlyList<SymbolDeclaration> Unused(int limit, string? kind = null)
@@ -535,17 +501,24 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                SELECT {DeclarationColumns} FROM si_symbol
-                WHERE accessibility IN ('private', 'internal', 'protected', 'private protected', 'protected internal')
-                  AND ($kind IS NULL OR kind = $kind)
-                  AND NOT EXISTS (SELECT 1 FROM si_usage u WHERE u.symbol_key = si_symbol.symbol_key)
-                ORDER BY path, start LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-            return ReadDeclarations(command);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var nonPublic = new[] { "private", "internal", "protected", "private protected", "protected internal" };
+
+            var query = context.Symbols
+                .AsNoTracking()
+                .Where(row =>
+                    nonPublic.Contains(row.Accessibility) &&
+                    !context.SymbolUsages.Any(usage => usage.SymbolKey == row.SymbolKey));
+
+            if (kind is not null) query = query.Where(row => row.Kind == kind);
+
+            return query
+                .OrderBy(row => row.Path)
+                .ThenBy(row => row.Start)
+                .Take(Clamp(limit))
+                .ToList()
+                .Select(Shape)
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -569,29 +542,25 @@ public sealed class SymbolIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var stale = new List<string>();
-            using (var select = connection.CreateCommand())
-            {
-                select.CommandText = "SELECT path FROM si_document;";
-                using var reader = select.ExecuteReader();
-                while (reader.Read())
-                {
-                    var path = reader.GetString(0);
-                    if (!live.Contains(path)) stale.Add(path);
-                }
-            }
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var paths = context.SymbolDocuments
+                .AsNoTracking()
+                .Select(document => document.Path)
+                .ToList();
 
+            var stale = paths.Where(path => !live.Contains(path)).ToList();
+            if (stale.Count == 0) return 0;
+
+            using var transaction = context.Database.BeginTransaction();
             foreach (var path in stale)
             {
-                foreach (var table in new[] { "si_symbol", "si_usage", "si_metacode", "si_document" })
-                {
-                    using var delete = connection.CreateCommand();
-                    delete.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-                    delete.Parameters.AddWithValue("$path", path);
-                    delete.ExecuteNonQuery();
-                }
+                context.Symbols.Where(row => row.Path == path).ExecuteDelete();
+                context.SymbolUsages.Where(row => row.Path == path).ExecuteDelete();
+                context.SymbolMetacode.Where(row => row.Path == path).ExecuteDelete();
+                context.SymbolDocuments.Where(row => row.Path == path).ExecuteDelete();
             }
 
+            transaction.Commit();
             return stale.Count;
         }
         catch (SqliteException)
@@ -614,22 +583,24 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            var documents = Count(connection, "SELECT COUNT(*) FROM si_document;");
-            var symbols = Count(connection, "SELECT COUNT(DISTINCT symbol_key) FROM si_symbol;");
-            var declarations = Count(connection, "SELECT COUNT(*) FROM si_symbol;");
-            var usages = Count(connection, "SELECT COUNT(*) FROM si_usage;");
+            using var context = VisualMcpSchema.CreateContext(connection);
 
-            string? newest = null;
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT MAX(indexed_at) FROM si_document;";
-                if (command.ExecuteScalar() is string value) newest = value;
-            }
+            var documents = context.SymbolDocuments.Count();
+            var symbols = context.Symbols.Select(row => row.SymbolKey).Distinct().Count();
+            var declarations = context.Symbols.Count();
+            var usages = context.SymbolUsages.Count();
+
+            // SQLite cannot ORDER BY a DateTimeOffset through EF; the timestamps are few enough to rank here.
+            var indexedAt = context.SymbolDocuments
+                .AsNoTracking()
+                .Select(document => document.IndexedAt)
+                .ToList();
+            var newest = indexedAt.Count == 0 ? null : indexedAt.Max().ToUniversalTime().ToString("O");
 
             return new SymbolIndexStatus(
                 documents, symbols, declarations, usages, newest,
-                Histogram(connection, "SELECT kind, COUNT(*) FROM si_symbol GROUP BY kind ORDER BY 2 DESC, 1"),
-                Histogram(connection, "SELECT kind, COUNT(*) FROM si_usage GROUP BY kind ORDER BY 2 DESC, 1"));
+                Histogram(context.Symbols.Select(row => row.Kind)),
+                Histogram(context.SymbolUsages.Select(row => row.Kind)));
         }
         catch (SqliteException)
         {
@@ -650,9 +621,11 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM si_symbol; DELETE FROM si_usage; DELETE FROM si_metacode; DELETE FROM si_document;";
-            command.ExecuteNonQuery();
+            using var context = VisualMcpSchema.CreateContext(connection);
+            context.SymbolUsages.ExecuteDelete();
+            context.SymbolMetacode.ExecuteDelete();
+            context.Symbols.ExecuteDelete();
+            context.SymbolDocuments.ExecuteDelete();
         }
         catch (SqliteException)
         {
@@ -694,8 +667,10 @@ public sealed class SymbolIndexStore : IDisposable
         }
     }
 
-    private IReadOnlyList<SymbolDeclaration> Declarations(
-        string where, string name, bool partial, string? kind, int limit, string order)
+    private IReadOnlyList<SymbolDeclaration> QueryDeclarations(
+        Expression<Func<SchemaSymbolRow, bool>> where,
+        Func<IQueryable<SchemaSymbolRow>, IQueryable<SchemaSymbolRow>> order,
+        int limit)
     {
         var connection = Open();
         if (connection is null) return [];
@@ -703,17 +678,12 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                SELECT {DeclarationColumns} FROM si_symbol
-                WHERE ({where}) AND ($kind IS NULL OR kind = $kind) {order} LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$name", name);
-            command.Parameters.AddWithValue("$partial", partial ? 1 : 0);
-            command.Parameters.AddWithValue("$pattern", "%" + Escape(name) + "%");
-            command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-            return ReadDeclarations(command);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return order(context.Symbols.AsNoTracking().Where(where))
+                .Take(Clamp(limit))
+                .ToList()
+                .Select(Shape)
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -725,7 +695,11 @@ public sealed class SymbolIndexStore : IDisposable
         }
     }
 
-    private IReadOnlyList<SymbolUsage> Usages(string where, string key, string? kind, int limit)
+    private static IQueryable<SchemaSymbolRow> QueryDeclarationsByName(IQueryable<SchemaSymbolRow> query) =>
+        query.OrderBy(row => row.Name).ThenBy(row => row.Path).ThenBy(row => row.Start);
+
+    private IReadOnlyList<SymbolMetacode> Metacode(
+        Func<IQueryable<SchemaMetacodeRow>, IQueryable<SchemaMetacodeRow>> shape, int limit)
     {
         var connection = Open();
         if (connection is null) return [];
@@ -733,60 +707,13 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                SELECT symbol_key, name, kind, container_key, path, start, length, line, col, doc_hash
-                FROM si_usage {where} LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$key", key);
-            command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-
-            var usages = new List<SymbolUsage>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                usages.Add(new SymbolUsage(
-                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                    reader.GetString(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7),
-                    reader.GetInt32(8), reader.GetString(9)));
-            }
-
-            return usages;
-        }
-        catch (SqliteException)
-        {
-            return [];
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    private IReadOnlyList<SymbolMetacode> Metacode(string where, string key, int limit)
-    {
-        var connection = Open();
-        if (connection is null) return [];
-
-        _gate.Wait();
-        try
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT symbol_key, path, kind, name, line, text, doc_hash FROM si_metacode WHERE {where};";
-            command.Parameters.AddWithValue("$key", key);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-
-            var trees = new List<SymbolMetacode>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                trees.Add(new SymbolMetacode(
-                    reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                    reader.GetInt32(4), Decompress((byte[])reader[5]), reader.GetString(6)));
-            }
-
-            return trees;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return shape(context.SymbolMetacode.AsNoTracking())
+                .Take(Clamp(limit))
+                .ToList()
+                .Select(row => new SymbolMetacode(
+                    row.SymbolKey, row.Path, row.Kind, row.Name, row.Line, Decompress(row.Text), row.DocHash))
+                .ToList();
         }
         catch (Exception exception) when (exception is SqliteException or InvalidDataException)
         {
@@ -798,60 +725,22 @@ public sealed class SymbolIndexStore : IDisposable
         }
     }
 
-    private static IReadOnlyList<SymbolDeclaration> ReadDeclarations(SqliteCommand command)
+    private static SymbolDeclaration Shape(SchemaSymbolRow row) =>
+        new(row.SymbolKey, row.Name, row.Display, row.Signature, row.Kind, row.Accessibility, row.Modifiers,
+            row.ContainerKey, row.ContainerName, row.Namespace, row.IsStatic, row.IsAbstract, row.IsVirtual,
+            row.IsOverride, row.IsExtension, row.Arity, row.Summary, row.Project, row.Path, row.Start,
+            row.Length, row.Line, row.Col, row.EndLine, row.EndCol, row.DocHash);
+
+    private static IReadOnlyList<SymbolKindCount> Histogram(IQueryable<string> kinds)
     {
-        var declarations = new List<SymbolDeclaration>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            declarations.Add(new SymbolDeclaration(
-                Key: reader.GetString(0),
-                Name: reader.GetString(1),
-                Display: reader.GetString(2),
-                Signature: reader.GetString(3),
-                Kind: reader.GetString(4),
-                Accessibility: reader.GetString(5),
-                Modifiers: reader.GetString(6),
-                ContainerKey: reader.GetString(7),
-                ContainerName: reader.GetString(8),
-                Namespace: reader.GetString(9),
-                IsStatic: reader.GetInt32(10) != 0,
-                IsAbstract: reader.GetInt32(11) != 0,
-                IsVirtual: reader.GetInt32(12) != 0,
-                IsOverride: reader.GetInt32(13) != 0,
-                IsExtension: reader.GetInt32(14) != 0,
-                Arity: reader.GetInt32(15),
-                Summary: reader.IsDBNull(16) ? null : reader.GetString(16),
-                Project: reader.GetString(17),
-                Path: reader.GetString(18),
-                Start: reader.GetInt32(19),
-                Length: reader.GetInt32(20),
-                Line: reader.GetInt32(21),
-                Column: reader.GetInt32(22),
-                EndLine: reader.GetInt32(23),
-                EndColumn: reader.GetInt32(24),
-                DocumentHash: reader.GetString(25)));
-        }
-
-        return declarations;
-    }
-
-    private static int Count(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        return Convert.ToInt32(command.ExecuteScalar());
-    }
-
-    private static IReadOnlyList<SymbolKindCount> Histogram(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-
-        var counts = new List<SymbolKindCount>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) counts.Add(new SymbolKindCount(reader.GetString(0), reader.GetInt32(1)));
-        return counts;
+        return kinds
+            .GroupBy(kind => kind)
+            .Select(group => new { Kind = group.Key, Count = group.Count() })
+            .OrderByDescending(entry => entry.Count)
+            .ThenBy(entry => entry.Kind)
+            .ToList()
+            .Select(entry => new SymbolKindCount(entry.Kind, entry.Count))
+            .ToList();
     }
 
     /// <summary>A LIKE pattern takes its own metacharacters: a query for <c>%</c> must not match everything.</summary>

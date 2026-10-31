@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **381 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **387 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -194,6 +194,8 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `push_members_down` | ✎ Move a member into the only derived type |
 | `implement_inpc` | ✎ Add `INotifyPropertyChanged` plumbing and convert properties to notifying ones |
 | `generate_members` | ✎ Generate constructor, `Equals`/`GetHashCode` and `ToString` from fields/properties |
+| `generate_builder` | ✎ Generate a fluent builder for a type: one `With<Property>` per public settable property and a `Build()`; compiler-gated |
+| `generate_dto_from_json` | ✎ Generate a C# DTO from a JSON sample (types inferred from the data, init-only properties, nested objects as nested records); compiler-gated |
 | `implement_members` | ✎ Generate stubs for the interface and abstract members a type still owes; refused unless the compiler errors disappear |
 | `create_from_usage` | ✎ Create what a compiler error already assumes: the method or property on the receiver's type (CS1061), the static member on its type (CS0117), the overload whose signature is the call site (CS1501/CS7036), the type (CS0246) or a method on the enclosing type (CS0103) |
 | `generate_docs` | ✎ Write the missing XML `<summary>`/`<param>`/`<typeparam>`/`<returns>` entries from the declaration name |
@@ -237,7 +239,11 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | Tool | What it does |
 |---|---|
 | `build_project` | Run `dotnet build` and return structured errors/warnings; runs the configured analyzers by default and can skip copying output so a running app does not lock files |
+| `analyze_binlog` | ✎ Read an MSBuild binary log — or run `dotnet build -bl` and analyse it — returning errors/warnings with project, file and line, the duration of every project and target, the target that dominates the wall clock, and the project graph |
+| `project_properties` | ✎ preview Read the evaluated MSBuild view (`dotnet msbuild -getProperty`/`-getItem`, so what `Directory.Build.props` and conditions contribute), and set/unset one property in the project or the nearest `Directory.Build.props`, build-gated |
 | `run_project` | Launch `dotnet run` with a timeout and capture startup output and the listening URL |
+| `run_config` | ✎ preview Save and list the ways a project is launched — project, application arguments, configuration, environment variables — in `.visualMCP/run-configs.json`; `run_project configName=…` applies one |
+| `launch_settings` | ✎ preview `Properties/launchSettings.json` as data: list, add/update or remove profiles, preserving `$schema`, `iisSettings` and the profiles nobody touched |
 | `run_command` | Execute a shell command in PowerShell, pwsh, cmd or bash (PowerShell by default on Windows, bash elsewhere) — pipes, redirection, nested shells, long scripts; the process tree is killed at the timeout |
 | `run_tests` | Run `dotnet test`, parse TRX, return pass/fail/skip counts, per-project results and failure details |
 | `get_test_coverage_map` | Per-class and per-method line coverage, plus branch coverage (Cobertura `branch-rate`); requires `coverlet.collector` in the test projects |
@@ -253,6 +259,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `find_flaky_tests` | Run the selection several times and report the tests whose outcome changed, apart from those that never passed |
 | `run_mutation_tests` | ✎ Run Stryker.NET over a test project: mutation score, killed/survived/timed-out/no-coverage counts, the worst files and the surviving mutants with file and line |
 | `dotnet_publish` | Publish a project (RID, self-contained, single-file, output folder) with a structured result |
+| `publish_profile` | ✎ preview `Properties/PublishProfiles/*.pubxml` as data: list, create/update or delete a profile by the MSBuild properties `dotnet publish -p:PublishProfile` reads (`PublishDir`, `RuntimeIdentifier`, `SelfContained`, `PublishSingleFile`, …) |
 | `add_project_reference` | ✎ Add a `<ProjectReference>` (`dotnet add reference`) and reload the workspace |
 | `remove_project_reference` | ✎ Remove a `<ProjectReference>` |
 | `nuget_pack` | ✎ Pack a project into a .nupkg, with an optional version and output folder |
@@ -343,6 +350,7 @@ dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
 | `inspect_packages` | The same for several packages (`id` or `id@version`) in one call |
 | `decompile_package_type` | One-shot: locate a package and decompile one type to C# |
 | `search_nuget_packages` | Search the nuget.org gallery by id or keywords: version, description, downloads, authors, tags |
+| `nuget_sources` | ✎ List, add, update, remove, enable or disable the package sources through `dotnet nuget`; credentials are passed to NuGet and never echoed back |
 | `add_nuget_package` | ✎ Add a package reference and restore |
 | `remove_nuget_package` | ✎ Remove a package reference |
 | `update_nuget_package` | ✎ Update a package to a newer version or the latest stable |
@@ -405,6 +413,7 @@ claims that a database accepts a statement.
 | `decompile_types` | The same for several types of one assembly in one call |
 | `assembly_workspace` | Decompile an assembly INTO a Roslyn workspace (one document per type, cached per MVID) and navigate it: `load`, `list`, `search` (CamelHumps too), `source`, `references`, `outline`, `unload` |
 | `decompile_assembly` | Decompile a whole module, or a filtered/paged set of types; can write one file per type |
+| `disassemble` | The IL view of a module: each method body decoded into instructions with the metadata tokens resolved (`call System.String::Concat`, the `ldstr` literals), filtered by type and method |
 
 ## Metacode
 

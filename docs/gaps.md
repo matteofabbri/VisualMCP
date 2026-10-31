@@ -16,7 +16,16 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (seventeenth revision: **profiling closes the four Visual Studio gaps and joins
+Last updated: 2026-10-31 (eighteenth revision: **the build settings close the last section 10 rows**.
+New tools: `analyze_binlog` (an MSBuild `.binlog` — or `dotnet build -bl` and then its analysis — with
+errors/warnings by project and line, per-project and per-target durations, the target that dominates the
+wall clock and the project graph), `project_properties` (the **evaluated** MSBuild view through
+`dotnet msbuild -getProperty`/`-getItem`, plus `set`/`unset` of one property in the project or the nearest
+`Directory.Build.props`, build-gated), `run_config` (launch shapes stored in `.visualMCP/run-configs.json`,
+applied by `run_project configName=…`), `launch_settings` and `publish_profile` (`launchSettings.json` and
+`*.pubxml` as data, previewed, preserving what nobody touched) and `nuget_sources` (package sources and
+credentials through `dotnet nuget`, never echoed back). **381 → 387 tools.** The seventeenth revision:
+**profiling closes the four Visual Studio gaps and joins
 the measurements with the metacode AST**. New tools: `profile_root_cause` (a CPU/allocation/blocked/
 exception site matched to the declaration the AST holds for that line, with the loop chain and nesting,
 the LINQ materialiser per iteration, the allocation or string concatenation inside the loop, the
@@ -554,19 +563,18 @@ not-applicable-by-design rows in [section 11](#11-ui-bound-features--not-applica
 Build and run are covered (`build_project`, `run_project`, `run_tests`, `run_benchmarks`,
 `quick_benchmark`, `run_plan`, `add_ci_workflow`). **Packaging is covered since 2026-10-30**
 (`dotnet_publish` with RID/self-contained/single-file, `nuget_pack`, `nuget_push`) together with
-**project references** (`add_project_reference`, `remove_project_reference`). What remains:
+**project references** (`add_project_reference`, `remove_project_reference`). **The build settings are
+covered since 2026-10-31**: `analyze_binlog` reads (or produces and then reads) an MSBuild binary log —
+errors and warnings with project and line, every project's and target's duration, the target that
+dominates the wall clock and the project graph; `project_properties` reads the *evaluated* MSBuild view
+(what `Directory.Build.props` and conditions contribute) and sets/unsets one property in the project or
+the props file under a build gate; `run_config` stores launch shapes and `run_project configName=…`
+applies one; `launch_settings` and `publish_profile` read and write `launchSettings.json` and `*.pubxml`
+as data; `nuget_sources` manages the package sources and their credentials through `dotnet nuget`. What
+remains:
 
 - MSIX, ClickOnce, WiX/installer authoring;
-- publish profiles and launch settings editing;
-- no project-property editing surface beyond `update_framework`, `implicit_usings` and the package tools;
-  the csproj is otherwise text;
-- **NuGet gaps**: `search_nuget_packages` finds a package id in the nuget.org gallery (id, version,
-  description, downloads, authors, tags); still missing is package-source and credential management;
-- **build diagnostics gaps**: no MSBuild binary-log (`.binlog`) analysis, no evaluated-property dump, no
-  build graph or per-target timings — `build_project` returns compiler diagnostics; `extract_build_log_errors`
-  parses a text log;
-- no run configurations (per-project env vars/args stored and reused — `run_project` takes arguments per
-  call); a `.http` request file runs through `run_http_file`, and `.http` files edited elsewhere are text;
+- a `.http` request file runs through `run_http_file`, and `.http` files edited elsewhere are text;
 - no deployment targets (IIS, Azure, containers, Kubernetes);
 - **no standalone command-line tool** for a pipeline (the equivalents of ReSharper's `inspectcode`,
   `dupfinder`, `cleanupcode`): the MCP server must be driven by an MCP client, so CI needs a harness;

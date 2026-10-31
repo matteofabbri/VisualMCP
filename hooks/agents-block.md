@@ -27,6 +27,7 @@ In a .NET repository, use these tools instead of shell probes or reading files b
 | `dotnet test` once per project | `run_tests{projectFilter, extraArgs}` |
 | rename / extract / move / change signature | `apply_rename`, `extract_interface`, `extract_method_candidates`, `change_signature`, `move_type` |
 | `python - <<PY` / `sed -i` / `cat > file <<EOF` rewriting or creating a file | `Edit` / `Write` (never heredoc edits) |
+| "what is missing / what's next / what do we implement" | `board_board` (columns and counts), `board_list` (a filtered view), `board_audit` (which open cards are already done) |
 
 Rules:
 
@@ -43,6 +44,11 @@ Rules:
   `dotnet build`, `dotnet test` or `git` through `grep`/`tail`: the MCP tools return
   structured errors and results instead of a log tail you have to read again.
 - At the start of work on a solution, read `read_project_docs` (README/docs) before code.
+- The board is the backlog. When the user asks what is missing, what comes next, or what to
+  implement, read it first with `board_board` (columns, counts) or `board_list` (a filtered
+  view); `board_audit` cross-checks each open card's tool names against this build and says
+  which cards are probably already done. Memory notes and `docs/gaps.md` are historical
+  records — never answer that question by reading a backlog file.
 - Project memory is the client's, not the server's: this build exposes no `memory_read`,
   `memory_write` or `memory_append` — never call them, not even when an old build, a cached tool
   list or an old transcript mentions them. Notes another client keeps under

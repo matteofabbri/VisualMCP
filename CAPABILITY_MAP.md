@@ -711,9 +711,10 @@ the total, and every row below is the count of its section.
 
 The section tables are frozen at 2026-10-30 and do not contain the **14 tools added that day** (SSR, cleanup
 and formatting, the "create" family, the inspection baseline, seven analyses), the **18 closed on 2026-10-31**
-(9 Kubernetes/Helm, 7 Node/JS-TS, 2 SQL), the **2 of section 18** (`templates`, `layout_code`) nor
-`get_quality_trend` (2026-10-31, the quality trend between two revisions: section 3 carries its row). The live
-count is `capability_report`: **381 tools**.
+(9 Kubernetes/Helm, 7 Node/JS-TS, 2 SQL), the **2 of section 18** (`templates`, `layout_code`),
+`get_quality_trend` (2026-10-31, the quality trend between two revisions: section 3 carries its row) nor the
+**6 build-settings tools** of 2026-10-31 (`analyze_binlog`, `project_properties`, `run_config`,
+`launch_settings`, `publish_profile`, `nuget_sources`). The live count is `capability_report`: **387 tools**.
 
 ---
 
