@@ -193,6 +193,7 @@ analysis, and `find_implementations`/`reference_index` use rises above zero.
 |---|---|---|---|---|
 | C# | style | 97 ids, 29 explained by category | `StyleRewriteCatalog` | guides/refactoring.md |
 | Visual Basic | style | 15 ids, 34 with a reason | `VbStyleRewriteCatalog` | reference/limits.md |
+| Visual Basic | the rest of the language | symbol index, structural search, format/usings/cleanup, VB-capable inspection packs, dead code / smells / async / performance / complexity, rename + encapsulate_field + ParamArray | `VisualBasicSymbolIndexFrontend`, `*.VisualBasic.cs` | gaps.md §1.2 |
 | Razor | markup analysis | 28 rules | `RazorRuleCatalog` | razor.md |
 | … | … | … | … | … |
 

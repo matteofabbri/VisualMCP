@@ -66,7 +66,9 @@ public sealed class CapabilityReportService : ICapabilityReportService
             layers = new
             {
                 csharp = "Snitch.Languages.CSharp (Roslyn: navigation, refactoring, style, inspections, testing)",
-                visualBasic = "Snitch.Languages.VB (style: 15 ids) + Snitch.Metacode's VisualBasicFrontend (trees, complexity, C# generation)",
+                visualBasic = "Snitch.Languages.VB (style: 15 ids; refactoring helpers) + Snitch.Metacode's VisualBasicFrontend " +
+                              "and VisualBasicSymbolIndexFrontend (trees, symbol index, complexity, C# generation) + the VB halves of " +
+                              "structural search, formatting/usings/cleanup, inspections and the analysis tools",
                 razor = "Snitch.Languages.Razor (heuristic markup scanner, 28 rules)",
                 xaml = "Snitch.Languages.Xaml (markup + Roslyn code-behind: inventory, XAML0001-0009, navigation)",
                 metacode = "Snitch.Metacode (C#, Visual Basic, Razor, pseudocode, Ghidra frontends; persisted index)",
