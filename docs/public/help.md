@@ -170,14 +170,19 @@ if present) and to the post-build install hook in the project file.
 
 **Can I use it on Linux or macOS?**
 
-CI produces self-contained builds for Linux x64 and macOS arm64, and the server is not fundamentally
-Windows-bound. Windows is the documented and fully supported platform; the installer and the routing
-guard are PowerShell. Treat Linux/macOS as a build target, not a supported installation path, unless you
-set up the client registration yourself.
+Yes — the server is platform-independent and works anywhere the .NET 10 SDK (or a self-contained build)
+runs. The platform-sensitive pieces adapt automatically: `run_command` and `run_plan` default to
+PowerShell on Windows and bash elsewhere (`cmd` and Windows PowerShell are refused off Windows with a
+clear error), `self_update` downloads the asset for the platform it runs on and swaps it with a POSIX
+shell helper, `debug_install` picks the linux/osx netcoredbg build, Ghidra's `analyzeHeadless` (not the
+`.bat`) is used off Windows, and `stop_server` reads `/proc`/`ps` instead of WMI. CI produces builds for
+Windows x64, Linux x64 and macOS arm64. The two things that remain Windows-shaped are the PowerShell
+installer and routing guard in `scripts/` — on Linux/macOS register the server in your client manually
+(see [Getting started → Manual installation](getting-started.md#manual-installation)).
 
 **How many tools are there?**
 
-314 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
+318 in this revision. The live list is `capability_report` (with per-area counts), `http://127.0.0.1:4677/tools`
 (everything, with schemas), or the [tool catalogue](tools.md).
 
 **How do I update?**

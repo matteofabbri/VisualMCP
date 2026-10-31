@@ -11,8 +11,8 @@ families of tools.
 | Requirement | Why |
 |---|---|
 | **.NET 10 SDK** | The server targets `net10.0` and uses MSBuild/Roslyn to load solutions. |
-| **Windows 10/11** | Primary supported platform. The install script is PowerShell. |
-| **PowerShell 5.1+** | Runs `scripts\install.ps1`. |
+| **Windows 10/11, Linux or macOS** | The server is platform-independent; the installer script is PowerShell (Windows). On Linux/macOS, [register it manually](#manual-installation). |
+| **PowerShell 5.1+** | Runs `scripts\install.ps1` (Windows only). |
 | An AI client with MCP support | ZCode, Claude Code, or any client that can start a stdio MCP server. |
 
 Visual Studio is **not** required. Optional integrations light up only when their tool is present:
@@ -20,8 +20,10 @@ Docker for the `docker_*` tools, the GitHub CLI (`gh`) for `gh_*`, a JDK 21+ for
 `analyze_native_binary` (Ghidra itself is downloaded into the per-user tools folder on first use),
 and `coverlet.collector` in your test projects for `get_test_coverage_map`.
 
-Linux x64 and macOS arm64 self-contained builds are produced by CI. Windows is the platform this
-documentation and the installer target.
+CI builds and tests on Windows x64, Linux x64 and macOS arm64. The server behaves the same on all
+three: `run_command` defaults to PowerShell on Windows and bash elsewhere, and `self_update` downloads
+the build for the platform it runs on. The PowerShell installer and routing guard are the Windows part
+of the setup.
 
 ## Install
 
@@ -172,7 +174,9 @@ Then register the built DLL in your client's MCP configuration:
 
 Point at the DLL rather than using `dotnet run`: `dotnet run` writes build output, which can corrupt
 the stdio protocol. The repository's own `.mcp.json` uses this Debug-DLL form for development; the
-installer produces the stable Release build for daily use.
+installer produces the stable Release build for daily use. On Linux/macOS this manual registration is
+the installation path — the same JSON, with the DLL's path on that machine (e.g.
+`/home/you/REPOSITORY/VisualMCP/src/VisualMCP/bin/Debug/net10.0/VisualMCP.dll`).
 
 ## Upgrade
 

@@ -1,4 +1,5 @@
 using System.Text;
+using Snitch.Platform;
 using Snitch.Workspace;
 
 namespace Snitch.Execution;
@@ -40,9 +41,14 @@ public sealed class RunCommandService : IRunCommandService
             workDir = slnPath is not null ? Path.GetDirectoryName(slnPath)! : Directory.GetCurrentDirectory();
         }
 
-        var kind = shell.Trim().ToLowerInvariant();
+        var kind = string.IsNullOrWhiteSpace(shell) ? HostSystem.DefaultShell : shell.Trim().ToLowerInvariant();
         if (kind is not ("powershell" or "pwsh" or "cmd" or "bash"))
             return new { error = $"Unsupported shell '{shell}'. Use 'powershell', 'pwsh', 'cmd' or 'bash'." };
+
+        // cmd.exe and Windows PowerShell exist only on Windows; refuse them up front
+        // instead of failing at spawn time with an opaque "file not found".
+        if (kind is "cmd" or "powershell" && !HostSystem.IsWindows)
+            return new { error = $"The '{kind}' shell exists only on Windows. On this platform use 'bash' (the default) or 'pwsh'." };
 
         var ext = kind switch { "cmd" => ".cmd", "bash" => ".sh", _ => ".ps1" };
         var scriptPath = Path.Combine(Path.GetTempPath(), $"{_options.TempFilePrefix}-cmd-{Guid.NewGuid():N}{ext}");
@@ -57,10 +63,14 @@ public sealed class RunCommandService : IRunCommandService
                 case "cmd":
                     exe = "cmd.exe"; args = $"/c \"{scriptPath}\""; break;
                 case "pwsh":
-                    exe = "pwsh.exe"; args = $"-ExecutionPolicy Bypass -NoProfile -NonInteractive -File \"{scriptPath}\""; break;
+                    exe = HostSystem.IsWindows ? "pwsh.exe" : "pwsh";
+                    args = $"-ExecutionPolicy Bypass -NoProfile -NonInteractive -File \"{scriptPath}\""; break;
                 case "bash":
                     var bash = ResolveBash();
-                    if (bash is null) return new { error = "bash was not found. Install Git for Windows or add bash to PATH." };
+                    if (bash is null)
+                        return new { error = HostSystem.IsWindows
+                            ? "bash was not found. Install Git for Windows or add bash to PATH."
+                            : "bash was not found. Install bash or add its directory to PATH." };
                     exe = bash;
                     args = $"\"{scriptPath.Replace('\\', '/')}\""; break;
                 default:
@@ -92,19 +102,29 @@ public sealed class RunCommandService : IRunCommandService
 
     private static string? ResolveBash()
     {
-        string[] known =
-        {
-            @"C:\Program Files\Git\bin\bash.exe",
-            @"C:\Program Files\Git\usr\bin\bash.exe",
-            @"C:\Program Files (x86)\Git\bin\bash.exe",
-        };
+        // Git for Windows installs bash in a well-known place; on the other
+        // platforms it is a system binary with a fixed location.
+        string[] known = HostSystem.IsWindows
+            ?
+            [
+                @"C:\Program Files\Git\bin\bash.exe",
+                @"C:\Program Files\Git\usr\bin\bash.exe",
+                @"C:\Program Files (x86)\Git\bin\bash.exe",
+            ]
+            :
+            [
+                "/bin/bash",
+                "/usr/bin/bash",
+                "/usr/local/bin/bash",
+            ];
         foreach (var p in known)
             if (File.Exists(p)) return p;
 
+        var fileName = HostSystem.IsWindows ? "bash.exe" : "bash";
         var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
         foreach (var dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            try { var candidate = Path.Combine(dir.Trim(), "bash.exe"); if (File.Exists(candidate)) return candidate; }
+            try { var candidate = Path.Combine(dir.Trim(), fileName); if (File.Exists(candidate)) return candidate; }
             catch { }
         }
         return null;

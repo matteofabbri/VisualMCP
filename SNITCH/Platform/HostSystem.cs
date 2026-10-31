@@ -40,6 +40,9 @@ public static class HostSystem
     /// <summary>".exe" on Windows, empty elsewhere.</summary>
     public static string ExecutableSuffix => IsWindows ? ".exe" : string.Empty;
 
+    /// <summary>The shell a command runs in when the caller does not pick one: PowerShell on Windows, bash elsewhere.</summary>
+    public static string DefaultShell => IsWindows ? "powershell" : "bash";
+
     /// <summary>Human-readable description, for reports and diagnostics.</summary>
     public static string Describe() =>
         $"{Family} {RuntimeInformation.OSDescription.Trim()} ({RuntimeInformation.ProcessArchitecture})";

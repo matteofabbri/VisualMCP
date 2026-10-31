@@ -9,7 +9,7 @@ public static class GitRunTool
 {
     [McpServerTool(Name = "git_run"), Description(
         "Escape hatch: run ANY git command in the repository and get exit code, stdout and stderr. Use it for what " +
-        "the structured git_* tools do not cover (reflog, worktree, bisect, submodule, filter-repo, ...). " +
+        "the structured git_* tools do not cover (reflog, filter-repo, fsck, ...). " +
         "The arguments are passed verbatim, so you spell the command out yourself. Destructive commands are not " +
         "confirmed for you here — prefer the structured tools (git_reset, git_squash, ...) when they fit.")]
     public static Task<object> GitRun(

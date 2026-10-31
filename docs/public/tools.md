@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **314 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **318 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -212,7 +212,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 |---|---|
 | `build_project` | Run `dotnet build` and return structured errors/warnings; runs the configured analyzers by default and can skip copying output so a running app does not lock files |
 | `run_project` | Launch `dotnet run` with a timeout and capture startup output and the listening URL |
-| `run_command` | Execute a shell command in PowerShell, pwsh, cmd or bash — pipes, redirection, nested shells, long scripts; the process tree is killed at the timeout |
+| `run_command` | Execute a shell command in PowerShell, pwsh, cmd or bash (PowerShell by default on Windows, bash elsewhere) — pipes, redirection, nested shells, long scripts; the process tree is killed at the timeout |
 | `run_tests` | Run `dotnet test`, parse TRX, return pass/fail/skip counts, per-project results and failure details |
 | `get_test_coverage_map` | Per-class and per-method line coverage, plus branch coverage (Cobertura `branch-rate`); requires `coverlet.collector` in the test projects |
 | `run_test` | Run one test or one class without hand-building `--filter`; structured TRX result (passed/failed, failure messages) and the failures are recorded |
@@ -305,6 +305,7 @@ dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
 | `inspect_package` | One-shot: locate a package and list its public API, without running it |
 | `inspect_packages` | The same for several packages (`id` or `id@version`) in one call |
 | `decompile_package_type` | One-shot: locate a package and decompile one type to C# |
+| `search_nuget_packages` | Search the nuget.org gallery by id or keywords: version, description, downloads, authors, tags |
 | `add_nuget_package` | ✎ Add a package reference and restore |
 | `remove_nuget_package` | ✎ Remove a package reference |
 | `update_nuget_package` | ✎ Update a package to a newer version or the latest stable |
@@ -396,6 +397,9 @@ Everything else changes the repository; the destructive cases require `confirm=t
 | `git_show` | One commit in full, plus one file's diff |
 | `git_blame` | Who last touched each line, with commit and date |
 | `git_sync` | fetch, pull, push; force uses `--force-with-lease` and requires `confirm=true` |
+| `git_worktree` | List, add (on a branch, optionally new), remove or prune linked working trees |
+| `git_bisect` | Start, mark good/bad, skip, log, view or reset a binary search; reports when it finds the first bad commit |
+| `git_submodule` | status (structured), update, init, sync or deinit |
 | `git_run` | Escape hatch: any git command, verbatim, with exit code and output |
 
 ## GitHub

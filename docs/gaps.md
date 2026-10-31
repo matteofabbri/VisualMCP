@@ -16,8 +16,10 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-30 (fourth revision: `fix_diagnostics` closes the compiler-diagnostic family that
-had no automatic fix, `git_churn_hotspots` closes the churn × complexity row, 309 → 314). The
+Last updated: 2026-10-31 (fifth revision: the server is now platform-independent — `run_command`/
+`run_plan` pick a platform shell, `stop_server` reads `/proc`/`ps` instead of WMI-only, `self_update`
+downloads and swaps the platform's own asset — and `search_nuget_packages` plus `git_worktree` /
+`git_bisect` / `git_submodule` close four rows, 314 → 318). The
 style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -35,8 +37,8 @@ style counts (87 C# ids, 15 VB ids) are read from the catalogues; the inspection
 | [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 20 action ids now (guards, wrap, braces, region, foreach↔for, if→switch, concat→interpolation, index guard); the long tail is still the long tail |
 | [Refactoring gaps](#7-refactoring-gaps) | ⚠️ | Low | 41 of Rider's main set are there (`remove_params` and bidirectional call hierarchy arrived); the remaining names are listed |
 | [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ❌ | Low | Text/graph export exists; visual exploration does not |
-| [Version control and collaboration](#9-version-control-and-collaboration) | ⚠️ | Low | Git and GitHub are covered; the rest of the VCS ecosystem is not |
-| [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run exist; publish and packaging do not |
+| [Version control and collaboration](#9-version-control-and-collaboration) | ⚠️ | Low | Git (including worktrees, bisect and submodules) and GitHub are covered; the rest of the VCS ecosystem is not |
+| [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish exist; package search is covered; installers and deployment targets do not |
 | [UI-bound features](#11-ui-bound-features--not-applicable-by-design) | 💀 | — | Deliberately out of scope for an MCP server |
 
 ---
@@ -111,7 +113,6 @@ What is missing:
 | Metacode index (`metacode_index`) | 🟡 VB is read natively and stored in `source_document`, and `build` reports it as `unsupported`: it has no frontend, so no trees. Razor has one. |
 | Dead code, code smells, async/performance patterns, complexity report | ❌ the implementations walk C# syntax |
 | Metacode translate/generate | ❌ no VB frontend; the tool answers that it has none |
-| A solution made only of VB projects | ❌ `check_solution` reports "Only .NET C# solutions are supported" |
 
 Workaround: use `simplify_vb_code`, `run_code_analysis` with the project's own analyzers, and the text
 tools; do refactoring in an IDE. If VB matters to you, this is a product decision to make explicitly,
@@ -320,7 +321,8 @@ impossible.
 
 Still missing:
 
-- an IL view, or a toggle between C# and IL;
+- a C#↔IL toggle or an integrated IL view (`disassemble` decodes the method bodies to IL, and
+  `decompile_to_metacode` gives the pseudocode; the views just are not linked);
 - rename inside the decompiled set (it would need a mapping back to IL, and an edit has no source to
   write);
 - debugging the decompiled code (it needs the debugger plus a source-mapping step);
@@ -355,8 +357,8 @@ What that does not cover:
 | Wrap actions | try/catch, try/finally, if, using and #region are covered; still missing quotes and the "Surround with" template family |
 | Guard actions | the common null/empty guards and the index/range guard are covered; still missing dictionary-key, span-index, enum-defined and contract annotations |
 | Literal/string actions | raw, verbatim and regular re-encoding and concatenation→interpolation are covered; still missing interpolation→concatenation/format, escape/unescape, split/join, digit separators and the StringBuilder rewrites |
-| Statement actions | `foreach`→`for` and add-braces are covered; still missing `for`→`foreach`, statement ↔ expression, invert a loop, convert an `if` chain to `switch` |
-| Type actions | generate a DTO from JSON/XML, generate a builder, generate a comparer, generate a factory beyond `constructor_to_factory` |
+| Statement actions | `foreach`↔`for`, add-braces and `if`-chain→`switch` are covered; still missing statement ↔ expression and invert a loop |
+| Type actions | a DTO from JSON (`generate_dto_from_json`) and a builder (`generate_builder`) are covered; still missing a DTO from XML and a comparer |
 | Test actions | `generate_tests` scaffolds a class; still missing "add a test for this member" and "run the covering test" |
 | Templates | live templates, postfix templates (`.if`, `.null`, `.var`), file templates, a template editor |
 | Editor policy | naming rules, `var` preferences (`IDE0007`/`IDE0008` are deliberately not rewritten), code-style enforcement on save, licence-header insertion (`IDE0073` needs the repository's template) |
@@ -416,7 +418,8 @@ graph.
 ## 9. Version control and collaboration
 
 Git has a complete local surface (`git_*`: status, diff, log, blame, stage, commit, amend, branch, tag,
-stash, reset, merge, rebase, cherry-pick, revert, squash, remote, sync, show, run) and GitHub has a
+stash, reset, merge, rebase, cherry-pick, revert, squash, remote, sync, show, run — plus the structured
+`git_worktree`, `git_bisect` and `git_submodule` since 2026-10-31) and GitHub has a
 structured surface (`gh_repo`, `gh_pr`, `gh_issue`, `gh_release`, `gh_actions`, `gh_secret`).
 
 Missing:
@@ -426,7 +429,6 @@ Missing:
   the files; there is no merge editor or conflict model;
 - **interactive rebase** (the squash tool covers the common case; `git_run` can do the rest, without a
   structured result);
-- **bisect, worktree and submodule workflows** as first-class operations (`git_run` can run them);
 - **patch/shelve** beyond `git_stash`;
 - **GitLab, Azure DevOps, Bitbucket** — only GitHub is integrated;
 - **line-anchored PR review comments** (`gh_pr` posts comments; it does not build an inline review with
@@ -447,8 +449,8 @@ Build and run are covered (`build_project`, `run_project`, `run_tests`, `run_ben
 - publish profiles and launch settings editing;
 - no project-property editing surface beyond `update_framework`, `implicit_usings` and the package tools;
   the csproj is otherwise text;
-- **NuGet gaps**: `add_nuget_package` needs an exact package id (no package search/browse), there is no
-  package-source or credential management;
+- **NuGet gaps**: `search_nuget_packages` finds a package id in the nuget.org gallery (id, version,
+  description, downloads, authors, tags); still missing is package-source and credential management;
 - **build diagnostics gaps**: no MSBuild binary-log (`.binlog`) analysis, no evaluated-property dump, no
   build graph or per-target timings — `build_project` returns compiler diagnostics; `extract_build_log_errors`
   parses a text log;

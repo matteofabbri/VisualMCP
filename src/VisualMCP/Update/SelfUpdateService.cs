@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -9,10 +10,12 @@ namespace VisualMCP.Update;
 /// <summary>
 /// Checks GitHub Releases for a newer build of VisualMCP and, on request, downloads
 /// and applies it. The running server cannot overwrite its own files, so the update
-/// is staged and a detached helper swaps it in after this process exits (Claude Code
-/// then relaunches the updated server). Self-update is a host/deployment concern
-/// specific to VisualMCP — its identity (repo, process name, install marker,
-/// user-agent) lives here in the plugin rather than in the reusable Snitch library.
+/// is staged and a detached helper swaps it in after this process exits (the host
+/// then relaunches the updated server). The helper is a PowerShell script on Windows
+/// and a POSIX shell script elsewhere, and the release asset defaults to the one this
+/// platform can run. Self-update is a host/deployment concern specific to VisualMCP —
+/// its identity (repo, process name, install marker, user-agent) lives here in the
+/// plugin rather than in the reusable Snitch library.
 /// </summary>
 public interface ISelfUpdateService
 {
@@ -26,11 +29,11 @@ public sealed class SelfUpdateService : ISelfUpdateService
     private const string DefaultRepo = "matteofabbri/VisualMCP";
 
     /// <summary>
-    /// Substring marking the Claude Code managed install directory. When the running
-    /// install path contains it, an in-place update is considered safe; otherwise the
-    /// user is warned.
+    /// Substring marking a managed (Claude Code / ZCode) install directory. When the running
+    /// install path contains it, an in-place update is considered safe; otherwise the user
+    /// is warned. Paths are compared with '/' separators on every platform.
     /// </summary>
-    private const string InstallPathMarker = @".claude\mcp-servers\VisualMCP\app";
+    private const string InstallPathMarker = "/mcp-servers/VisualMCP/app";
 
     /// <summary>User-agent sent on GitHub API and asset-download requests.</summary>
     private const string UserAgent = "VisualMCP-selfupdate";
@@ -71,7 +74,7 @@ public sealed class SelfUpdateService : ISelfUpdateService
         if (err is not null) return new { repo = r, error = err };
         if (rel!.Assets.Count == 0) return new { repo = r, error = $"Release '{rel.Tag}' has no downloadable assets." };
 
-        var pattern = string.IsNullOrWhiteSpace(assetPattern) ? "win-x64" : assetPattern!.Trim();
+        var pattern = string.IsNullOrWhiteSpace(assetPattern) ? DefaultAssetPattern() : assetPattern!.Trim();
         var asset = rel.Assets.FirstOrDefault(a => a.Name.Contains(pattern, StringComparison.OrdinalIgnoreCase) && a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                  ?? rel.Assets.FirstOrDefault(a => a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
         if (asset is null)
@@ -108,7 +111,10 @@ public sealed class SelfUpdateService : ISelfUpdateService
         finally { try { File.Delete(zipPath); } catch { } }
 
         // Detached helper that swaps staging -> appDir once this process has exited.
-        var script = $$"""
+        string scriptPath;
+        if (OperatingSystem.IsWindows())
+        {
+            var script = $$"""
 $ErrorActionPreference = 'SilentlyContinue'
 $app = '{{appDir}}'
 $staging = '{{staging}}'
@@ -123,14 +129,47 @@ for ($i = 0; $i -lt 60; $i++) {
 }
 Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 """;
-        var scriptPath = Path.Combine(Path.GetTempPath(), $"{TempFilePrefix}-apply-update-{Guid.NewGuid():N}.ps1");
-        await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(true));
+            scriptPath = Path.Combine(Path.GetTempPath(), $"{TempFilePrefix}-apply-update-{Guid.NewGuid():N}.ps1");
+            await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(true));
+        }
+        else
+        {
+            var script = $$"""
+#!/bin/sh
+# Swaps {{staging}} into {{appDir}} once the server process is gone.
+app='{{appDir}}'
+staging='{{staging}}'
+i=0
+while [ "$i" -lt 60 ]; do
+    pkill -f "$app" 2>/dev/null
+    sleep 1
+    if rm -rf "$app" 2>/dev/null && mv "$staging" "$app" 2>/dev/null; then
+        exit 0
+    fi
+    i=$((i + 1))
+done
+rm -rf "$staging" 2>/dev/null
+""";
+            scriptPath = Path.Combine(Path.GetTempPath(), $"{TempFilePrefix}-apply-update-{Guid.NewGuid():N}.sh");
+            await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(false));
+        }
 
         try
         {
-            Process.Start(new ProcessStartInfo("powershell.exe",
-                $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"")
-            { UseShellExecute = false, CreateNoWindow = true });
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo("powershell.exe",
+                    $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{scriptPath}\"")
+                { UseShellExecute = false, CreateNoWindow = true });
+            }
+            else
+            {
+                // nohup + '&' detaches the helper so it survives this server's exit;
+                // the outer sh -c returns immediately.
+                Process.Start(new ProcessStartInfo("/bin/sh",
+                    $"-c \"nohup sh '{scriptPath}' >/dev/null 2>&1 &\"")
+                { UseShellExecute = false, CreateNoWindow = true });
+            }
         }
         catch (Exception ex)
         {
@@ -141,7 +180,7 @@ Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
         _ = Task.Run(async () => { await Task.Delay(1200); Environment.Exit(0); });
 
         var looksInstalled =
-            appDir.Replace('/', '\\').Contains(InstallPathMarker, StringComparison.OrdinalIgnoreCase);
+            appDir.Replace('\\', '/').Contains(InstallPathMarker, StringComparison.OrdinalIgnoreCase);
         return new
         {
             repo = r,
@@ -194,4 +233,17 @@ Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 
     private static string CurrentVersion() =>
         typeof(SelfUpdateService).Assembly.GetName().Version?.ToString() ?? "unknown";
+
+    /// <summary>
+    /// The release asset this platform can run: <c>win-x64</c>, <c>linux-arm64</c>,
+    /// <c>osx-x64</c>, … A caller may still override it with an explicit pattern.
+    /// </summary>
+    private static string DefaultAssetPattern()
+    {
+        var arch = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "-arm64" : "-x64";
+        if (OperatingSystem.IsWindows()) return "win" + arch;
+        if (OperatingSystem.IsLinux()) return "linux" + arch;
+        if (OperatingSystem.IsMacOS()) return "osx" + arch;
+        return "win-x64";
+    }
 }

@@ -46,6 +46,11 @@ public interface IGitService
 
     /// <summary>Escape hatch: any git command, verbatim, inside the repository.</summary>
     Task<object> RunAsync(string args, string? repoPath, int timeoutSeconds);
+
+    // worktrees, bisect, submodules
+    Task<object> WorktreeAsync(string action, string? path, string? branch, bool newBranch, bool force, string? repoPath);
+    Task<object> BisectAsync(string action, string? bad, string? good, string? repoPath);
+    Task<object> SubmoduleAsync(string action, string? repoPath);
 }
 
 /// <summary>Default <see cref="IGitService"/> implementation, shelling out to the git CLI.</summary>
@@ -913,6 +918,196 @@ public sealed class GitService : IGitService
             };
 
         return new { repoDir, succeeded = true, action = verb, remote, branch, forced = force, command = $"git {args}", output };
+    }
+
+    // ── worktrees ─────────────────────────────────────────────────────────────
+    /// <summary>List/add/remove worktrees; the porcelain list output is parsed into structured rows.</summary>
+    public async Task<object> WorktreeAsync(string action, string? path, string? branch, bool newBranch, bool force, string? repoPath)
+    {
+        var (repoDir, error) = await ResolveAsync(repoPath);
+        if (error is not null) return error;
+
+        var verb = (action ?? "list").Trim().ToLowerInvariant();
+
+        if (verb is "list" or "prune")
+        {
+            var (exitCode, _, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, $"worktree {verb} --porcelain", 30);
+            if (exitCode != 0) return new { error = $"git worktree {verb} failed: {stderr.Trim()}" };
+
+            if (verb == "prune")
+                return new { repoDir, action = verb, pruned = true, output = ProcessRunner.Truncate(stdout.Trim(), 2000) };
+
+            var worktrees = ParseWorktrees(stdout);
+            return new { repoDir, count = worktrees.Count, worktrees };
+        }
+
+        if (verb == "add")
+        {
+            if (string.IsNullOrWhiteSpace(path)) return new { error = "A target path for the new worktree is required." };
+            if (LooksLikeFlag(path)) return new { error = $"'{path}' is not a path." };
+
+            var args = "worktree add";
+            if (!string.IsNullOrWhiteSpace(branch))
+            {
+                if (LooksLikeFlag(branch)) return new { error = $"'{branch}' is not a branch name." };
+                args += newBranch ? $" -b {Q(branch!)}" : $" {Q(branch!)}";
+            }
+            args += $" {Q(path!)}";
+
+            var (addExit, _, addOut, addErr, _) = await GitCli.RunAsync(repoDir!, args, 60);
+            if (addExit != 0) return new { error = $"git {args} failed: {addErr.Trim()}", command = $"git {args}" };
+
+            return new
+            {
+                repoDir, added = true, path, branch, newBranch,
+                command = $"git {args}",
+                output = ProcessRunner.Truncate((addOut + addErr).Trim(), 2000),
+            };
+        }
+
+        if (verb == "remove")
+        {
+            if (string.IsNullOrWhiteSpace(path)) return new { error = "The worktree path to remove is required." };
+            if (LooksLikeFlag(path)) return new { error = $"'{path}' is not a path." };
+
+            var args = $"worktree remove {Q(path!)}{(force ? " --force" : "")}";
+            var (rmExit, _, rmOut, rmErr, _) = await GitCli.RunAsync(repoDir!, args, 60);
+            if (rmExit != 0)
+                return new
+                {
+                    error = $"git {args} failed: {rmErr.Trim()}",
+                    hint = force ? null : "The worktree may hold uncommitted changes; pass force=true to remove it anyway.",
+                    command = $"git {args}",
+                };
+
+            return new { repoDir, removed = true, path, force, command = $"git {args}", output = ProcessRunner.Truncate((rmOut + rmErr).Trim(), 2000) };
+        }
+
+        return new { error = $"Unknown action '{action}'. Use list, add, remove or prune." };
+    }
+
+    /// <summary>Parses <c>git worktree list --porcelain</c> into one row per worktree.</summary>
+    private static List<object> ParseWorktrees(string porcelain)
+    {
+        var worktrees = new List<object>();
+        string? path = null, branch = null, head = null;
+        var detached = false;
+
+        void Flush()
+        {
+            if (path is not null)
+                worktrees.Add(new { path, branch = detached ? null : branch, head, detached });
+            path = branch = head = null;
+            detached = false;
+        }
+
+        foreach (var raw in porcelain.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length == 0) { Flush(); continue; }
+            if (line.StartsWith("worktree ", StringComparison.Ordinal)) path = line[9..];
+            else if (line.StartsWith("branch ", StringComparison.Ordinal)) branch = line[7..];
+            else if (line.StartsWith("HEAD ", StringComparison.Ordinal)) head = line[5..];
+            else if (line == "detached") detached = true;
+        }
+        Flush();
+        return worktrees;
+    }
+
+    // ── bisect ────────────────────────────────────────────────────────────────
+    public async Task<object> BisectAsync(string action, string? bad, string? good, string? repoPath)
+    {
+        var (repoDir, error) = await ResolveAsync(repoPath);
+        if (error is not null) return error;
+
+        var verb = (action ?? "log").Trim().ToLowerInvariant();
+        if (bad is { } b && LooksLikeFlag(b)) return new { error = $"'{bad}' is not a revision." };
+        if (good is { } g && LooksLikeFlag(g)) return new { error = $"'{good}' is not a revision." };
+
+        string? args = verb switch
+        {
+            "start" => "bisect start" +
+                       (string.IsNullOrWhiteSpace(bad) ? "" : $" {Q(bad!)}") +
+                       (string.IsNullOrWhiteSpace(good) ? "" : $" {Q(good!)}"),
+            "good" => "bisect good" + (string.IsNullOrWhiteSpace(good) ? "" : $" {Q(good!)}"),
+            "bad" => "bisect bad" + (string.IsNullOrWhiteSpace(bad) ? "" : $" {Q(bad!)}"),
+            "skip" => "bisect skip",
+            "reset" => "bisect reset",
+            "log" => "bisect log",
+            "view" => "bisect view",
+            _ => null,
+        };
+
+        if (args is null)
+            return new { error = $"Unknown action '{action}'. Use start, good, bad, skip, log, view or reset." };
+
+        var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 60);
+        if (timedOut) return new { error = $"git {args} timed out." };
+
+        var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 4000);
+        if (exitCode != 0)
+            return new { succeeded = false, action = verb, command = $"git {args}", error = $"git {args} failed: {stderr.Trim()}", output };
+
+        // When marking a commit finishes the bisection, git says "X is the first bad commit".
+        var finished = verb is "good" or "bad" or "skip" &&
+                       (stdout + stderr).Contains("first bad commit", StringComparison.OrdinalIgnoreCase);
+
+        return new
+        {
+            repoDir, succeeded = true, action = verb, command = $"git {args}", finished, output,
+            note = finished ? "The bisection is complete; call git_bisect with action=reset to leave the bisecting state." : null,
+        };
+    }
+
+    // ── submodules ────────────────────────────────────────────────────────────
+    public async Task<object> SubmoduleAsync(string action, string? repoPath)
+    {
+        var (repoDir, error) = await ResolveAsync(repoPath);
+        if (error is not null) return error;
+
+        var verb = (action ?? "status").Trim().ToLowerInvariant();
+        var args = verb switch
+        {
+            "status" => "submodule status",
+            "update" => "submodule update --init --recursive",
+            "init" => "submodule init",
+            "sync" => "submodule sync",
+            "deinit" => "submodule deinit --all",
+            _ => "",
+        };
+        if (args.Length == 0)
+            return new { error = $"Unknown action '{action}'. Use status, update, init, sync or deinit." };
+
+        var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 120);
+        if (timedOut) return new { error = $"git {args} timed out (network for update/sync?)." };
+
+        var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 12_000);
+        if (exitCode != 0)
+            return new { succeeded = false, action = verb, command = $"git {args}", error = $"git {args} failed: {stderr.Trim()}", output };
+
+        var submodules = new List<object>();
+        if (verb == "status")
+        {
+            foreach (var raw in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = raw.TrimEnd('\r');
+                if (line.Length < 2) continue;
+                var state = line[0] switch
+                {
+                    ' ' => "clean",
+                    '+' => "uninitialized",
+                    '-' => "not-initialized",
+                    'U' => "merge-conflict",
+                    _ => "other",
+                };
+                var content = line.TrimStart();
+                var space = content.IndexOf(' ');
+                if (space < 0) continue;
+                submodules.Add(new { sha = content[..space], path = content[(space + 1)..], state });
+            }
+        }
+
+        return new { repoDir, succeeded = true, action = verb, command = $"git {args}", count = submodules.Count, submodules, output };
     }
 
     // ── escape hatch ─────────────────────────────────────────────────────────

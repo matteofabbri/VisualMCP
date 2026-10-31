@@ -295,16 +295,13 @@ public sealed class PlanExecutionTests
     [Fact]
     public async Task TheWholeChainRunsARealCommandAndARealTool()
     {
-        if (!OperatingSystem.IsWindows())
-            return; // the command step is PowerShell; the tool half is platform-neutral.
-
         using var workspace = FakeWorkspace.Create(("C.cs", "internal class C { }"));
         var runner = new PlanCommandRunner(new RunCommandService(workspace, new SnitchOptions()));
         var invoker = new McpToolInvoker(new ServiceCollection().BuildServiceProvider());
         var plan = Plan(
             [
                 Tool("catalogue", tool: "list_analysis_tools"),
-                Command("sum", "2 + 2"),
+                Command("sum", "echo 4"), // the default shell: PowerShell on Windows, bash elsewhere
                 Tool("after", tool: "list_analysis_tools", dependsOn: ["catalogue", "sum"]),
             ],
             maxConcurrency: 2,

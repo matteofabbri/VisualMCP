@@ -65,6 +65,7 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.SolutionManagement.ISolutionProjectsService, Languages.CSharp.SolutionManagement.SolutionProjectsService>();
         services.AddSingleton<Languages.CSharp.Packages.IAddNuGetPackageService, Languages.CSharp.Packages.AddNuGetPackageService>();
         services.AddSingleton<Languages.CSharp.Packages.INuGetManageService, Languages.CSharp.Packages.NuGetManageService>();
+        services.AddSingleton<Languages.CSharp.Packages.ISearchNuGetPackagesService, Languages.CSharp.Packages.SearchNuGetPackagesService>();
         services.AddSingleton<Languages.CSharp.Benchmarking.IQuickBenchmarkService, Languages.CSharp.Benchmarking.QuickBenchmarkService>();
         services.AddSingleton<Languages.CSharp.Benchmarking.IRunBenchmarksService, Languages.CSharp.Benchmarking.RunBenchmarksService>();
         services.AddSingleton<Planning.ITaskChecklistService, Planning.TaskChecklistService>();

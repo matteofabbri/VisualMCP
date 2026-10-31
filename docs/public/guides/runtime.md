@@ -41,9 +41,10 @@ Launches `dotnet run`, captures output and returns when the timeout expires. For
 output includes the listening URL, which is exactly what you need before calling `http_invoke` or
 `signal_r_connect` against it. If the solution has a single runnable project, omit `projectName`.
 
-`run_command` is the general escape hatch: PowerShell, pwsh, cmd or bash, with pipes, redirection, nested
-shells and scripts of any length. The process tree is killed at the timeout. It runs with the server's
-privileges and is not sandboxed — prefer a dedicated tool when one exists.
+`run_command` is the general escape hatch: PowerShell, pwsh, cmd or bash (PowerShell by default on
+Windows, bash elsewhere; `cmd` and Windows PowerShell are refused off Windows), with pipes, redirection,
+nested shells and scripts of any length. The process tree is killed at the timeout. It runs with the
+server's privileges and is not sandboxed — prefer a dedicated tool when one exists.
 
 ## Test
 

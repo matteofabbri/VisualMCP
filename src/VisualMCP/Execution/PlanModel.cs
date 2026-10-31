@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Snitch.Platform;
 
 namespace VisualMCP.Execution;
 
@@ -40,7 +41,7 @@ public sealed class PlanStepSpec
     [Description("For kind 'command': the command or script text to run. May span multiple lines.")]
     public string? Command { get; set; }
 
-    [Description("For kind 'command': 'powershell' (default), 'pwsh', 'cmd' or 'bash'.")]
+    [Description("For kind 'command': 'powershell' (Windows PowerShell), 'pwsh', 'cmd' (Windows only) or 'bash'. Default: 'powershell' on Windows, 'bash' elsewhere.")]
     public string? Shell { get; set; }
 
     [Description("Working directory for a command step, or the base directory its paths are resolved against.")]
@@ -144,7 +145,7 @@ internal static class PlanCompiler
 
             var name = step.As?.Trim() is { Length: > 0 } aliasName ? aliasName : "item";
             var timeout = Math.Clamp(step.TimeoutSeconds ?? 600, 1, 3600);
-            var shell = string.IsNullOrWhiteSpace(step.Shell) ? "powershell" : step.Shell.Trim();
+            var shell = string.IsNullOrWhiteSpace(step.Shell) ? HostSystem.DefaultShell : step.Shell.Trim();
             var continueOnError = step.ContinueOnError ?? false;
 
             var items = step.ForEach is { Length: > 0 } ? step.ForEach : null;
