@@ -18,6 +18,10 @@ public sealed record DecompiledTypeMetacode(
 /// cannot read comes back as <see cref="Error"/> or in <see cref="Errors"/>, next to everything that
 /// did succeed, because a decompilation that stops at the first awkward type is not useful.
 /// <para>
+/// <see cref="Assembly"/> is the PATH the decompiler was given — the store records it as the
+/// <c>source_path</c> of every row it writes — while the document's own name is the file name.
+/// </para>
+/// <para>
 /// <see cref="Errors"/> keeps at most five messages, so its count is only a lower bound on the types
 /// that were lost; <see cref="FailedTypes"/> is the exact number for the requested page. A caller that
 /// pages has to advance by <see cref="Types"/> + <see cref="Hidden"/> + <see cref="FailedTypes"/>.

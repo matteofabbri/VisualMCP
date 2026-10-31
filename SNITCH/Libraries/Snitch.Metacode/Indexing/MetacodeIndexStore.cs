@@ -14,10 +14,16 @@ namespace Snitch.Metacode.Indexing;
 /// </summary>
 /// <remarks>
 /// A document is stored twice, on purpose. <c>source_document</c> keeps the file as its own language
-/// writes it — the native side, which exists for every document in the solution; <c>mc_document</c> and
-/// <c>mc_tree</c> keep what Snitch's model made of it, which exists only for the languages a frontend can
-/// read. A file in a language with no reader is therefore present in the store and visibly unread,
-/// rather than missing.
+/// writes it — the native side, which exists for every file of the solution; <c>mc_document</c> and
+/// <c>mc_tree</c> keep what Snitch's model made of it, which exists for the languages a frontend can
+/// read. A file in a language with no reader is therefore present in the store AND in the AST as a single
+/// <c>file</c> node, rather than missing from both.
+/// </remarks>
+/// <remarks>
+/// Every row carries its provenance: <c>source_path</c> is the file the content came from (the binary,
+/// for decompiled code) and <c>decompiled</c> says which of the two it is. That is what lets a
+/// decompiled assembly and the solution's own code share these tables without a query ever confusing
+/// them.
 /// </remarks>
 /// <remarks>
 /// It owns its connection, like the symbol index and the board that share the same file, and every
@@ -29,7 +35,7 @@ public sealed class MetacodeIndexStore : IDisposable
 {
     private const string TreeColumns = """
         declaration_key, path, kind, name, line, col, end_line, cyclomatic, cognitive,
-        max_nesting, statements, branches, expressions, text
+        max_nesting, statements, branches, expressions, text, source_path, decompiled
         """;
 
     /// <summary>What one path owns, children first, so a delete never leaves an orphan behind.</summary>
@@ -41,6 +47,17 @@ public sealed class MetacodeIndexStore : IDisposable
     /// tells a refresh not to prune them — they are not documents of the solution and never will be.
     /// </summary>
     public const string DecompiledPrefix = "assembly://";
+
+    /// <summary>
+    /// The same idea for a native binary recovered with Ghidra: one document per image, its functions as
+    /// the declarations. The prefix keeps it out of the solution's prune for the same reason.
+    /// </summary>
+    public const string NativePrefix = "native://";
+
+    /// <summary>Whether a stored path is a decompiled artifact rather than a document of the solution.</summary>
+    public static bool IsDecompiledPath(string path) =>
+        path.StartsWith(DecompiledPrefix, StringComparison.Ordinal)
+        || path.StartsWith(NativePrefix, StringComparison.Ordinal);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
@@ -165,7 +182,7 @@ public sealed class MetacodeIndexStore : IDisposable
                     INSERT OR REPLACE INTO mc_tree
                         ({TreeColumns}, doc_hash)
                     VALUES ($key, $path, $kind, $name, $line, $col, $end, $cc, $cog,
-                            $nesting, $statements, $branches, $expressions, $text, $hash);
+                            $nesting, $statements, $branches, $expressions, $text, $source, $decompiled, $hash);
                     """;
 
                 var key = insert.Parameters.Add("$key", SqliteType.Text);
@@ -182,7 +199,13 @@ public sealed class MetacodeIndexStore : IDisposable
                 var branches = insert.Parameters.Add("$branches", SqliteType.Integer);
                 var expressions = insert.Parameters.Add("$expressions", SqliteType.Integer);
                 var text = insert.Parameters.Add("$text", SqliteType.Blob);
+                var source = insert.Parameters.Add("$source", SqliteType.Text);
+                var decompiled = insert.Parameters.Add("$decompiled", SqliteType.Integer);
                 var hash = insert.Parameters.Add("$hash", SqliteType.Text);
+
+                // Provenance is a property of the document, written into every row it owns: a query that
+                // only reads mc_tree still knows where the content came from and whether it was read.
+                var sourcePath = facts.SourcePath ?? facts.Path;
 
                 foreach (var row in facts.Rows)
                 {
@@ -200,6 +223,8 @@ public sealed class MetacodeIndexStore : IDisposable
                     branches.Value = row.Branches;
                     expressions.Value = row.Expressions;
                     text.Value = Compress(row.Text);
+                    source.Value = row.SourcePath.Length > 0 ? row.SourcePath : sourcePath;
+                    decompiled.Value = (row.Decompiled || facts.Decompiled) ? 1 : 0;
                     hash.Value = facts.Hash;
                     insert.ExecuteNonQuery();
                 }
@@ -214,9 +239,9 @@ public sealed class MetacodeIndexStore : IDisposable
                 node.CommandText = """
                     INSERT OR REPLACE INTO mc_node
                         (path, declaration_key, node_id, parent_id, slot, ordinal, depth, kind,
-                         line, col, end_line, data, doc_hash)
+                         line, col, end_line, data, doc_hash, source_path, decompiled)
                     VALUES ($path, $key, $id, $parent, $slot, $ordinal, $depth, $kind,
-                            $line, $col, $end, $data, $hash);
+                            $line, $col, $end, $data, $hash, $source, $decompiled);
                     """;
 
                 var nodePath = node.Parameters.Add("$path", SqliteType.Text);
@@ -232,6 +257,10 @@ public sealed class MetacodeIndexStore : IDisposable
                 var nodeEnd = node.Parameters.Add("$end", SqliteType.Integer);
                 var nodeData = node.Parameters.Add("$data", SqliteType.Text);
                 var nodeHash = node.Parameters.Add("$hash", SqliteType.Text);
+                var nodeSource = node.Parameters.Add("$source", SqliteType.Text);
+                var nodeDecompiled = node.Parameters.Add("$decompiled", SqliteType.Integer);
+
+                var sourcePath = facts.SourcePath ?? facts.Path;
 
                 foreach (var ast in facts.Nodes)
                 {
@@ -248,6 +277,8 @@ public sealed class MetacodeIndexStore : IDisposable
                     nodeEnd.Value = ast.EndLine;
                     nodeData.Value = ast.Data;
                     nodeHash.Value = facts.Hash;
+                    nodeSource.Value = sourcePath;
+                    nodeDecompiled.Value = facts.Decompiled ? 1 : 0;
                     node.ExecuteNonQuery();
                 }
             }
@@ -257,8 +288,10 @@ public sealed class MetacodeIndexStore : IDisposable
                 stamp.Transaction = transaction;
                 stamp.CommandText = """
                     INSERT OR REPLACE INTO mc_document
-                        (path, project, hash, mtime, language, declarations, nodes, diagnostics, indexed_at)
-                    VALUES ($path, $project, $hash, $mtime, $language, $declarations, $nodes, $diagnostics, $at);
+                        (path, project, hash, mtime, language, declarations, nodes, diagnostics, indexed_at,
+                         source_path, decompiled)
+                    VALUES ($path, $project, $hash, $mtime, $language, $declarations, $nodes, $diagnostics, $at,
+                            $source, $decompiled);
                     """;
                 stamp.Parameters.AddWithValue("$path", facts.Path);
                 stamp.Parameters.AddWithValue("$project", facts.Project);
@@ -271,6 +304,8 @@ public sealed class MetacodeIndexStore : IDisposable
                     : facts.Rows.Sum(row => row.Statements + row.Expressions));
                 stamp.Parameters.AddWithValue("$diagnostics", facts.Diagnostics);
                 stamp.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+                stamp.Parameters.AddWithValue("$source", facts.SourcePath ?? facts.Path);
+                stamp.Parameters.AddWithValue("$decompiled", facts.Decompiled ? 1 : 0);
                 stamp.ExecuteNonQuery();
             }
 
@@ -293,45 +328,9 @@ public sealed class MetacodeIndexStore : IDisposable
     }
 
     /// <summary>
-    /// Writes a document the model cannot read: its native source and nothing else. Any metacode rows the
-    /// path still holds are dropped, so "this language has no reader" is a state the store records
-    /// instead of a gap it hides.
+    /// The native half of one document. Called inside <see cref="ReplaceAsync"/>'s transaction, so the
+    /// text and the trees it produced never disagree about a file.
     /// </summary>
-    public async Task<bool> ReplaceSourceAsync(MetacodeDocumentFacts facts, CancellationToken cancellationToken = default)
-    {
-        if (facts.Source is null) return false;
-
-        var connection = Open();
-        if (connection is null) return false;
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            using var transaction = connection.BeginTransaction();
-
-            foreach (var table in OwnedTables)
-            {
-                using var delete = connection.CreateCommand();
-                delete.Transaction = transaction;
-                delete.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-                delete.Parameters.AddWithValue("$path", facts.Path);
-                delete.ExecuteNonQuery();
-            }
-
-            WriteSource(connection, transaction, facts);
-            transaction.Commit();
-            return true;
-        }
-        catch (SqliteException)
-        {
-            return false;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
     private static void WriteSource(
         SqliteConnection connection, SqliteTransaction transaction, MetacodeDocumentFacts facts)
     {
@@ -437,12 +436,17 @@ public sealed class MetacodeIndexStore : IDisposable
         }
     }
 
-    /// <summary>Drops every path the solution no longer contains. Returns how many documents were removed.</summary>
+    /// <summary>
+    /// Drops every document of the solution that a pass no longer finds. Decompiled artifacts
+    /// (<c>assembly://</c>, <c>native://</c>) are never theirs to remove: only a new decompilation of the
+    /// same binary can make them stale. Returns how many documents were removed.
+    /// </summary>
     public async Task<int> PruneAsync(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
     {
         var stale = new List<string>();
         foreach (var path in Known().Keys)
         {
+            if (IsDecompiledPath(path)) continue;
             if (!paths.Contains(path)) stale.Add(path);
         }
 
@@ -569,13 +573,14 @@ public sealed class MetacodeIndexStore : IDisposable
     }
 
     /// <summary>
-    /// Which binaries the store holds code for: the file name, the MVID the rows are keyed on, and how
-    /// many types each one contributed. It is what makes a decompiled assembly discoverable — otherwise
-    /// the only way to learn what is there would be to guess a type name.
+    /// Which binaries the store holds code for: the file name, the identity its rows are keyed on (the
+    /// MVID, or the SHA-256 for a native image), and how many documents each one contributed. It is what
+    /// makes a decompiled binary discoverable — otherwise the only way to learn what is there would be to
+    /// guess a type or function name.
     /// </summary>
     public IReadOnlyList<DecompiledAssemblyRow> DecompiledAssemblies()
     {
-        var found = new Dictionary<string, (string Mvid, int Types)>(StringComparer.OrdinalIgnoreCase);
+        var found = new Dictionary<string, (string Identity, int Documents, string Kind)>(StringComparer.OrdinalIgnoreCase);
 
         var connection = Open();
         if (connection is null) return [];
@@ -586,31 +591,39 @@ public sealed class MetacodeIndexStore : IDisposable
             using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT path, hash FROM mc_document
-                WHERE substr(path, 1, length($prefix)) = $prefix
+                WHERE substr(path, 1, length($managed)) = $managed
+                   OR substr(path, 1, length($native)) = $native
                 ORDER BY path;
                 """;
-            command.Parameters.AddWithValue("$prefix", DecompiledPrefix);
+            command.Parameters.AddWithValue("$managed", DecompiledPrefix);
+            command.Parameters.AddWithValue("$native", NativePrefix);
 
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
                 var path = reader.GetString(0);
-                var rest = path[DecompiledPrefix.Length..];
+                var identity = reader.GetString(1);
 
-                // assembly://<file>/<type> — the file name is everything before the first '/'.
+                // assembly://<file>/<type> and native://<file>: the file name is everything before the
+                // first '/' — and for a native document there is no '/', so the rest is the name itself.
+                var native = path.StartsWith(NativePrefix, StringComparison.Ordinal);
+                var rest = path[(native ? NativePrefix.Length : DecompiledPrefix.Length)..];
                 var slash = rest.IndexOf('/');
-                if (slash <= 0) continue;
+                var assembly = slash > 0 ? rest[..slash] : rest;
+                if (assembly.Length == 0) continue;
 
-                var assembly = rest[..slash];
-                var mvid = reader.GetString(1);
+                var kind = native ? "native" : "managed";
                 found[assembly] = found.TryGetValue(assembly, out var existing)
-                    ? (mvid, existing.Types + 1)
-                    : (mvid, 1);
+                    ? (identity, existing.Documents + 1, kind)
+                    : (identity, 1, kind);
             }
 
             return found
                 .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(entry => new DecompiledAssemblyRow(entry.Key, entry.Value.Mvid, entry.Value.Types))
+                .Select(entry => new DecompiledAssemblyRow(entry.Key, entry.Value.Identity, entry.Value.Documents)
+                {
+                    Kind = entry.Value.Kind,
+                })
                 .ToList();
         }
         catch (SqliteException)
@@ -792,7 +805,9 @@ public sealed class MetacodeIndexStore : IDisposable
         try
         {
             var documents = Count(connection, "SELECT COUNT(*) FROM mc_document;");
-            var declarations = Count(connection, "SELECT COUNT(*) FROM mc_tree;");
+            // A file no frontend reads is stored as one `file` node: it is a document of the store, not a
+            // declaration of anything, so it is counted apart instead of inflating this number.
+            var declarations = Count(connection, "SELECT COUNT(*) FROM mc_tree WHERE kind <> 'file';");
             var functions = Count(connection,
                 "SELECT COUNT(*) FROM mc_tree WHERE kind IN ('method', 'constructor', 'destructor', 'operator', 'function', 'local-function');");
             var types = Count(connection,
@@ -802,6 +817,8 @@ public sealed class MetacodeIndexStore : IDisposable
                 "SELECT COALESCE(CAST(AVG(cyclomatic) AS INTEGER), 0) FROM mc_tree WHERE cyclomatic > 0;");
             var sources = Count(connection, "SELECT COUNT(*) FROM source_document;");
             var nodes = Count(connection, "SELECT COUNT(*) FROM mc_node;");
+            var decompiled = Count(connection, "SELECT COUNT(*) FROM mc_document WHERE decompiled <> 0;");
+            var files = Count(connection, "SELECT COUNT(*) FROM mc_tree WHERE kind = 'file';");
 
             string? newest = null;
             using (var command = connection.CreateCommand())
@@ -815,6 +832,8 @@ public sealed class MetacodeIndexStore : IDisposable
             {
                 Sources = sources,
                 Nodes = nodes,
+                Decompiled = decompiled,
+                Files = files,
             };
         }
         catch (SqliteException)
@@ -917,7 +936,11 @@ public sealed class MetacodeIndexStore : IDisposable
                 reader.GetInt32(10),
                 reader.GetInt32(11),
                 reader.GetInt32(12),
-                Decompress((byte[])reader[13])));
+                Decompress((byte[])reader[13]))
+            {
+                SourcePath = reader.GetString(14),
+                Decompiled = reader.GetInt32(15) != 0,
+            });
         }
 
         return rows;

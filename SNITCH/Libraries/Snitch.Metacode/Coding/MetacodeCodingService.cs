@@ -25,13 +25,19 @@ namespace Snitch.Metacode.Coding;
 public interface IMetacodeCodingService
 {
     /// <summary>
-    /// Decompiles an assembly and stores what it finds in <c>.visualMCP/visualmcp.db</c>. A managed
-    /// assembly becomes one metacode tree per type (under <c>assembly://&lt;file&gt;/&lt;type&gt;</c>,
-    /// queryable with <c>metacode_index</c>); a binary with no CLR metadata is handed to Ghidra, which
-    /// recovers its functions, and those are stored in the dedicated native tables
-    /// (<c>native_artifact</c>, <c>native_function</c>, <c>native_call</c>).
+    /// Decompiles a binary and stores what it finds in <c>.visualMCP/visualmcp.db</c>, as part of the
+    /// same metacode AST the solution's own files live in. A managed assembly becomes one metacode tree
+    /// per type (under <c>assembly://&lt;file&gt;/&lt;type&gt;</c>, queryable with <c>metacode_index</c>);
+    /// a binary with no CLR metadata is handed to Ghidra, whose recovered functions are stored as
+    /// <c>native://&lt;file&gt;</c> — and, as before, in the dedicated native tables
+    /// (<c>native_artifact</c>, <c>native_function</c>, <c>native_call</c>). Every stored row carries the
+    /// binary in <c>source_path</c> and is flagged decompiled.
+    /// <para>
     /// A binary already stored (same MVID, or same SHA-256 for a native one) is not decompiled again
-    /// unless <paramref name="force"/> is set.
+    /// unless <paramref name="force"/> is set. With <paramref name="siblings"/> (the default) the folder
+    /// the binary came from is swept afterwards: its text files are read into the store and its other
+    /// binaries are decompiled, so one call fills the AST with the whole folder instead of one file.
+    /// </para>
     /// </summary>
     Task<MetacodeCodingResult> DecompileAsync(
         string assemblyPath,
@@ -39,6 +45,8 @@ public interface IMetacodeCodingService
         string? namespaceFilter = null,
         int maxTypes = 0,
         bool force = false,
+        bool siblings = true,
+        int maxSiblings = 25,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -68,6 +76,22 @@ public interface IMetacodeCodingService
 }
 
 /// <summary>
+/// What a folder sweep did after a decompilation: how many sibling files were read as text, decompiled
+/// as managed assemblies, handed to Ghidra, or left alone, with the reason for the ones left alone.
+/// </summary>
+public sealed record FolderSweep(
+    string Folder,
+    int Text,
+    int Managed,
+    int Native,
+    int Skipped,
+    int Failed,
+    IReadOnlyList<string> Details)
+{
+    public int Total => Text + Managed + Native + Skipped + Failed;
+}
+
+/// <summary>
 /// What a metacoding operation produced. <see cref="Code"/> is the generated C#, <see cref="Diff"/> the
 /// preview of a dry run, <see cref="Summary"/> the one-line answer a caller can print as-is.
 /// </summary>
@@ -83,6 +107,9 @@ public sealed record MetacodeCodingResult(
     string? Error = null)
 {
     public bool IsError => Error is not null;
+
+    /// <summary>What the sibling sweep of <c>decompile</c> did, when it ran.</summary>
+    public FolderSweep? Sweep { get; init; }
 
     public static MetacodeCodingResult Failed(string operation, string target, string error) =>
         new(operation, target, false, error, Error: error);
@@ -127,14 +154,63 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         string? namespaceFilter = null,
         int maxTypes = 0,
         bool force = false,
+        bool siblings = true,
+        int maxSiblings = 25,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(assemblyPath) || !File.Exists(assemblyPath))
             return MetacodeCodingResult.Failed("decompile", assemblyPath, $"Assembly not found: {assemblyPath}");
 
+        var result = await DecompileCoreAsync(
+            assemblyPath, nameFilter, namespaceFilter, maxTypes, force, cancellationToken).ConfigureAwait(false);
+
+        // The folder the binary came from is part of the same investigation: the text files next to it
+        // are the documentation/config that binary belongs to, and its other binaries are the rest of
+        // the program. Read and decompile them into the same AST, so one call answers "what is here".
+        if (!siblings || result.IsError)
+            return result;
+
+        var folder = Path.GetDirectoryName(Path.GetFullPath(assemblyPath));
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return result;
+
+        FolderSweep sweep;
+        try
+        {
+            sweep = await SweepAsync(folder, assemblyPath, maxSiblings, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return result with
+            {
+                Summary = result.Summary + " The sibling sweep failed: " + exception.Message,
+                Sweep = new FolderSweep(folder, 0, 0, 0, 0, 1, [exception.Message]),
+            };
+        }
+
+        return result with
+        {
+            Summary = result.Summary + " " + Describe(sweep),
+            Sweep = sweep,
+        };
+    }
+
+    /// <summary>The managed/native half of <see cref="DecompileAsync"/>, without the folder sweep.</summary>
+    private async Task<MetacodeCodingResult> DecompileCoreAsync(
+        string assemblyPath,
+        string? nameFilter,
+        string? namespaceFilter,
+        int maxTypes,
+        bool force,
+        CancellationToken cancellationToken)
+    {
         // ILSpy reads metadata, so machine code has to go the other way: Ghidra recovers C, the model
-        // lowers it, and the dedicated native tables keep it. The detection is a PE header check, not an
-        // exception from deep inside the decompiler.
+        // lowers it, and the native tables (plus the AST) keep it. The detection is a PE header check,
+        // not an exception from deep inside the decompiler.
         if (!ManagedAssemblyDetector.IsManaged(assemblyPath))
         {
             return await DecompileNativeAsync(
@@ -167,7 +243,8 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         if (report.Removed > 0) summary.Append(", ").Append(report.Removed).Append(" stale type(s) removed");
         if (report.Failed > 0) summary.Append(", ").Append(report.Failed).Append(" failed");
         summary.Append(". Query them with metacode_index (trees, complexity) — paths start with ");
-        summary.Append(MetacodeIndexStore.DecompiledPrefix).Append('.');
+        summary.Append(MetacodeIndexStore.DecompiledPrefix)
+            .Append("; every row records this binary in source_path and is flagged decompiled.");
 
         return new MetacodeCodingResult(
             "decompile", assembly, report.Indexed > 0, summary.ToString(),
@@ -175,9 +252,10 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
     }
 
     /// <summary>
-    /// The non-managed half of <see cref="DecompileAsync"/>: Ghidra recovers the functions, the model
-    /// gives each one a body and a complexity, and the native store keeps the result next to the
-    /// solution's own database. Ghidra installs itself on first use; a failure names the run's log
+    /// The non-managed half of <see cref="DecompileCoreAsync"/>: Ghidra recovers the functions, the model
+    /// gives each one a body and a complexity, and the result lands in two places — the dedicated native
+    /// tables, and the unified metacode AST under <c>native://&lt;file&gt;</c> so it is queryable exactly
+    /// like the solution's own code. Ghidra installs itself on first use; a failure names the run's log
     /// instead of throwing.
     /// </summary>
     private async Task<MetacodeCodingResult> DecompileNativeAsync(
@@ -186,6 +264,37 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         string? namespaceFilter,
         bool force,
         CancellationToken cancellationToken)
+    {
+        var ingest = await IngestNativeAsync(binaryPath, force, cancellationToken).ConfigureAwait(false);
+        if (ingest.Error is not null)
+            return MetacodeCodingResult.Failed("decompile", ingest.Assembly, ingest.Error);
+
+        var summary = new StringBuilder(ingest.Summary);
+        if (!string.IsNullOrWhiteSpace(nameFilter) || !string.IsNullOrWhiteSpace(namespaceFilter))
+        {
+            summary.Append(" nameFilter/namespaceFilter do not apply to a native binary: ")
+                .Append("use analyze_native_binary with function= to read one function back.");
+        }
+
+        return new MetacodeCodingResult(
+            "decompile", ingest.Assembly, ingest.Stored, summary.ToString(),
+            File: ingest.File, Diagnostics: ingest.Diagnostics);
+    }
+
+    /// <summary>What decompiling one native binary did, in the shape both the tool and the sweep report.</summary>
+    private sealed record NativeIngest(
+        string Assembly,
+        bool Stored,
+        string Summary,
+        string? File = null,
+        IReadOnlyList<string>? Diagnostics = null,
+        string? Error = null);
+
+    /// <summary>
+    /// Run Ghidra on a native binary, save its functions in the native tables, and store the same
+    /// functions as a metacode document — one entry point for the single-binary path and the sweep.
+    /// </summary>
+    private async Task<NativeIngest> IngestNativeAsync(string binaryPath, bool force, CancellationToken cancellationToken)
     {
         var assembly = Path.GetFileName(binaryPath);
 
@@ -200,17 +309,17 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         }
         catch (Exception exception)
         {
-            return MetacodeCodingResult.Failed("decompile", assembly,
-                $"Ghidra could not run on {assembly}: {exception.GetType().Name}: {exception.Message}");
+            return new NativeIngest(assembly, false, string.Empty,
+                Error: $"Ghidra could not run on {assembly}: {exception.GetType().Name}: {exception.Message}");
         }
 
         if (analysis.IsError || analysis.Snapshot is null)
         {
             var hint = " Ghidra is installed on demand under " + GhidraOptions.DefaultToolsDirectory +
                        "; set GHIDRA_INSTALL_DIR (or GhidraOptions.GhidraHome) to use a copy that is already there.";
-            return MetacodeCodingResult.Failed("decompile", assembly,
-                $"{assembly} is not a managed assembly, so ILSpy has no C# to read, and Ghidra could not decompile it: " +
-                (analysis.Error ?? "no snapshot was produced.") + hint);
+            return new NativeIngest(assembly, false, string.Empty,
+                Error: $"{assembly} is not a managed assembly, so ILSpy has no C# to read, and Ghidra could not decompile it: " +
+                       (analysis.Error ?? "no snapshot was produced.") + hint);
         }
 
         var document = analysis.ToMetacode();
@@ -222,9 +331,31 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         }
         catch (Exception exception)
         {
-            return MetacodeCodingResult.Failed("decompile", assembly,
-                $"{assembly} is not managed: Ghidra recovered {analysis.Functions} function(s), but the solution store " +
-                $"refused them: {exception.GetType().Name}: {exception.Message}");
+            return new NativeIngest(assembly, false, string.Empty,
+                Error: $"{assembly} is not managed: Ghidra recovered {analysis.Functions} function(s), but the solution store " +
+                       $"refused them: {exception.GetType().Name}: {exception.Message}");
+        }
+
+        // The same functions, in the tables the rest of the metacode lives in: native code becomes part
+        // of one AST instead of a side table only the native readers can query.
+        var indexed = 0;
+        string? astError = null;
+        if (!artifact.IsError)
+        {
+            try
+            {
+                var ast = await _index.IndexNativeAsync(binaryPath, artifact.Sha256, document, cancellationToken).ConfigureAwait(false);
+                if (ast.Error is null) indexed = ast.Declarations;
+                else astError = ast.Error;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                astError = exception.Message;
+            }
         }
 
         var summary = new StringBuilder()
@@ -254,18 +385,268 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
                 .Append("); pass force=true to decompile it again.");
         }
 
-        if (!string.IsNullOrWhiteSpace(nameFilter) || !string.IsNullOrWhiteSpace(namespaceFilter))
-        {
-            summary.Append(" nameFilter/namespaceFilter do not apply to a native binary: ")
-                .Append("use analyze_native_binary with function= to read one function back.");
-        }
+        if (astError is not null)
+            summary.Append(" The metacode AST did not take them: ").Append(astError);
+        else if (indexed > 0)
+            summary.Append(" They are also in the metacode AST as ")
+                .Append(MetacodeIndexStore.NativePrefix).Append(assembly)
+                .Append(" (").Append(indexed).Append(" declaration(s), decompiled).");
 
-        return new MetacodeCodingResult(
-            "decompile", assembly, artifact.Stored, summary.ToString(),
-            File: analysis.OutputJsonPath,
-            Diagnostics: document.Diagnostics.Count > 0
+        return new NativeIngest(
+            assembly,
+            artifact.Stored || indexed > 0,
+            summary.ToString(),
+            analysis.OutputJsonPath,
+            document.Diagnostics.Count > 0
                 ? document.Diagnostics.Take(5).Select(diagnostic => diagnostic.ToString()).ToList()
                 : null);
+    }
+
+    // ── the folder a binary came from ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// How many native siblings the sweep may hand to Ghidra. A Ghidra run is tens of seconds, not
+    /// milliseconds: a folder of a dozen executables must not turn one decompile into a coffee break.
+    /// </summary>
+    private const int MaxNativeSiblings = 2;
+
+    /// <summary>A sibling bigger than this is a data file, not a program or a source worth reading here.</summary>
+    private const long MaxSiblingBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// The same folder as the binary just decompiled, read into the same store: every text file goes in
+    /// as a document (a <c>file</c> node when no frontend reads it), every other managed assembly is
+    /// decompiled, and a couple of native images are handed to Ghidra. Bounded by <paramref name="maxSiblings"/>
+    /// files and <see cref="MaxNativeSiblings"/> native runs, and idempotent: a file the store already
+    /// holds is skipped on its hash, a binary already decompiled on its MVID/SHA.
+    /// </summary>
+    private async Task<FolderSweep> SweepAsync(
+        string folder, string sourcePath, int maxSiblings, CancellationToken cancellationToken)
+    {
+        var details = new List<string>();
+        var texts = new List<string>();
+        var managed = new List<string>();
+        var native = new List<string>();
+        int skipped = 0, failed = 0;
+
+        var self = Path.GetFullPath(sourcePath);
+        var budget = Math.Clamp(maxSiblings, 0, 500);
+
+        string[] siblings;
+        try
+        {
+            siblings = Directory.GetFiles(folder);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new FolderSweep(folder, 0, 0, 0, 0, 1, ["The folder could not be read: " + exception.Message]);
+        }
+
+        var candidates = siblings
+            .Select(Path.GetFullPath)
+            .Where(file => !string.Equals(file, self, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var examined = 0;
+        foreach (var file in candidates)
+        {
+            if (examined >= budget)
+            {
+                details.Add($"{candidates.Count - examined} more file(s) were not examined (maxSiblings={budget}).");
+                break;
+            }
+
+            var name = Path.GetFileName(file);
+            examined++;
+
+            try
+            {
+                var length = new FileInfo(file).Length;
+                if (length > MaxSiblingBytes)
+                {
+                    skipped++;
+                    details.Add($"{name}: larger than {MaxSiblingBytes / (1024 * 1024)} MB");
+                    continue;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                skipped++;
+                details.Add($"{name}: {exception.Message}");
+                continue;
+            }
+
+            if (WorkspaceSources.IsTextFile(file))
+            {
+                texts.Add(file);
+                continue;
+            }
+
+            if (!LooksLikeBinary(file))
+            {
+                // A database, an image, a PDB: not code and not a program this folder describes.
+                skipped++;
+                details.Add($"{name}: neither text nor an executable image");
+                continue;
+            }
+
+            if (ManagedAssemblyDetector.IsManaged(file)) managed.Add(file);
+            else native.Add(file);
+        }
+
+        // The text files, through the same incremental path a build pass uses.
+        if (texts.Count > 0)
+        {
+            try
+            {
+                var report = await _index.IndexFilesAsync(texts, projectName: null, cancellationToken).ConfigureAwait(false);
+                if (report.Error is not null)
+                {
+                    failed += texts.Count;
+                    details.Add("text files: " + report.Error);
+                }
+                else if (report.Failed > 0)
+                {
+                    failed += report.Failed;
+                    details.AddRange(report.Failures);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failed += texts.Count;
+                details.Add("text files: " + exception.Message);
+            }
+        }
+
+        var managedDecompiled = 0;
+        foreach (var assembly in managed)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var name = Path.GetFileName(assembly);
+            try
+            {
+                var result = await DecompileCoreAsync(assembly, null, null, 0, force: false, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (result.IsError)
+                {
+                    failed++;
+                    details.Add($"{name}: {result.Error}");
+                }
+                else if (result.Written)
+                {
+                    managedDecompiled++;
+                }
+                else
+                {
+                    // The store already held this exact binary (same MVID): nothing was decompiled again.
+                    skipped++;
+                    details.Add($"{name}: already stored");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failed++;
+                details.Add($"{name}: {exception.Message}");
+            }
+        }
+
+        var natives = 0;
+        foreach (var binary in native)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var name = Path.GetFileName(binary);
+            if (natives >= MaxNativeSiblings)
+            {
+                skipped++;
+                details.Add($"{name}: native binary not decompiled (at most {MaxNativeSiblings} per sweep — " +
+                            "pass its path to decompile it on its own)");
+                continue;
+            }
+
+            try
+            {
+                // Ghidra is the expensive half: a binary the native table already holds is not run again.
+                var sha = NativeCodeStore.HashOf(binary);
+                if (_native.Find(sha) is not null)
+                {
+                    skipped++;
+                    details.Add($"{name}: already stored (SHA-256 {sha[..12]})");
+                    continue;
+                }
+
+                var ingest = await IngestNativeAsync(binary, force: false, cancellationToken).ConfigureAwait(false);
+                if (ingest.Error is not null)
+                {
+                    failed++;
+                    details.Add($"{name}: {ingest.Error}");
+                }
+                else
+                {
+                    natives++;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failed++;
+                details.Add($"{name}: {exception.Message}");
+            }
+        }
+
+        return new FolderSweep(folder, texts.Count, managedDecompiled, natives, skipped, failed, details);
+    }
+
+    /// <summary>Whether a file starts with the magic of a PE, ELF or Mach-O image.</summary>
+    private static bool LooksLikeBinary(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var head = new byte[4];
+            if (stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false) < head.Length) return false;
+
+            if (head[0] == (byte)'M' && head[1] == (byte)'Z') return true;             // PE / DOS
+            if (head[0] == 0x7F && head[1] == (byte)'E' && head[2] == (byte)'L' && head[3] == (byte)'F') return true;
+
+            var magic = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(head);
+            return magic is 0xFEEDFACE or 0xFEEDFACF or 0xCAFEBABE or 0xCEFAEDFE or 0xCAFEBABF;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The sweep as one sentence, for the decompile result's summary.</summary>
+    private static string Describe(FolderSweep sweep)
+    {
+        var summary = new StringBuilder()
+            .Append("Swept ").Append(Path.GetFileName(sweep.Folder) ?? sweep.Folder).Append(": ")
+            .Append(sweep.Text).Append(" text file(s) read, ")
+            .Append(sweep.Managed).Append(" managed assembly(ies) decompiled, ")
+            .Append(sweep.Native).Append(" native binary(ies) parsed, ")
+            .Append(sweep.Skipped).Append(" skipped, ")
+            .Append(sweep.Failed).Append(" failed");
+
+        var notes = sweep.Details.Where(detail => !detail.Contains("were not examined", StringComparison.Ordinal)).Take(5).ToList();
+        if (notes.Count > 0) summary.Append(" — ").Append(string.Join("; ", notes));
+
+        return summary.Append('.').ToString();
     }
 
     // ── trees back into the solution ───────────────────────────────────────────────────

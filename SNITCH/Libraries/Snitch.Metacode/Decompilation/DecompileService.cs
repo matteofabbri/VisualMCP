@@ -372,7 +372,9 @@ public sealed class DecompileService : IDecompileService, IMetacodeDecompileServ
 
             var translated = Translate(code, assemblyPath, typeFullName);
             return new MetacodeDecompilation(
-                Path.GetFileName(assemblyPath),
+                // The PATH, not the file name: this value becomes the source_path of the stored rows, and
+                // two binaries called the same thing in two folders are not the same source.
+                assemblyPath,
                 new[] { translated },
                 translated.Document,
                 1,
@@ -462,7 +464,8 @@ public sealed class DecompileService : IDecompileService, IMetacodeDecompileServ
                 types.SelectMany(t => t.Document.Diagnostics).ToList());
 
             return new MetacodeDecompilation(
-                Path.GetFileName(assemblyPath), types, document, definitions.Count, matches.Count, hidden, errors,
+                // The PATH: it is written as the source_path of every stored row (see the type overload).
+                assemblyPath, types, document, definitions.Count, matches.Count, hidden, errors,
                 TryReadMvid(assemblyPath), FailedTypes: failed);
         }
         catch (Exception ex)

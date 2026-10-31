@@ -140,8 +140,8 @@ static async Task RunServerAsync(string[] args)
         "To WORK inside a decompiled assembly (search its types/members with CamelHumps, read a member's source, find its uses inside the assembly, outline it) -> assembly_workspace (load once, keyed on the module version id). " +
         "The C# in the answer is compacted (indentation, line breaks and comments dropped) unless compact=false; a file written to outputPath keeps the readable formatting and is searchable with text_index afterwards.\n" +
         "- Who calls this and what it calls, more than one level deep -> call_hierarchy (incoming + outgoing tree with a depth); find_callers stays the one-level view.\n" +
-        "- Decompile an assembly into CANONICAL PSEUDOCODE (ILSpy → C# → the metacode model: one type, or a paged set of types) -> decompile_to_metacode; to KEEP what you decompile, store every type as a metacode tree in the solution database -> metacoding action=decompile. That same action ROUTES a native binary (no CLR metadata) to Ghidra and stores the recovered functions in the solution database's native_artifact / native_function / native_call tables, keyed on the file's SHA-256.\n" +
-        "- Recover a NATIVE binary's functions with Ghidra headless and print them as pseudocode (a real external run, tens of seconds; Ghidra is installed on demand into the per-user tools folder; the run is also persisted in native_artifact / native_function / native_call; re-read an existing snapshot with metacode_translate) -> analyze_native_binary.\n" +
+        "- Decompile an assembly into CANONICAL PSEUDOCODE (ILSpy → C# → the metacode model: one type, or a paged set of types) -> decompile_to_metacode; to KEEP what you decompile, store every type as a metacode tree in the solution database -> metacoding action=decompile. That same action ROUTES a native binary (no CLR metadata) to Ghidra and stores the recovered functions both in the native_artifact / native_function / native_call tables (keyed on the file's SHA-256) and in the same metacode AST as everything else (native://<file>). Every stored node records the binary in source_path and is flagged decompiled; siblings=true (the default) also reads/decompiles the other files in that folder into the same AST.\n" +
+        "- Recover a NATIVE binary's functions with Ghidra headless and print them as pseudocode (a real external run, tens of seconds; Ghidra is installed on demand into the per-user tools folder; the run is also persisted in native_artifact / native_function / native_call and in the metacode AST; re-read an existing snapshot with metacode_translate) -> analyze_native_binary.\n" +
         "- Explore a NuGet package directly by id+version (auto-locates its DLL): public API -> inspect_package; a type's C# source -> decompile_package_type; SEVERAL packages in one call -> inspect_packages.\n" +
         "- Read code in the canonical pseudocode (C# source, a Razor page, a Ghidra snapshot or pseudocode itself; a " +
         "construct with no node stays visible as RAW + a diagnostic) -> metacode_translate (no solution needed).\n" +
@@ -151,13 +151,14 @@ static async Task RunServerAsync(string[] args)
         "translate_python_file, clang -ast-dump=json via translate_cpp_file; pass dumpJson to translate a dump produced elsewhere).\n" +
         "- The SOLUTION'S metacode, persisted in .visualMCP/visualmcp.db and generated when the solution opens " +
         "(the background pass keeps it in step with saved files and a build refreshes it) -> metacode_index: " +
-        "action=status|build|complexity|trees|ast. Every source of the solution is stored twice there — its native text " +
+        "action=status|build|complexity|trees|ast|assemblies. Every source of the solution is stored twice there — its native text " +
         "and language (source_document) and its metacode (mc_document/mc_tree), whose COMPLETE AST is also stored " +
         "node by node in mc_node (parent, property slot, position, depth, span, payload) so action=ast answers with " +
-        "the tree itself; the document set is decided by " +
-        "language, so Razor pages/components are included and a language no frontend reads (Visual Basic today) is " +
-        "recorded natively and reported as `unsupported` instead of being skipped. Its complexity is computed over " +
-        "the language-neutral model " +
+        "the tree itself. The document set is the whole solution: every text file under it, so C#, Visual Basic and " +
+        "Razor go through a frontend and a README/.csproj/JSON config becomes a single `file` node instead of being " +
+        "left out. Every row carries source_path (the file, or the BINARY for decompiled code) and a decompiled flag, " +
+        "which is what keeps decompiled types and native functions in the same tables as the solution's own code " +
+        "without anyone confusing them. Its complexity is computed over the language-neutral model " +
         "(cyclomatic + cognitive); complexity_report remains the C#/Roslyn view with Halstead and the maintainability index. " +
         "Generate new C# from metacode (pseudocode text, a stored symbol, or a file) -> metacode_generate; every " +
         "construct C# cannot express is lowered with a diagnostic instead of being dropped. To WRITE through the model " +

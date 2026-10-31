@@ -421,9 +421,13 @@ fallimento non è un'eccezione: `analyze_native_binary` e `metacoding` lo riport
 
 Un binario che non è un assembly gestito non ha C# da decompilare: `ManagedAssemblyDetector` legge
 l'header PE (directory COM descriptor) e `metacoding action=decompile` lo instrada a Ghidra invece di
-fallire dentro ILSpy. `analyze_native_binary` fa la stessa cosa per la sola lettura. In entrambi i casi
-il risultato viene **persistito** nel database della soluzione (`.visualMCP/visualmcp.db`) in tabelle
-dedicate, non mescolato al metacode dei documenti della soluzione:
+fallire dentro ILSpy. `analyze_native_binary` fa la stessa cosa per la sola lettura.
+
+Il risultato viene **persistito due volte**, e la seconda è quella che conta per l'AST: le funzioni
+recuperate diventano **un documento metacode** sotto `native://<file>` — le funzioni come dichiarazioni,
+l'AST completo nodo per nodo, la complessità, tutto nelle stesse tabelle (`mc_document`/`mc_tree`/
+`mc_node`) del codice della soluzione, con `source_path` = il binario e `decompiled` = 1 — e restano
+anche nelle tabelle native dedicate:
 
 | Tabella | Cosa contiene |
 |---|---|
@@ -436,6 +440,26 @@ volte, e `force=true` sostituisce le righe invece di aggiungerne una seconda cop
 tradotto una volta sola: ogni funzione prende la sua voce in `native_function`, con lo stesso
 pseudocodice e la stessa complessità che avrebbe un albero della soluzione. La scrittura è transazionale
 e degrada senza far fallire l'analisi se il database non è disponibile.
+
+### La cartella del binario: leggere e decompilare i vicini
+
+Un binario non vive da solo: accanto ha la sua documentazione, i suoi `.config`, e gli altri binari dello
+stesso programma. Dopo una decompilazione (`metacoding action=decompile`, `siblings` acceso per default)
+la **stessa cartella** viene percorsa e quello che c'è dentro entra nello stesso AST:
+
+- i file **di testo** vengono letti come in una build (timestamp, poi hash): un `.md`, un `.json` o un
+  `.cs` diventano un documento, con il frontend se la lingua ne ha uno e un nodo `File` se no;
+- gli altri **assembly gestiti** vengono decompilati con ILSpy (uno per uno, con la stessa chiave MVID:
+  quelli già in archivio vengono saltati);
+- i binari **nativi** vengono passati a Ghidra, ma al massimo due per scansione: una corsa di Ghidra
+  costa decine di secondi e una cartella di eseguibili non deve trasformare una chiamata in un'attesa.
+  Gli altri sono elencati come saltati, con l'istruzione di decomprimerli da soli.
+
+Il tetto è `maxSiblings` (default 25 file esaminati): oltre, la scansione si ferma e lo dice. I file più
+grandi di 64 MB sono saltati, i binari già decompilati (SHA-256 in `native_artifact`) non vengono
+rianalizzati, e ogni file passato dallo stesso controllo di freschezza della build — quindi una seconda
+chiamata sulla stessa cartella non riscrive niente. Il risultato riporta un `sweep` con i conteggi
+(testi letti, assembly decompilati, binari nativi, saltati, falliti) e i motivi dei saltati.
 
 ### La normalizzazione, costrutto per costrutto
 
@@ -684,11 +708,13 @@ la riga di codice mostrata come `snippet`).
 `reference_index build` produce gli alberi come effetto collaterale dell'indice dei simboli. Ma il
 metacode della soluzione è un artefatto a sé, e ha un ciclo di vita proprio:
 
-- **alla prima apertura della soluzione** viene generato per **ogni sorgente della soluzione** (il task in
+- **alla prima apertura della soluzione** viene generato per **ogni file della soluzione** (il task in
   background di `Program.cs`, dopo `OpenEnvironmentAsync`): i documenti Roslyn di tutti i progetti, in
-  qualunque lingua il workspace sappia caricare, più le pagine `.cshtml`/`.razor` lette da disco — sono
-  content item, il workspace non le tiene come documenti. La selezione è per lingua, non per estensione
-  `.cs`: decide il frontend.
+  qualunque lingua il workspace sappia caricare, più **ogni file di testo sotto la cartella della
+  soluzione** letto da disco — le pagine `.cshtml`/`.razor` sono content item e il workspace non le tiene
+  come documenti, e un `README`, un `.csproj` o un `.json` non sono codice ma fanno parte della soluzione.
+  La selezione per i documenti è per lingua, non per estensione `.cs`: decide il frontend; per i file è il
+  contenuto (un NUL nei primi 8 KB dice "binario", e oltre 1 MB non è codice).
 - **quando un file viene salvato** viene aggiornato in modo incrementale: un giro ogni 2 secondi legge
   prima il timestamp, e solo se è cambiato il contenuto, quindi traduce **solo quel documento**. Vale
   anche per un salvataggio fatto in un altro editor, perché il testo viene letto dal file su disco, non
@@ -701,10 +727,19 @@ scrive la sua lingua, dall'altro come la legge il modello.
 
 | Tabella | Chiave | Cosa tiene |
 |---|---|---|
-| `source_document` | `path` | il file **nella sua lingua nativa**: testo, tag di lingua (`cs`, `vb`, `razor`), hash del contenuto, timestamp, caratteri e righe. C'è per **ogni** sorgente della soluzione |
-| `mc_document` | `path` | hash del contenuto, timestamp, progetto, lingua, numero di dichiarazioni, nodi dell'AST, diagnostici — solo per i documenti che un frontend ha letto |
-| `mc_tree` | `declaration_key` + `path` + riga + nome | pseudocodice canonico della dichiarazione (gzip) e i fatti strutturali: cyclomatic, cognitive, nesting massimo, istruzioni, rami, espressioni |
-| `mc_node` | `path` + `declaration_key` + `node_id` | **l'AST completo** di ogni dichiarazione: una riga per nodo, con `parent_id`, `slot` (la proprietà del padre che lo contiene), `ordinal`, `depth`, riga/colonna e il payload del nodo in JSON |
+| `source_document` | `path` | il file **nella sua lingua nativa**: testo, tag di lingua (`cs`, `vb`, `razor`, `md`, `csproj`…), hash del contenuto, timestamp, caratteri e righe. C'è per **ogni** file della soluzione |
+| `mc_document` | `path` | hash del contenuto, timestamp, progetto, lingua, numero di dichiarazioni, nodi dell'AST, diagnostici — e la provenienza: `source_path` e il flag `decompiled` |
+| `mc_tree` | `declaration_key` + `path` + riga + nome | pseudocodice canonico della dichiarazione (gzip) e i fatti strutturali: cyclomatic, cognitive, nesting massimo, istruzioni, rami, espressioni — con `source_path` e `decompiled` |
+| `mc_node` | `path` + `declaration_key` + `node_id` | **l'AST completo** di ogni dichiarazione: una riga per nodo, con `parent_id`, `slot` (la proprietà del padre che lo contiene), `ordinal`, `depth`, riga/colonna, il payload del nodo in JSON — e `source_path`/`decompiled` |
+
+**La provenienza è una colonna, non una convenzione.** `source_path` è il file da cui il contenuto
+proviene — per un documento letto da disco è il file stesso, per il codice decompilato è il **binario** —
+e `decompiled` dice quale dei due è (0 = letto, 1 = decompilato). Le tre tabelle dell'AST portano
+entrambe le colonne su **ogni** riga, non solo sul documento: una query su `mc_node` sa sempre da dove
+viene un nodo e se è codice decompilato, senza dover interpretare il prefisso `assembly://` o risalire al
+documento. Le righe scritte prima che le colonne esistessero le ricevono al primo `Ensure`: lo schema
+aggiunge in place le colonne che il modello dichiara e il file non ha (`ALTER TABLE … ADD COLUMN`, con il
+valore zero come default), senza ricreare né perdere nulla.
 
 `mc_node` è l'albero, `mc_tree.text` è la sua resa: lo pseudocodice canonico serve a leggere, confrontare e
 rigenerare, `mc_node` tiene **ogni** nodo del modello — lo stesso vocabolario di `MetacodeNode` (`If`,
@@ -721,10 +756,12 @@ rileggerlo dal testo costa un parse. Quello che il database conserva è quindi l
 suo hash), da cui il modello di Roslyn si ricostruisce identico — ed è quello che permette al workspace di
 usare tutte le feature di Roslyn sul documento, mentre il metacode resta la vista neutra dello stesso file.
 
-Una lingua che nessun frontend sa leggere — per esempio F#, Java o Rust — **non sparisce**:
-`source_document` tiene il file, `mc_tree` non ha righe, `mc_document` non ha la riga.
-`metacode_index action=status` lo dice con `sources` accanto a `documents`, e il report della build con
-`unsupported`. Visual Basic era in questa lista: dal frontend VB la passata successiva traduce i `.vb`
+Un file che nessun frontend sa leggere — un `README.md`, un `.csproj`, un `.json` — **non sparisce**:
+`source_document` tiene il testo, e l'AST ha **un nodo `File`** (kind `file`, payload con `path`, `name`,
+`language`, `lines`, `chars`) che dice cos'è. Così l'AST contiene tutto quello che la soluzione contiene,
+invece di contenere solo ciò che è codice; `metacode_index action=status` li conta in `files` e il report
+della build in `unsupported`. Una lingua che nessun frontend legge (per esempio F#, Java o Rust) segue la
+stessa strada. Visual Basic era in questa lista: dal frontend VB la passata successiva traduce i `.vb`
 già letti (l'hash è quello giusto) senza toccare `source_document`.
 
 Il lato semantico "nativo" — dichiarazioni, usi, relazione di override e di implementazione — è l'indice

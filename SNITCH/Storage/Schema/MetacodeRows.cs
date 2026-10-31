@@ -1,6 +1,11 @@
 namespace Snitch.Storage.Schema;
 
-/// <summary>One document the metacode index read, with its freshness token and what the model found in it.</summary>
+/// <summary>One document the metacode index knows, with its freshness token and what the model found in it.</summary>
+/// <remarks>
+/// <see cref="SourcePath"/> is where the content CAME FROM: the file itself for a document the pass read
+/// from the solution, the binary for the types of a decompiled assembly. <see cref="Decompiled"/> says
+/// which of the two it is, so a query never has to parse the <c>assembly://</c> path to find out.
+/// </remarks>
 public sealed class MetacodeDocumentRow
 {
     public string Path { get; set; } = string.Empty;
@@ -12,6 +17,12 @@ public sealed class MetacodeDocumentRow
     public int Nodes { get; set; }
     public int Diagnostics { get; set; }
     public DateTimeOffset IndexedAt { get; set; }
+
+    /// <summary>The file the content came from, or empty when it is <see cref="Path"/> itself.</summary>
+    public string SourcePath { get; set; } = string.Empty;
+
+    /// <summary>True when the content was decompiled from a binary rather than read from a source file.</summary>
+    public bool Decompiled { get; set; }
 }
 
 /// <summary>One declaration's canonical pseudocode, with the structural facts computed over the model.</summary>
@@ -35,6 +46,12 @@ public sealed class MetacodeTreeRow
     public byte[] Text { get; set; } = [];
 
     public string DocHash { get; set; } = string.Empty;
+
+    /// <summary>The file or binary this content came from — see <see cref="MetacodeDocumentRow.SourcePath"/>.</summary>
+    public string SourcePath { get; set; } = string.Empty;
+
+    /// <summary>True when this content was decompiled from a binary rather than read from a source file.</summary>
+    public bool Decompiled { get; set; }
 }
 
 /// <summary>The file as its own language writes it — the half of the record that exists even with no frontend.</summary>
@@ -71,4 +88,10 @@ public sealed class MetacodeNodeRow
     public int EndLine { get; set; }
     public string Data { get; set; } = string.Empty;
     public string DocHash { get; set; } = string.Empty;
+
+    /// <summary>The file or binary this node came from — see <see cref="MetacodeDocumentRow.SourcePath"/>.</summary>
+    public string SourcePath { get; set; } = string.Empty;
+
+    /// <summary>True when the node belongs to decompiled code rather than to a file that was read.</summary>
+    public bool Decompiled { get; set; }
 }

@@ -183,6 +183,21 @@ analyze_native_binary  binaryPath=C:\Windows\System32\notepad.exe maxFunctions=5
   and `native_call` (the call edges). `save=false` prints only. `metacoding action=decompile` on a
   file with no CLR metadata takes the same route automatically.
 
+### Decompiled code lives in the same AST
+
+`metacoding action=decompile` stores what it decompiles in the **same tables** as the solution's own
+code (`mc_document`, `mc_tree`, `mc_node`): managed types under `assembly://<file>/<type>`, a native
+image's functions under `native://<file>`. Every row carries two provenance columns — `source_path`
+(the source file, or the **binary** for decompiled code) and `decompiled` (0 = read, 1 = decompiled) —
+so `metacode_index`, the complexity report and a raw SQL query never confuse the two. The solution's own
+files are all in the store too: a text file no frontend reads (a README, a `.csproj`, a JSON config) is
+a single `file` node describing it, not a gap.
+
+After the binary, the folder it came from is swept into the same AST (`siblings`, on by default): its
+text files are read, its other managed assemblies decompiled, and up to two native images handed to
+Ghidra. The sweep is bounded by `maxSiblings` (default 25 files) and its result comes back as a `sweep`
+object with the counts and the reasons anything was skipped.
+
 ### Metacode limits
 
 - Normalization is declarative, not an interpreter: constructs the C reader does not model (the comma

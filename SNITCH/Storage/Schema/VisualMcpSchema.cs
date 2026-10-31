@@ -11,8 +11,15 @@ namespace Snitch.Storage.Schema;
 /// <para>
 /// <see cref="Ensure"/> is safe on a fresh database and on one written by an older build: it reads what
 /// <c>sqlite_master</c> already holds and executes only the statements whose table or index is missing.
-/// It never drops or alters anything, so a store that runs without it keeps working — and several stores
+/// It never drops a table or a row, so a store that runs without it keeps working — and several stores
 /// open the same file with their own connection, so each of them can call it.
+/// </para>
+/// <para>
+/// A COLUMN added to the model after a store was written is added in place (<c>ALTER TABLE … ADD COLUMN</c>)
+/// with the column's own default, which is what lets the store gain a field — the metacode provenance
+/// columns were the first — without a migration pass or a rebuild. A nullable column is added as NULL;
+/// a required one as NOT NULL with the type's zero value, so existing rows read as "unknown" instead of
+/// breaking the query. Nothing is ever dropped: a column the model no longer declares keeps its data.
 /// </para>
 /// <para>
 /// The full-text table is the one exception to the model: <c>ti_line</c> is an FTS5 virtual table, which a
@@ -32,7 +39,7 @@ public static class VisualMcpSchema
         );
         """;
 
-    private static readonly Lazy<(string[] Statements, string[] Tables)> Script = new(Build);
+    private static readonly Lazy<(string[] Statements, string[] Tables, SchemaColumn[] Columns)> Script = new(Build);
 
     /// <summary>
     /// Every table <see cref="Ensure"/> guarantees, in script order, including the FTS5 virtual table.
@@ -40,12 +47,15 @@ public static class VisualMcpSchema
     /// </summary>
     public static IReadOnlyList<string> Tables => Script.Value.Tables;
 
-    /// <summary>Creates whatever the model declares and the database does not hold yet. Creates no columns.</summary>
+    /// <summary>
+    /// Creates whatever the model declares and the database does not hold yet — a missing table, and a
+    /// column a newer model declares on a table an older store already had.
+    /// </summary>
     public static void Ensure(SqliteConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        var (statements, _) = Script.Value;
+        var (statements, _, columns) = Script.Value;
         var existing = ExistingObjects(connection);
 
         foreach (var statement in statements)
@@ -71,6 +81,62 @@ public static class VisualMcpSchema
         using var fullText = connection.CreateCommand();
         fullText.CommandText = FullText;
         fullText.ExecuteNonQuery();
+
+        AddMissingColumns(connection, columns);
+    }
+
+    /// <summary>
+    /// Adds, to a table an older store already had, every column the model declares and the file does
+    /// not hold. SQLite allows <c>ADD COLUMN</c> for exactly this purpose; a required column needs a
+    /// default because the existing rows must be given one, so the type's zero value is used.
+    /// </summary>
+    private static void AddMissingColumns(SqliteConnection connection, IReadOnlyList<SchemaColumn> columns)
+    {
+        var present = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var column in columns)
+        {
+            if (!present.TryGetValue(column.Table, out var held))
+            {
+                held = ColumnsOf(connection, column.Table);
+                present[column.Table] = held;
+
+                // A table the model declares but this connection could not read is not ours to alter.
+                if (held.Count == 0) continue;
+            }
+
+            if (!held.Add(column.Column)) continue;
+
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                $"ALTER TABLE \"{column.Table}\" ADD COLUMN \"{column.Column}\" {column.StoreType}"
+                + (column.Nullable ? string.Empty : $" NOT NULL DEFAULT {column.Default}") + ";";
+
+            try
+            {
+                command.ExecuteNonQuery();
+            }
+            catch (SqliteException exception) when (exception.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+            {
+                // Another process added it between the read and the statement.
+            }
+        }
+    }
+
+    /// <summary>The columns a table physically holds, by name; empty when the table does not exist.</summary>
+    private static HashSet<string> ColumnsOf(SqliteConnection connection, string table)
+    {
+        var held = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info(\"{table}\");";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (!reader.IsDBNull(1)) held.Add(reader.GetString(1));
+        }
+
+        return held;
     }
 
     /// <summary>
@@ -86,7 +152,7 @@ public static class VisualMcpSchema
     }
 
     /// <summary>The model's DDL, generated once: the script costs a model build and never changes at run time.</summary>
-    private static (string[] Statements, string[] Tables) Build()
+    private static (string[] Statements, string[] Tables, SchemaColumn[] Columns) Build()
     {
         // GenerateCreateScript only reads the model: it never opens this connection.
         var options = new DbContextOptionsBuilder<VisualMcpDbContext>()
@@ -103,8 +169,40 @@ public static class VisualMcpSchema
             .Append("ti_line")
             .ToArray();
 
-        return (statements, tables);
+        var columns = context.Model.GetEntityTypes()
+            .SelectMany(entity => entity.GetTableName() is { } table
+                ? entity.GetProperties().Select(property => new SchemaColumn(
+                    table,
+                    property.GetColumnName(),
+                    property.GetColumnType(),
+                    property.IsNullable,
+                    DefaultOf(property)))
+                : [])
+            .ToArray();
+
+        return (statements, tables, columns);
     }
+
+    /// <summary>
+    /// The literal an existing row is given when a required column is added: the type's zero value,
+    /// quoted for text. Only the column types this model adds to a live table need one.
+    /// </summary>
+    private static string DefaultOf(Microsoft.EntityFrameworkCore.Metadata.IProperty property)
+    {
+        var type = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+
+        if (type == typeof(string)) return "''";
+        if (type == typeof(bool)) return "0";
+        if (type == typeof(Guid)) return "''";
+        if (type == typeof(DateTimeOffset) || type == typeof(DateTime)) return "''";
+        if (type.IsEnum) return "0";
+        if (type.IsPrimitive || type == typeof(decimal)) return "0";
+
+        return "''";
+    }
+
+    /// <summary>One column the model declares: the table it lives in, its SQL type and whether it may be null.</summary>
+    private sealed record SchemaColumn(string Table, string Column, string StoreType, bool Nullable, string Default);
 
     /// <summary>The DDL the model generates, one statement per entry.</summary>
     private static string[] Split(string script)

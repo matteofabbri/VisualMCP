@@ -22,7 +22,18 @@ public sealed record MetacodeTreeRow(
     int Statements,
     int Branches,
     int Expressions,
-    string Text);
+    string Text)
+{
+    /// <summary>
+    /// The file this content came from: <see cref="Path"/> for a file the pass read, the binary for a
+    /// type or function that was decompiled. Empty on the rows a translation produces — the store writes
+    /// the document's value into every row it owns.
+    /// </summary>
+    public string SourcePath { get; init; } = string.Empty;
+
+    /// <summary>True when this content was decompiled from a binary rather than read from a source file.</summary>
+    public bool Decompiled { get; init; }
+}
 
 /// <summary>What one file contributed, computed before anything is written.</summary>
 public sealed record MetacodeDocumentFacts(
@@ -48,11 +59,21 @@ public sealed record MetacodeDocumentFacts(
     public string? Source { get; init; }
 
     /// <summary>
-    /// Whether a frontend read this document into the model. False means the store keeps the native
-    /// source only, because the language has no reader yet (Visual Basic today): the file is recorded as
-    /// present and unreadable, instead of being skipped as if the solution did not contain it.
+    /// Whether a frontend read this document into the model. False means the file is stored as a single
+    /// <c>file</c> node: the file is recorded as present in the AST and visibly not code, instead of being
+    /// skipped as if the solution did not contain it.
     /// </summary>
     public bool HasReader { get; init; } = true;
+
+    /// <summary>
+    /// The file the content came from. Null means <see cref="Path"/> itself: a document read from disk.
+    /// A decompiled assembly sets it to the binary, because <see cref="Path"/> is then a
+    /// <c>assembly://</c>/<c>native://</c> key that is not a file at all.
+    /// </summary>
+    public string? SourcePath { get; init; }
+
+    /// <summary>True when this document was decompiled from a binary rather than read from a source file.</summary>
+    public bool Decompiled { get; init; }
 }
 
 /// <summary>The freshness token of a file: its content hash and the timestamp it had when indexed.</summary>
@@ -96,8 +117,12 @@ public sealed record MetacodeBuildReport(
     public int Nodes { get; init; }
 }
 
-/// <summary>One binary whose code the store holds: the file name, the MVID its rows are keyed on, and how many types it contributed.</summary>
-public sealed record DecompiledAssemblyRow(string Assembly, string Mvid, int Types);
+/// <summary>One binary whose code the store holds: the file name, the identity its rows are keyed on, and how many documents it contributed.</summary>
+public sealed record DecompiledAssemblyRow(string Assembly, string Mvid, int Types)
+{
+    /// <summary><c>managed</c> for an ILSpy decompilation, <c>native</c> for a Ghidra one.</summary>
+    public string Kind { get; init; } = "managed";
+}
 
 /// <summary>How much metacode the solution store holds, and how fresh it is.</summary>
 public sealed record MetacodeIndexStatus(
@@ -119,6 +144,15 @@ public sealed record MetacodeIndexStatus(
 
     /// <summary>How many nodes of the AST the store holds (the <c>mc_node</c> rows), across every document.</summary>
     public int Nodes { get; init; }
+
+    /// <summary>How many documents were decompiled from a binary rather than read from a source file.</summary>
+    public int Decompiled { get; init; }
+
+    /// <summary>
+    /// How many documents no frontend reads — text files that are in the store, and in the AST, as a
+    /// single <c>file</c> node.
+    /// </summary>
+    public int Files { get; init; }
 }
 
 /// <summary>One row of the complexity report: a callable and the score the metacode gives it.</summary>
@@ -133,7 +167,14 @@ public sealed record MetacodeComplexityRow(
     int MaxNesting,
     int Statements,
     int Branches,
-    string Risk);
+    string Risk)
+{
+    /// <summary>The file or binary this callable came from (see <see cref="MetacodeTreeRow.SourcePath"/>).</summary>
+    public string SourcePath { get; init; } = string.Empty;
+
+    /// <summary>True when the callable was decompiled rather than read from source.</summary>
+    public bool Decompiled { get; init; }
+}
 
 /// <summary>What a generation produced: the code, the diagnostics of both directions, and the usings it needs.</summary>
 public sealed record MetacodeGenerateResult(
@@ -169,7 +210,14 @@ public sealed record MetacodeAstTree(
     int Line,
     int Nodes,
     int MaxDepth,
-    IReadOnlyList<MetacodeAstTreeNode> Root);
+    IReadOnlyList<MetacodeAstTreeNode> Root)
+{
+    /// <summary>The file or binary this tree came from (see <see cref="MetacodeTreeRow.SourcePath"/>).</summary>
+    public string SourcePath { get; init; } = string.Empty;
+
+    /// <summary>True when the tree was decompiled from a binary rather than read from a source file.</summary>
+    public bool Decompiled { get; init; }
+}
 
 /// <summary>The answer to "show me the AST": the declarations that matched, their trees, and whether the cap cut them.</summary>
 public sealed record MetacodeAstResult(

@@ -20,10 +20,11 @@ namespace Snitch.Metacode.Indexing;
 public interface IMetacodeIndexService
 {
     /// <summary>
-    /// Reads every source of the solution whose content changed and stores both halves of it: the file as
+    /// Reads every file of the solution whose content changed and stores both halves of it: the file as
     /// its own language writes it (always) and the metacode of the languages a frontend can read. The
-    /// document set is decided by language, not by a <c>.cs</c> filter — Razor pages and components come
-    /// from disk, because they are content items and never reach the workspace.
+    /// document set is the whole solution, not a <c>.cs</c> filter: the Roslyn documents, every other text
+    /// file found on disk (Razor pages and components are content items and never reach the workspace),
+    /// and a text file no frontend reads becomes a single <c>file</c> node instead of being left out.
     /// <paramref name="force"/> re-reads even what looks unchanged. Incremental by design: an unchanged
     /// file is skipped on its timestamp alone, and a touched-but-identical file on its hash.
     /// </summary>
@@ -78,10 +79,27 @@ public interface IMetacodeIndexService
     /// Stores a decompilation as metacode trees, so decompiled code is queryable exactly like the
     /// solution's own code: one document per type, under <c>assembly://&lt;file name&gt;/&lt;type&gt;</c>.
     /// The rows are keyed by the assembly's MVID, so decompiling the same binary again replaces them
-    /// instead of duplicating them, and the solution's own refresh never prunes them.
+    /// instead of duplicating them, the solution's own refresh never prunes them, and every row records
+    /// the binary it came from with the decompiled flag set.
     /// </summary>
     Task<MetacodeBuildReport> IndexDecompilationAsync(
         MetacodeDecompilation decompilation, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stores what Ghidra recovered from a native binary as one metacode document under
+    /// <c>native://&lt;file name&gt;</c> — its functions as the declarations, in the same tables and with
+    /// the same AST as any other code, flagged as decompiled and pointing at the binary.
+    /// </summary>
+    Task<MetacodeBuildReport> IndexNativeAsync(
+        string binaryPath, string hash, MetacodeDocument document, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Indexes a given set of files — the folder a binary was decompiled from, or anything else a caller
+    /// names — with the same freshness rules as a build pass. A file no frontend reads becomes a
+    /// <c>file</c> node; a file that is not text at all is skipped.
+    /// </summary>
+    Task<MetacodeBuildReport> IndexFilesAsync(
+        IReadOnlyList<string> paths, string? projectName = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The MVID the store holds for a decompiled assembly (the name of the file, e.g.
@@ -103,7 +121,6 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 {
     private const string CSharp = "cs";
     private const string VisualBasic = "vb";
-    private const string Razor = "razor";
 
     private static readonly HashSet<string> TypeKinds = new(StringComparer.Ordinal)
     {
@@ -211,7 +228,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         if (projectName is not null && projects.Count == 0)
             return Failure($"No project '{projectName}'.", stopwatch, database);
 
-        var documents = Sources(projects);
+        var documents = Sources(projects, solution.FilePath);
 
         var known = _index.Known();
         int scanned = 0, indexed = 0, skipped = 0, unsupported = 0, declarations = 0, functions = 0, types = 0, diagnostics = 0;
@@ -227,44 +244,21 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             async (item, token) =>
             {
                 Interlocked.Increment(ref scanned);
-                var path = item.Path;
 
                 try
                 {
-                    var stat = Stat(path);
-                    known.TryGetValue(path, out var state);
-
-                    // Fast path: the file was not touched since the last pass and both halves are stored,
-                    // so its stored hash still holds.
-                    if (!force && state is { HasSource: true } && stat.Mtime != 0 && state.Mtime == stat.Mtime)
+                    var outcome = await IndexOneAsync(item, force, known, token).ConfigureAwait(false);
+                    if (outcome.Skipped)
                     {
                         Interlocked.Increment(ref skipped);
                         return;
                     }
 
-                    var (text, mtime) = await ReadAsync(item, path, token).ConfigureAwait(false);
-                    var hash = MetacodeIndexStore.ContentHash(text);
-
-                    if (!force && state is { HasSource: true } && string.Equals(state.Hash, hash, StringComparison.Ordinal))
-                    {
-                        // Touched but identical (a save that changed nothing): keep the rows, renew the stamp.
-                        _index.Touch(path, mtime);
-                        Interlocked.Increment(ref skipped);
-                        return;
-                    }
-
-                    var facts = Translate(text, item.Project, item.Language, path, hash, mtime);
-
-                    // A language with no reader still gets its native half written: the store says the
-                    // solution contains the file and that no frontend could read it, instead of skipping it.
-                    var written = facts.HasReader
-                        ? await _index.ReplaceAsync(facts, token).ConfigureAwait(false)
-                        : await _index.ReplaceSourceAsync(facts, token).ConfigureAwait(false);
-                    if (!written)
-                        throw new InvalidOperationException("the database refused the write");
-
+                    var facts = outcome.Facts!;
                     if (!facts.HasReader)
                     {
+                        // No frontend reads the language: the file is in the store (and in the AST) as a
+                        // single `file` node, not as code.
                         Interlocked.Increment(ref unsupported);
                         return;
                     }
@@ -284,7 +278,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
                 }
                 catch (Exception exception)
                 {
-                    failures.Enqueue($"{Path.GetFileName(path)}: {exception.Message}");
+                    failures.Enqueue($"{Path.GetFileName(item.Path)}: {exception.Message}");
                 }
             }).ConfigureAwait(false);
 
@@ -295,7 +289,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             var stale = known.Keys
                 // A decompiled assembly is not a document of the solution: its rows belong to the binary,
                 // and only a new decompilation of that binary can make them stale.
-                .Where(path => !path.StartsWith(MetacodeIndexStore.DecompiledPrefix, StringComparison.Ordinal))
+                .Where(path => !MetacodeIndexStore.IsDecompiledPath(path))
                 .Where(path => !present.Contains(path))
                 .ToList();
             removed = await _index.RemoveAsync(stale, cancellationToken).ConfigureAwait(false);
@@ -304,6 +298,120 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         var status = _index.Status();
         return new MetacodeBuildReport(
             scanned, indexed, skipped, removed, failures.Count, failures.Take(5).ToList(),
+            declarations, functions, types, diagnostics,
+            stopwatch.ElapsedMilliseconds, database, _workspace.LoadedSolutionPath)
+        {
+            Documents = status.Documents,
+            Sources = status.Sources,
+            Unsupported = unsupported,
+            Nodes = status.Nodes,
+        };
+    }
+
+    /// <summary>
+    /// One file, from the freshness check to the committed rows. The build pass runs it in parallel; a
+    /// folder sweep runs it in sequence. <see cref="IndexOutcome.Skipped"/> is the cheap answer: the file
+    /// was not touched, or was touched but its content hash is the one the store already holds.
+    /// </summary>
+    private async Task<IndexOutcome> IndexOneAsync(
+        IndexItem item, bool force, IReadOnlyDictionary<string, MetacodeDocumentState> known, CancellationToken cancellationToken)
+    {
+        var path = item.Path;
+        var stat = Stat(path);
+        known.TryGetValue(path, out var state);
+
+        // Fast path: the file was not touched since the last pass and both halves are stored,
+        // so its stored hash still holds.
+        if (!force && state is { HasSource: true } && stat.Mtime != 0 && state.Mtime == stat.Mtime)
+            return IndexOutcome.Unchanged;
+
+        var (text, mtime) = await ReadAsync(item, path, cancellationToken).ConfigureAwait(false);
+        var hash = MetacodeIndexStore.ContentHash(text);
+
+        if (!force && state is { HasSource: true } && string.Equals(state.Hash, hash, StringComparison.Ordinal))
+        {
+            // Touched but identical (a save that changed nothing): keep the rows, renew the stamp.
+            _index.Touch(path, mtime);
+            return IndexOutcome.Unchanged;
+        }
+
+        var facts = Translate(text, item.Project, item.Language, path, hash, mtime);
+        if (!await _index.ReplaceAsync(facts, cancellationToken).ConfigureAwait(false))
+            throw new InvalidOperationException("the database refused the write");
+
+        return new IndexOutcome(facts);
+    }
+
+    /// <summary>The result of indexing one file: the facts when anything was written, nothing when not.</summary>
+    private readonly record struct IndexOutcome(MetacodeDocumentFacts? Facts)
+    {
+        public bool Skipped => Facts is null;
+
+        public static IndexOutcome Unchanged => new(null);
+    }
+
+    /// <summary>
+    /// Indexes a given set of files — the folder a binary was decompiled from, or anything else a caller
+    /// names — with the same freshness rules as a build pass. Files that are not text are left alone.
+    /// </summary>
+    public async Task<MetacodeBuildReport> IndexFilesAsync(
+        IReadOnlyList<string> paths, string? projectName = null, CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var database = _store.EnsureDatabase();
+        if (database is null)
+            return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
+
+        if (!_index.Open(database))
+            return Failure("The solution database could not be opened (is the solution folder writable?).", stopwatch, database);
+
+        var known = _index.Known();
+        int scanned = 0, indexed = 0, skipped = 0, unsupported = 0, declarations = 0, functions = 0, types = 0, diagnostics = 0;
+        var failures = new List<string>();
+
+        foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            scanned++;
+
+            try
+            {
+                var outcome = await IndexOneAsync(
+                        new IndexItem(path, projectName ?? string.Empty, WorkspaceSources.LanguageTag(path), null),
+                        force: false, known, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (outcome.Skipped)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var facts = outcome.Facts!;
+                if (!facts.HasReader) unsupported++;
+                else indexed++;
+
+                declarations += facts.Rows.Count(row => row.Kind != "file");
+                diagnostics += facts.Diagnostics;
+                foreach (var row in facts.Rows)
+                {
+                    if (FunctionKinds.Contains(row.Kind)) functions++;
+                    if (TypeKinds.Contains(row.Kind)) types++;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failures.Add($"{Path.GetFileName(path)}: {exception.Message}");
+            }
+        }
+
+        var status = _index.Status();
+        return new MetacodeBuildReport(
+            scanned, indexed, skipped, 0, failures.Count, failures.Take(5).ToList(),
             declarations, functions, types, diagnostics,
             stopwatch.ElapsedMilliseconds, database, _workspace.LoadedSolutionPath)
         {
@@ -353,10 +461,13 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 
             // The whole assembly shares one freshness token — its MVID — so DecompiledHash can answer
             // "was this exact binary stored?" from any of its rows, and a new build replaces them all.
+            // The provenance is the binary itself: the path is a store key that names no file on disk.
             var facts = new MetacodeDocumentFacts(
                 path, project, identity, 0, CSharp, collected.Rows, type.Document.Diagnostics.Count)
             {
                 Nodes = collected.Nodes,
+                SourcePath = FullPathOf(decompilation.Assembly),
+                Decompiled = true,
             };
 
             if (!await _index.ReplaceAsync(facts, cancellationToken).ConfigureAwait(false))
@@ -403,16 +514,78 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         return _index.DecompiledHash(assemblyFileName.Trim());
     }
 
+    /// <summary>
+    /// Stores the functions Ghidra recovered from a native binary as one metacode document, so a native
+    /// image is queryable exactly like a managed assembly or the solution's own code: same tables, same
+    /// AST, same complexity. The path is <c>native://&lt;file&gt;</c>, the <em>source path</em> is the
+    /// binary on disk, and every row is flagged as decompiled.
+    /// </summary>
+    public async Task<MetacodeBuildReport> IndexNativeAsync(
+        string binaryPath,
+        string hash,
+        MetacodeDocument document,
+        CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var database = _store.EnsureDatabase();
+        if (database is null)
+            return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
+
+        if (!_index.Open(database))
+            return Failure("The solution database could not be opened (is the solution folder writable?).", stopwatch, database);
+
+        var assembly = Path.GetFileName(binaryPath);
+        var path = MetacodeIndexStore.NativePrefix + assembly;
+        var collected = MetacodeDeclarations.Collect(document, path);
+
+        var facts = new MetacodeDocumentFacts(
+            path, "decompiled:" + assembly, hash, 0, "native", collected.Rows, document.Diagnostics.Count)
+        {
+            Nodes = collected.Nodes,
+            SourcePath = FullPathOf(binaryPath),
+            Decompiled = true,
+        };
+
+        if (!await _index.ReplaceAsync(facts, cancellationToken).ConfigureAwait(false))
+            return Failure($"The database refused the {collected.Rows.Count} recovered function(s) of {assembly}.", stopwatch, database);
+
+        int functions = 0, types = 0;
+        foreach (var row in collected.Rows)
+        {
+            if (FunctionKinds.Contains(row.Kind)) functions++;
+            if (TypeKinds.Contains(row.Kind)) types++;
+        }
+
+        var status = _index.Status();
+        return new MetacodeBuildReport(
+            1, 1, 0, 0, 0, Array.Empty<string>(),
+            collected.Rows.Count, functions, types, document.Diagnostics.Count,
+            stopwatch.ElapsedMilliseconds, database, _workspace.LoadedSolutionPath)
+        {
+            Documents = status.Documents,
+            Nodes = status.Nodes,
+        };
+    }
+
     public IReadOnlyList<DecompiledAssemblyRow> DecompiledAssemblies() =>
         TryOpen() ? _index.DecompiledAssemblies() : [];
+
+    /// <summary>The absolute form of a path a caller gave, or the text itself when it is not one.</summary>
+    private static string FullPathOf(string path)
+    {
+        try { return Path.GetFullPath(path); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
+        }
+    }
 
     /// <summary>
     /// One type as a document: the file name identifies the assembly, the type name the row. A type
     /// name is not a file name — <c>List&lt;T&gt;</c> carries characters Windows refuses — so it is
     /// sanitised. The path is a key, never opened.
     /// </summary>
-    private static string DecompiledPath(string assembly, string typeFullName)
-    {
+    private static string DecompiledPath(string assembly, string typeFullName)    {
         var name = typeFullName;
         foreach (var invalid in Path.GetInvalidFileNameChars().Concat(['<', '>', ',', ' ']))
             name = name.Replace(invalid, '_');
@@ -424,32 +597,104 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     private sealed record IndexItem(string Path, string Project, string Language, Document? Document);
 
     /// <summary>
-    /// Every source of the solution in its own language: the Roslyn documents of each project, plus the
-    /// Razor pages and components, which are content items and never reach the workspace as documents.
-    /// The same file reached through two projects (a shared file, a nested folder) is indexed once.
+    /// Every file of the solution, not only the ones the compiler reads. Three sources, deduplicated in
+    /// that order so the workspace's own view of a document wins over the disk's:
+    /// <list type="number">
+    /// <item>the Roslyn documents of each project — the Compile items, which are what a build sees;</item>
+    /// <item>every text file under the solution root, found on disk: Razor pages and components (content
+    /// items, so the workspace never holds them), project files, READMEs, JSON configs and the rest. A
+    /// file no frontend reads becomes a single <c>file</c> node, so it is in the AST instead of missing;</item>
+    /// <item>each project's own folder, for a workspace whose solution has no path on disk (an
+    /// in-memory solution, a test).</item>
+    /// </list>
+    /// The same file reached twice (a shared file, a project nested in another project's folder) is
+    /// indexed once, attributed to the project whose directory is its closest ancestor.
     /// </summary>
-    private static IReadOnlyList<IndexItem> Sources(IEnumerable<Project> projects)
+    private static IReadOnlyList<IndexItem> Sources(IEnumerable<Project> projects, string? solutionPath)
     {
         var items = new List<IndexItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var roots = new List<(string Name, string Directory)>();
 
         foreach (var project in projects)
         {
+            var directory = ProjectDirectory(project);
+            if (directory is not null) roots.Add((project.Name, directory));
+
             foreach (var document in project.Documents)
             {
                 if (document.FilePath is not { Length: > 0 } path) continue;
                 if (!seen.Add(path)) continue;
                 items.Add(new IndexItem(path, project.Name, LanguageTag(document), document));
             }
+        }
 
-            foreach (var path in RazorFilesUnder(Path.GetDirectoryName(project.FilePath)))
+        var solutionRoot = SolutionDirectory(solutionPath, roots);
+        foreach (var path in WorkspaceSources.FilesUnder(solutionRoot))
+        {
+            if (!seen.Add(path)) continue;
+            items.Add(new IndexItem(path, ProjectOf(path, roots), WorkspaceSources.LanguageTag(path), null));
+        }
+
+        // A solution with no file (the tests' in-memory one) still has the projects' folders to walk.
+        if (solutionRoot is null)
+        {
+            foreach (var (name, directory) in roots)
             {
-                if (!seen.Add(path)) continue;
-                items.Add(new IndexItem(path, project.Name, Razor, null));
+                foreach (var path in WorkspaceSources.FilesUnder(directory))
+                {
+                    if (!seen.Add(path)) continue;
+                    items.Add(new IndexItem(path, name, WorkspaceSources.LanguageTag(path), null));
+                }
             }
         }
 
         return items;
+    }
+
+    /// <summary>The folder a project lives in, or null when the project has no file on disk.</summary>
+    private static string? ProjectDirectory(Project project)
+    {
+        var file = project.FilePath;
+        if (string.IsNullOrEmpty(file)) return null;
+
+        var directory = Path.GetDirectoryName(file);
+        return string.IsNullOrEmpty(directory) ? null : Path.GetFullPath(directory);
+    }
+
+    /// <summary>
+    /// The root to walk: the solution's own folder when it has one, otherwise the shallowest project
+    /// folder — which is the closest thing to "the solution's directory" an in-memory solution has.
+    /// </summary>
+    private static string? SolutionDirectory(string? solutionPath, IReadOnlyList<(string Name, string Directory)> roots)
+    {
+        if (!string.IsNullOrEmpty(solutionPath) && Path.GetDirectoryName(solutionPath) is { Length: > 0 } directory)
+            return Path.GetFullPath(directory);
+
+        return roots
+            .Select(root => root.Directory)
+            .OrderBy(directory => directory.Length)
+            .FirstOrDefault();
+    }
+
+    /// <summary>The project whose folder is the closest ancestor of a file, or empty for a file no project owns.</summary>
+    private static string ProjectOf(string path, IReadOnlyList<(string Name, string Directory)> roots)
+    {
+        var best = string.Empty;
+        var bestLength = -1;
+
+        foreach (var (name, directory) in roots)
+        {
+            if (directory.Length <= bestLength) continue;
+            if (path.StartsWith(directory, StringComparison.OrdinalIgnoreCase) &&
+                (path.Length == directory.Length || path[directory.Length] is '\\' or '/'))
+            {
+                best = name;
+                bestLength = directory.Length;
+            }
+        }
+
+        return best;
     }
 
     /// <summary>The language a Roslyn document is written in, as a short tag: <c>cs</c>, <c>vb</c>.</summary>
@@ -468,54 +713,6 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         ".vb" => MetacodeLanguage.VisualBasic,
         _ => MetacodeLanguage.Unknown,
     };
-
-    private static readonly HashSet<string> ExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "bin", "obj", ".git", ".vs", ".idea", ".visualMCP", "node_modules", "TestResults",
-    };
-
-    /// <summary>
-    /// The Razor files under a project, found on disk: a <c>.cshtml</c> is a content item, so the
-    /// workspace is not a place it exists. Build outputs and tool folders are skipped.
-    /// </summary>
-    private static IEnumerable<string> RazorFilesUnder(string? root)
-    {
-        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) yield break;
-
-        var pending = new Stack<string>();
-        pending.Push(root);
-
-        while (pending.Count > 0)
-        {
-            var directory = pending.Pop();
-
-            string[] entries;
-            try
-            {
-                entries = Directory.GetFileSystemEntries(directory);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            foreach (var entry in entries)
-            {
-                if (Directory.Exists(entry))
-                {
-                    if (!ExcludedDirectories.Contains(Path.GetFileName(entry)))
-                        pending.Push(entry);
-                    continue;
-                }
-
-                if (entry.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) ||
-                    entry.EndsWith(".razor", StringComparison.OrdinalIgnoreCase))
-                {
-                    yield return Path.GetFullPath(entry);
-                }
-            }
-        }
-    }
 
     /// <summary>The file's timestamp, or 0 when it is not on disk (a virtual document).</summary>
     private static (long Mtime, bool Exists) Stat(string path)
@@ -560,9 +757,8 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     /// One source → both halves of the record: the text as its own language writes it, and the trees the
     /// model produced from it. The translator is built per document because the frontends carry
     /// per-translation state (their diagnostics), so the default singleton is not safe to share across the
-    /// parallel pass. A document no frontend can read comes back with the NoFrontend diagnostic and
-    /// <see cref="MetacodeDocumentFacts.HasReader"/> false, which is what keeps it in the store as a
-    /// source and out of it as metacode.
+    /// parallel pass. A file no frontend can read comes back with the NoFrontend diagnostic and a single
+    /// <c>file</c> node: it belongs to the AST like everything else, marked as what it is.
     /// </summary>
     private static MetacodeDocumentFacts Translate(
         string text, string project, string language, string path, string hash, long mtime)
@@ -571,6 +767,9 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         var model = translator.Translate(MetacodeSource.FromText(text, LanguageOf(path), path), MetacodeOptions.Default);
         var collected = MetacodeDeclarations.Collect(model, path);
         var hasReader = model.Diagnostics.All(diagnostic => diagnostic.Code != MetacodeDiagnosticCodes.NoFrontend);
+
+        if (!hasReader)
+            collected = MetacodeDeclarations.FileDocument(path, text, language);
 
         return new MetacodeDocumentFacts(
             path, project, hash, mtime, language, collected.Rows, model.Diagnostics.Count)
@@ -654,7 +853,11 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             remaining -= nodes.Count;
             trees.Add(new MetacodeAstTree(
                 declaration.Path, declaration.Key, declaration.Kind, declaration.Name, declaration.Line,
-                stored, nodes.Max(node => node.Depth), BuildTree(nodes)));
+                stored, nodes.Max(node => node.Depth), BuildTree(nodes))
+            {
+                SourcePath = declaration.SourcePath,
+                Decompiled = declaration.Decompiled,
+            });
         }
 
         if (trees.Count == 0)
@@ -719,7 +922,11 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             .Select(row => new MetacodeComplexityRow(
                 row.Key, row.Name, row.Kind, row.Path, row.Line,
                 row.Cyclomatic, row.Cognitive, row.MaxNesting, row.Statements, row.Branches,
-                MetacodeComplexityAnalyzer.RiskOf(row.Cyclomatic, row.Cognitive)))
+                MetacodeComplexityAnalyzer.RiskOf(row.Cyclomatic, row.Cognitive))
+            {
+                SourcePath = row.SourcePath,
+                Decompiled = row.Decompiled,
+            })
             .ToList();
     }
 
@@ -891,6 +1098,11 @@ internal sealed record MetacodeCollected(
 /// </summary>
 internal static class MetacodeDeclarations
 {
+    private static readonly JsonSerializerOptions PayloadJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     public static MetacodeCollected Collect(MetacodeDocument model, string path)
     {
         var rows = new List<MetacodeTreeRow>();
@@ -901,6 +1113,45 @@ internal static class MetacodeDeclarations
             Walk(module.Declarations, module.Name, [], rows, nodes, renderer, path);
 
         return new MetacodeCollected(rows, nodes);
+    }
+
+    /// <summary>
+    /// The AST of a file no frontend reads: ONE node that says what the file is, so a README, a project
+    /// file or a JSON config is in the store and in the AST instead of absent from both. Its text is the
+    /// other half of the record (<c>source_document</c>), which is why the node carries a description and
+    /// not a copy of the content.
+    /// </summary>
+    /// <remarks>
+    /// The tree row is kind <c>file</c>, which is the one kind the complexity report and the declaration
+    /// count exclude: it names a document, it does not pretend to be a declaration.
+    /// </remarks>
+    public static MetacodeCollected FileDocument(string path, string text, string language)
+    {
+        var name = Path.GetFileName(path);
+        var lines = LineCount(text);
+        var key = "file:" + name;
+
+        var row = new MetacodeTreeRow(
+            key, path, "file", name, 1, 1, lines,
+            Cyclomatic: 0, Cognitive: 0, MaxNesting: 0, Statements: 0, Branches: 0, Expressions: 0,
+            Text: string.Empty);
+
+        var data = JsonSerializer.Serialize(
+            new { path, name, language, lines, chars = text.Length }, PayloadJson);
+
+        var node = new MetacodeAstNode(
+            key, NodeId: 1, ParentId: 0, Slot: string.Empty, Ordinal: 0, Depth: 0,
+            Kind: "File", Line: 1, Column: 1, EndLine: lines, Data: data);
+
+        return new MetacodeCollected([row], [node]);
+    }
+
+    private static int LineCount(string text)
+    {
+        var lines = 1;
+        foreach (var character in text)
+            if (character == '\n') lines++;
+        return lines;
     }
 
     private static void Walk(

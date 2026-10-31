@@ -61,8 +61,12 @@ public sealed class MetacodeIndexTests
         {
             var first = await service.BuildAsync();
             Assert.Null(first.Error);
-            Assert.Equal(2, first.Scanned);
+
+            // The two C# documents plus the help files that are part of the solution: Probe.sln and
+            // Probe.csproj are text files with no frontend, so they are in the store as `file` nodes.
+            Assert.Equal(4, first.Scanned);
             Assert.Equal(2, first.Indexed);
+            Assert.Equal(2, first.Unsupported);
             Assert.Equal(0, first.Skipped);
             Assert.True(first.Declarations >= 5, $"expected the declarations of both files, got {first.Declarations}");
             Assert.Equal(2, first.Types);
@@ -70,7 +74,7 @@ public sealed class MetacodeIndexTests
 
             var second = await service.BuildAsync();
             Assert.Equal(0, second.Indexed);
-            Assert.Equal(2, second.Skipped);
+            Assert.Equal(4, second.Skipped);
         }
     }
 
@@ -94,7 +98,7 @@ public sealed class MetacodeIndexTests
 
             var refresh = await service.BuildAsync();
             Assert.Equal(1, refresh.Indexed);
-            Assert.Equal(1, refresh.Skipped);
+            Assert.Equal(3, refresh.Skipped);
 
             var after = service.Trees(path: path);
             Assert.NotEmpty(after);
@@ -127,7 +131,7 @@ public sealed class MetacodeIndexTests
             Assert.Contains(report, row => row.Name == "Area" && row.Cyclomatic == 1);
 
             var status = service.Status();
-            Assert.Equal(2, status.Documents);
+            Assert.Equal(4, status.Documents);
             Assert.True(status.Functions >= 2);
             Assert.Equal(2, status.Types);
             Assert.Equal(3, status.MaxCyclomatic);
@@ -205,8 +209,8 @@ public sealed class MetacodeIndexTests
             var report = await service.BuildAsync();
 
             Assert.Null(report.Error);
-            Assert.Equal(2, report.Sources);
-            Assert.Equal(0, report.Unsupported);
+            Assert.Equal(4, report.Sources);
+            Assert.Equal(2, report.Unsupported);
 
             // The native half: the file exactly as it is on disk, tagged with the language it is written in.
             Assert.Equal(("cs", Counter), service.Source(workspace.PathOf("Counter.cs"))!.Value);
@@ -216,8 +220,9 @@ public sealed class MetacodeIndexTests
             Assert.NotEmpty(service.Trees(path: workspace.PathOf("Counter.cs")));
 
             var status = service.Status();
-            Assert.Equal(2, status.Sources);
-            Assert.Equal(2, status.Documents);
+            Assert.Equal(4, status.Sources);
+            Assert.Equal(4, status.Documents);
+            Assert.Equal(2, status.Files);
         }
     }
 
@@ -237,9 +242,9 @@ public sealed class MetacodeIndexTests
         var report = await service.BuildAsync();
 
         Assert.Null(report.Error);
-        Assert.Equal(1, report.Scanned);
+        Assert.Equal(2, report.Scanned);
         Assert.Equal(1, report.Indexed);
-        Assert.Equal(0, report.Unsupported);
+        Assert.Equal(1, report.Unsupported);
 
         // The native half: the file in its own language.
         var source = service.Source(workspace.PathOf("Module1.vb"));
@@ -249,11 +254,11 @@ public sealed class MetacodeIndexTests
 
         // The metacode half: a Visual Basic frontend reads it, so the trees are there.
         Assert.NotEmpty(service.Trees(path: workspace.PathOf("Module1.vb")));
-        Assert.Equal(1, service.Status().Documents);
+        Assert.Equal(2, service.Status().Documents);
 
         // A second pass skips it on the timestamp, like any other unchanged file.
         var again = await service.BuildAsync();
-        Assert.Equal(1, again.Skipped);
+        Assert.Equal(2, again.Skipped);
     }
 
     [Fact]
@@ -271,9 +276,9 @@ public sealed class MetacodeIndexTests
             var report = await service.BuildAsync();
 
             Assert.Null(report.Error);
-            Assert.Equal(3, report.Scanned);
-            Assert.Equal(3, report.Sources);
-            Assert.Equal(0, report.Unsupported);
+            Assert.Equal(5, report.Scanned);
+            Assert.Equal(5, report.Sources);
+            Assert.Equal(2, report.Unsupported);
 
             var source = service.Source(page);
             Assert.NotNull(source);
@@ -306,11 +311,12 @@ public sealed class MetacodeIndexTests
             // Not one document was complete, so none was skipped: both halves are written again.
             Assert.Equal(0, again.Skipped);
             Assert.Equal(2, again.Indexed);
-            Assert.Equal(2, again.Sources);
+            Assert.Equal(2, again.Unsupported);
+            Assert.Equal(4, again.Sources);
             Assert.Equal(("cs", Counter), service.Source(workspace.PathOf("Counter.cs"))!.Value);
 
             // And the pass after that skips them again.
-            Assert.Equal(2, (await service.BuildAsync()).Skipped);
+            Assert.Equal(4, (await service.BuildAsync()).Skipped);
         }
     }
 

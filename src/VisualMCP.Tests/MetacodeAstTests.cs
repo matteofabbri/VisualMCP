@@ -247,7 +247,10 @@ public sealed class MetacodeAstTests
         Assert.Equal(0, Scalar(connection,
             "SELECT COUNT(*) FROM mc_node WHERE declaration_key = 'method:Demo.Basket.Total(1)';"));
         Assert.True(second.Nodes < first.Nodes, "the method's nodes should be gone with the method");
-        Assert.Equal(1, Scalar(connection, "SELECT COUNT(*) FROM mc_node;"));
+
+        // One node left for the code (the empty class); the `File` nodes of the solution's own text files
+        // are documents of the store, not declarations of this one.
+        Assert.Equal(1, Scalar(connection, "SELECT COUNT(*) FROM mc_node WHERE kind <> 'File';"));
     }
 
     [Fact]

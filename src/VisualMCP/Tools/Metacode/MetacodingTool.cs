@@ -12,14 +12,20 @@ public static class MetacodingTool
         "improvements stay where they are (simplify_code for style quick-fixes, the Refactoring tools for rename/extract/" +
         "change-signature, code_cleanup for a whole-file sweep); use THIS for the three that start or end in a metacode " +
         "tree:\n" +
-        "• action=decompile — decompile a binary and STORE what it finds in .visualMCP/visualmcp.db. A MANAGED assembly " +
-        "(.NET, CLR metadata) becomes one metacode tree per type under assembly://<file>/<type>, queryable with " +
-        "metacode_index (trees, complexity) and comparable with metacode_compare. A NATIVE binary (no CLR metadata) is " +
-        "handed to Ghidra — installed on demand if this machine has none — and its recovered functions go into the " +
-        "dedicated tables native_artifact, native_function (Ghidra's C + canonical pseudocode + complexity per function) " +
-        "and native_call (call edges), keyed on the file's SHA-256. Keyed on the binary's MVID (managed) or SHA-256 " +
-        "(native): the same binary is not decompiled twice unless force=true. This is the only decompile call that " +
-        "PERSISTS its output; decompile_type / decompile_assembly return text and keep nothing.\n" +
+        "• action=decompile — decompile a binary and STORE what it finds in .visualMCP/visualmcp.db, in the same AST the " +
+        "solution's own files live in. A MANAGED assembly (.NET, CLR metadata) becomes one metacode tree per type under " +
+        "assembly://<file>/<type>, queryable with metacode_index (trees, complexity) and comparable with " +
+        "metacode_compare. A NATIVE binary (no CLR metadata) is handed to Ghidra — installed on demand if this machine " +
+        "has none — and its recovered functions are stored TWICE: in the dedicated tables native_artifact / " +
+        "native_function (Ghidra's C + canonical pseudocode + complexity per function) / native_call (call edges), keyed " +
+        "on the file's SHA-256, AND as one metacode document under native://<file> (its functions as the declarations). " +
+        "Every stored row records the binary in source_path and carries the decompiled flag, so a query never confuses " +
+        "decompiled code with code read from a source file. Keyed on the binary's MVID (managed) or SHA-256 (native): the " +
+        "same binary is not decompiled twice unless force=true. With siblings=true (the default) the folder the binary " +
+        "came from is swept after it: its text files are read into the store (a file no frontend reads becomes a `file` " +
+        "node) and its other binaries are decompiled too, up to maxSiblings files and 2 native images — so one call " +
+        "fills the AST with the whole folder instead of one file. This is the only decompile call that PERSISTS its " +
+        "output; decompile_type / decompile_assembly return text and keep nothing.\n" +
         "• action=rewrite — replace the code of an existing declaration with what 'source' describes, emit it as C#, and " +
         "write it back to the file the declaration came from. 'source' is metacode pseudocode by default (language=pseudo) " +
         "or C# (language=cs). Previewed unless dryRun=false; every write is compiler-gated (refused when it would add an " +
@@ -36,6 +42,10 @@ public static class MetacodingTool
         [Description("decompile (managed only): maximum types to store (0 = all).")] int maxTypes = 0,
         [Description("decompile: decompile again even when the store already holds this binary (MVID for managed, SHA-256 for native).")]
         bool force = false,
+        [Description("decompile: after the binary, sweep its folder — read the text files next to it and decompile its other binaries into the same AST (default true).")]
+        bool siblings = true,
+        [Description("decompile: how many sibling files the sweep may process (default 25). Native siblings are capped at 2 per sweep.")]
+        int maxSiblings = 25,
         [Description("rewrite: the declaration to replace — a name ('Divide'), a qualified name ('Calculator.Divide') or a declaration key.")]
         string? symbol = null,
         [Description("insert: the type to add the member to — simple ('Calculator') or qualified ('Demo.Calculator').")]
@@ -52,7 +62,7 @@ public static class MetacodingTool
                     return new { error = "decompile needs assemblyPath." };
 
                 return await coding.DecompileAsync(
-                    assemblyPath!, nameFilter, namespaceFilter, maxTypes, force, cancellationToken);
+                    assemblyPath!, nameFilter, namespaceFilter, maxTypes, force, siblings, maxSiblings, cancellationToken);
 
             case "rewrite":
                 if (string.IsNullOrWhiteSpace(symbol))
