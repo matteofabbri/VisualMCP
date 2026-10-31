@@ -244,6 +244,14 @@ static async Task RunServerAsync(string[] args)
         "whose outcome changes between runs -> find_flaky_tests.\n" +
         "- Add/remove projects to/from the solution (.sln/.slnx) -> add_projects_to_solution / remove_projects_from_solution.\n" +
         "- Modernize the solution: add Aspire (status, install the templates if missing, scaffold AppHost + ServiceDefaults, wire and verify) -> aspire; move the projects to a newer target framework with a build gate and rollback -> update_framework; upgrade every outdated NuGet package (Central Package Management aware), optionally with the framework bump, in one gated pass -> update_solution. Prefer update_solution over one update_nuget_package call per package when modernising a whole solution.\n" +
+        "- Build and run settings as data (do NOT read or edit these files by hand): the EVALUATED MSBuild view " +
+        "(what Directory.Build.props and conditions contribute) and one property set/unset in the project or the nearest " +
+        "Directory.Build.props, build-gated -> project_properties; a binary log's errors with project and line, the real " +
+        "per-project and per-target durations and the project graph (build it with -bl for you when no log is given) -> " +
+        "analyze_binlog; the launch shapes saved per solution, applied by run_project configName=… -> run_config; " +
+        "Properties/launchSettings.json profiles -> launch_settings; Properties/PublishProfiles/*.pubxml, by the MSBuild " +
+        "keys dotnet publish -p:PublishProfile reads -> publish_profile; the package sources with their enabled state, " +
+        "credentials passed to NuGet and never echoed back -> nuget_sources.\n" +
         "- Version control (prefer these to shell git): inspect -> git_status / git_log / git_diff; stage and commit -> " +
         "git_stage / git_commit; branches -> git_branch; integrate -> git_merge / git_rebase / git_cherry_pick; push with " +
         "force=false -> git_sync. Conflicts are data, not text to edit: git_conflicts lists the hunks with ours/theirs/base " +

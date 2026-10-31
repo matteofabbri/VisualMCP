@@ -30,6 +30,12 @@ Related:
 | `run_code_analysis` | Analyzer diagnostics only |
 | `extract_build_log_errors` | Pull errors out of a native/MSBuild log file, including UTF-16 logs |
 | `get_environment_info` | Which SDKs, runtimes, Visual Studio and `cl.exe` are installed |
+| `analyze_binlog` | After a build: the errors and warnings with their project and line, the real per-project and per-target durations, and the project graph. Without a `binlogPath` it runs `dotnet build -bl` first |
+| `project_properties` | The **evaluated** value of a property (`TargetFramework`, `Nullable`, `OutputPath`, …) as MSBuild computes it — what `Directory.Build.props`, imports and conditions contribute — and a build-gated `set`/`unset` of one property |
+
+A project file read by hand answers "what does the XML say"; `project_properties` answers "what does
+MSBuild compute", which is the value the compiler actually sees. An empty result is itself an answer
+(the property is not set anywhere in the chain).
 
 ## Run
 
@@ -45,6 +51,21 @@ output includes the listening URL, which is exactly what you need before calling
 Windows, bash elsewhere; `cmd` and Windows PowerShell are refused off Windows), with pipes, redirection,
 nested shells and scripts of any length. The process tree is killed at the timeout. It runs with the
 server's privileges and is not sandboxed — prefer a dedicated tool when one exists.
+
+The arguments an app needs are written once, not on every call:
+
+```
+run_config  action=save name=api-dev project=MyApp.Api
+            args="--urls http://localhost:5000" configuration=Debug
+            environment={"ASPNETCORE_ENVIRONMENT":"Development"}
+run_project configName=api-dev
+```
+
+The shapes live in `.visualMCP/run-configs.json`, so the file can be committed and edited by hand; a
+value passed explicitly to `run_project` (`projectName`, `appArgs`, `configuration`, `noBuild`) still
+wins over the saved one. For the profiles the IDE uses, `launch_settings` lists, adds, updates and
+removes `Properties/launchSettings.json` entries (`commandName`, `applicationUrl`, `commandLineArgs`,
+environment variables) without reformatting the rest of the document, previewed by default.
 
 ## Test
 
@@ -93,6 +114,7 @@ cost under real load is a different question.
 | Decompile one type from a package | `decompile_package_type` |
 | Add, remove or update one package | `add_nuget_package`, `remove_nuget_package`, `update_nuget_package` |
 | Force one version across projects | `unify_nuget_version` |
+| List, add, update, remove, enable or disable a package source | `nuget_sources` |
 
 `list_nuget_packages` reports requested and **resolved** versions and flags the same package pinned to
 different versions across projects. Vulnerability results include the advisory id, severity and link,
@@ -100,6 +122,27 @@ and include transitive packages by default — most advisories hit indirect depe
 
 `inspect_package` and `decompile_package_type` are one-shot: give a package id and version, and they
 locate the cached DLL, then list its API or decompile a type. No solution needed.
+
+`nuget_sources` goes through `dotnet nuget`, so the source lands in the same `NuGet.Config` chain the
+CLI and the build read. Credentials are passed to NuGet and **never echoed back** — the command it
+reports has the password redacted, and NuGet encrypts it by default (`storePasswordInClearText=true`
+exists only for a feed that requires it).
+
+## Publish
+
+```
+dotnet_publish   projectName=MyApp.Api runtime=win-x64 selfContained=true singleFile=true
+publish_profile  action=set projectName=MyApp.Api profileName=Folder
+                 properties={"PublishDir":"bin/publish","RuntimeIdentifier":"win-x64"}
+```
+
+`dotnet_publish` runs the publish (RID, self-contained, single-file, output folder) and returns it as
+data. `publish_profile` edits the `*.pubxml` that the same publish reads with
+`-p:PublishProfile=<name>`: the MSBuild keys `PublishDir`, `RuntimeIdentifier`, `SelfContained`,
+`PublishSingleFile` and the rest, so a filesystem or ClickOnce target is authored without an IDE
+(previewed by default; deleting a profile needs `confirm=true`). `nuget_pack` and `nuget_push` cover
+the package half. Installer authoring (MSIX, WiX) and signing are the platform toolchain's job, not
+this server's.
 
 ## Modernization
 

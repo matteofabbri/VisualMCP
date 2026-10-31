@@ -81,7 +81,7 @@ figure is the documented ~800 from five packs.
 | [Refactoring gaps](#7-refactoring-gaps) | ✅ | — | All ~51 of Rider's main set are implemented, including `transform_parameters`, `make_non_static`, `move_type_to_nested_scope` and `generify` (2026-10-31) |
 | [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ✅ | — | Graph artifacts (project/namespace/type, call, sequence, control flow), value tracking, localization and the explorers exist as data; drawing them is the client's |
 | [Version control and collaboration](#9-version-control-and-collaboration) | ✅ | — | Git, the conflict model, plan rebase, patches, all four hosting providers and the review workflow exist; only real-time co-editing is out of scope by design |
-| [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish exist; package search is covered; installers and deployment targets do not |
+| [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish and the six build-settings tools (evaluated MSBuild, binlog, run configurations, launch/publish profiles, package sources) exist; installer authoring, deployment targets, a standalone CLI and solution-wide style campaigns do not |
 | [UI-bound features](#11-ui-bound-features--not-applicable-by-design) | 💀 | — | Deliberately out of scope for an MCP server |
 
 ---
