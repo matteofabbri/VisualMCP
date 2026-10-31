@@ -43,6 +43,12 @@ static async Task RunServerAsync(string[] args)
         "semantic model, so they correctly resolve overloads, overrides, interface members, " +
         "generics and partial types that text matching gets wrong.\n\n" +
         "ROUTING:\n" +
+        "- What is missing / what comes next / what do we implement -> the project's BOARD, which is the source of " +
+        "truth for the plan: board_brief (one compact call: counts, the card to pick up, every open card with its age " +
+        "and a stale flag) first; board_audit says which open cards this build already ships; board_board and " +
+        "board_list are the full and the filtered view; board_add / board_move / board_comment / board_update change " +
+        "it, board_move{status: done, note: ...} records the evidence. Do NOT answer that question by reading " +
+        "docs/gaps.md, a backlog file or memory notes — those are historical records.\n" +
         "- Find where a symbol is used / who calls a method -> find_references, find_callers " +
         "(NOT grep — grep also hits comments, strings and unrelated same-named text).\n" +
         "- Locate a class/method/interface by name -> find_symbol (ranks exact > prefix > CamelHumps > contains, and " +
@@ -111,11 +117,14 @@ static async Task RunServerAsync(string[] args)
         "generate argument guards (null / all parameters / string not null or empty / collection not empty / variable null), " +
         "wrap a statement range in try/catch, try/finally, if or using, convert a string literal between regular, verbatim " +
         "and raw, merge or split an if chain, join a null check with its use, use var and back, split a declaration, remove " +
-        "braces, enable nullable in a file, add/remove digit separators and ConfigureAwait(false) -> context_action " +
-        "(action id + line; `text` carries the parameter, the condition or the resource; preview by " +
-        "default, refused when the edit would add a compiler error).\n" +
+        "braces, enable nullable in a file, add/remove digit separators, ConfigureAwait(false), LINQ in both directions and " +
+        "StringBuilder -> context_action (action id + line; `text` carries the parameter, the condition or the resource; " +
+        "preview by default, refused when the edit would add a compiler error). A .vb file routes to the Visual Basic " +
+        "engine, which implements the 33 ids that have a VB spelling and refuses the C#-only ones with the reason.\n" +
         "- Apply Visual Basic style suggestions (15 rule ids, compiler-gated, preview by default) -> simplify_vb_code " +
         "(simplify_code rewrites C# only).\n" +
+        "- Fix an inspection's finding -> apply_code_fix (the analyzer's own CodeFixProvider, preview by default, FixAll by " +
+        "scope); on a .vb file it uses the .NET analyzers' Visual Basic fixers.\n" +
         "- Compiler errors/warnings for the whole solution -> get_diagnostics; to FIX the mechanical ones " +
         "(unused local/field/event, duplicated using, a member hiding an inherited one, a 'new' that hides " +
         "nothing) with a compiler gate and a revertible write -> fix_diagnostics.\n" +
@@ -298,12 +307,15 @@ static async Task RunServerAsync(string[] args)
         "it is backed by an FTS5 index in .visualMCP/visualmcp.db (built on demand, action=build to refresh).\n" +
         "- Download a file from an http/https URL (dataset, asset, artifact) -> download_file (INSTEAD OF Invoke-WebRequest/curl).\n" +
         "- Move or rename a file/directory -> move_path (INSTEAD OF shell mv/Move-Item/git mv). To rename a C# symbol/type/namespace and update all references, use apply_rename (semantic).\n" +
-        "- Persistent project memory belongs to the CLIENT, not to this server: recall and save it with the host's own " +
-        "memory mechanism. This build exposes NO memory_read, memory_write or memory_append — if a stale build, an old " +
-        "transcript or another server mentions them, do not call them. Notes another client keeps in " +
-        "~/.claude/projects/<slug>/memory are carried into this client's store at startup, and read_project_docs " +
-        "reports what moved. For facts the repository documents itself (README, docs, " +
-        "CONTRIBUTING), read_project_docs is the right source and is indexed automatically.\n" +
+        "- Persistent memory belongs to the PROJECT and lives on the BOARD: a fact, a decision, a constraint -> " +
+        "board_remember{topic, body, kind}; read it back with board_recall{query}. Pinned notes ride along in " +
+        "board_brief and read_project_docs. Do NOT write MEMORY.md, a *.md handoff/plan/backlog file or a chat " +
+        "promise as the place a later session is meant to find something: the board is what the next session reads, " +
+        "and the routing hook denies those writes. This build exposes NO memory_read, memory_write or memory_append — " +
+        "if a stale build, an old transcript or another server mentions them, do not call them. Notes another client " +
+        "keeps in ~/.claude/projects/<slug>/memory (or this client under ~/.zcode/cli/memories) are imported onto " +
+        "the board at startup, and read_project_docs reports what moved. For facts the repository documents itself " +
+        "(README, docs, CONTRIBUTING), read_project_docs is the right source and is indexed automatically.\n" +
         "- Interact with GitHub (create repo, PRs, issues, releases, runs) -> github (authenticated 'gh' CLI passthrough).\n" +
         "- Update VisualMCP itself from GitHub Releases: see what's available -> check_for_update; install the latest -> self_update.\n" +
         "- Scaffold project metadata: a LICENSE from a bundled template (20 licenses — call list_licenses for the catalogue with SPDX ids, copyleft family, OSI approval and patent grants) -> add_license; CONTRIBUTING + CLA -> add_contributing; a multi-OS GitHub Actions build (workflowType 'dotnet-multi-os') or a multi-OS release that publishes binaries to a GitHub Release on a tag ('dotnet-release') -> add_ci_workflow.\n" +
@@ -314,8 +326,14 @@ static async Task RunServerAsync(string[] args)
         "WORKFLOW:\n" +
         "- When you START working on a solution, first call read_project_docs to read its README/Markdown/" +
         "docs (indexed automatically when the solution opens) and understand the project before reading code.\n" +
-        "- When a task has MULTIPLE steps, call create_task_checklist at the start to write a Markdown " +
-        "Task|Done table, then update_task_checklist to tick steps off as you complete them.\n" +
+        "- The answer also carries a 'board' block: what the project has to do lives on the BOARD, not in those " +
+        "documents. Call board_brief once (counts, the card to pick up, open cards with their age) and keep the " +
+        "board updated as you work — board_move{status: in_progress} when you start a card, board_move{status: done, " +
+        "note: ...} with the evidence when you finish one, board_add for work you discover. The board is what the " +
+        "next session reads; a stale board is worse than none, so re-check it with board_audit when it looks old.\n" +
+        "- When a task has MULTIPLE steps, put the plan on the board: create_task_checklist{title, steps} creates ONE " +
+        "card whose description holds the steps as a checklist (no file is written), then update_task_checklist{id, " +
+        "done: [...]} ticks them off; board_add{title, steps: [...]} does the same on a card you describe yourself.\n" +
         "- After building, testing, or implementing/changing code, run run_code_analysis (or rely on " +
         "build_project's automatic analyzer pass) to catch analyzer/code-style issues before moving on.\n" +
         "- When you change performance-sensitive code, measure it with quick_benchmark (ad-hoc, no [Benchmark] " +
@@ -557,18 +575,16 @@ static async Task RunServerAsync(string[] args)
             // MCP transport: a port that cannot be bound is logged and nothing else changes.
             await dashboard.StartAsync();
 
-            // Carry the project memory that sits in another client's store into the one this client reads.
-            // It needs no solution, so it runs before the "nothing discovered" exit below.
+            // Import the project memory that sits in the clients' file stores onto the board. It needs no
+            // solution, so it runs before the "nothing discovered" exit below.
             try
             {
                 var memory = await host.Services.GetRequiredService<IMemoryImporter>().RunAsync();
                 if (memory.HasSources)
                 {
                     logger.LogInformation(
-                        "Memory import: {Sources} source(s), {Imported} note(s) carried over, {Present} already present, " +
-                        "{Index} index line(s) added, target {Target}.",
-                        memory.Sources.Count, memory.Imported.Count, memory.AlreadyPresent.Count,
-                        memory.IndexLinesAdded, memory.Target ?? "(none)");
+                        "Memory import: {Sources} store(s), {Imported} topic(s) written to the board, {Present} already current.",
+                        memory.Sources.Count, memory.Imported.Count, memory.AlreadyPresent.Count);
                 }
             }
             catch (Exception ex)

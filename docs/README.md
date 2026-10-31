@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **399 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **404 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -74,7 +74,7 @@ walkthrough: [Getting started](getting-started.md).
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
 | [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 399 tools, grouped by area, with a one-line description of each |
+| [Tool catalogue](tools.md) | All 404 tools, grouped by area, with a one-line description of each |
 | [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |
@@ -137,20 +137,23 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   (`scripts/install.ps1`, `scripts/install.sh`); the server adapts its shell, debugger, profiler and
   updater to the platform it runs on.
 - **Languages:** C# is the main surface; Visual Basic is a supported language (symbol index, metacode,
-  structural search, formatting/usings/cleanup, the VB-capable inspection packs, the analysis tools and
-  the refactorings that are not C#-idiom-specific) plus the language-neutral build/test/diagnostic
+  structural search, formatting/usings/cleanup, the VB-capable inspection packs and their fixers, the
+  analysis tools, `context_action` for the 33 ids that have a VB spelling, and the refactorings that are
+  not C#-idiom-specific) plus the language-neutral build/test/diagnostic
   tools; Razor and Blazor markup are analysed by a dedicated
   scanner, and XAML has its own markup layer (inventory, `XAML0001`–`XAML0009` diagnostics, navigation)
   with the code-behind resolved through Roslyn. EF Core migrations run through `ef_migrations`; SQL
   (`sql_files`, `analyze_sql`, SQL0001–SQL0010), JavaScript/TypeScript (`js_files`, `analyze_js`,
-  JS0001–JS0016), HTML/CSS (`markup_files`, `analyze_markup`), YAML (`yaml_files`, `analyze_yaml`) and F#
+  JS0001–JS0017, with relative imports resolved), HTML/CSS (`markup_files`, `analyze_markup`), YAML
+  (`yaml_files`, `analyze_yaml`, YAML0001–YAML0012) and F#
   (`fsharp_files`, `analyze_fsharp`) each have a scanned layer of their own; the JavaScript/TypeScript
   toolchain also runs through the project's own npm/pnpm/yarn (`node_*`, with `tsc`/`eslint` interpreted),
   and Kubernetes/Helm through `k8s_*`.
   A runnable Visual Basic sample lives in [`samples/VbDemo`](../samples/VbDemo/README.md), with the
   measured tool-by-tool results in [`DEMO.md`](../samples/VbDemo/DEMO.md).
   **What stays outside**: a scanner proves the shape of a line, never a binding, a type or a schema — the
-  JS/TS source has no module graph, HTML/CSS have no DOM, YAML has no schema model, and F# has no semantic
+  JS/TS source has a module graph but no type model, HTML/CSS have no DOM, YAML has no schema model, and
+  F# has no semantic
   layer (its compiler's diagnostics come through `build_project`). See
   [Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage).
 - **Scope:** everything is static analysis or process instrumentation. No tool proves that a change

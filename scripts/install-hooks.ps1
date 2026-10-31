@@ -68,6 +68,10 @@ $MarkerBegin = '<!-- VisualMCP:begin'
 $MarkerEnd   = '<!-- VisualMCP:end -->'
 $MarkerRx    = '(?s)\r?\n?<!-- VisualMCP:begin.*?<!-- VisualMCP:end -->\r?\n?'
 
+# The tools the guard watches: Bash for the shell probes, Write/Edit for a memory store or a new
+# plan-like .md. Claude Code and ZCode treat the matcher as a regex over the tool name.
+$Matcher = 'Bash|Write|Edit|MultiEdit|NotebookEdit'
+
 function Write-Step([string]$Msg) { Write-Host "`n==> $Msg" -ForegroundColor Cyan }
 function Write-Ok([string]$Msg)   { Write-Host "    OK  $Msg" -ForegroundColor Green }
 function Write-Skip([string]$Msg) { Write-Host "    --  $Msg" -ForegroundColor DarkYellow }
@@ -158,13 +162,13 @@ function Set-ZCodeHook() {
 
     $kept = @($existing | Where-Object { -not (Test-Ours $_) })
     $entry = [PSCustomObject]@{
-        matcher = 'Bash'
+        matcher = $Matcher
         hooks   = @(New-HookEntry $ZCodeHookPath)
     }
     $events | Add-Member -MemberType NoteProperty -Name 'PreToolUse' -Value (@($kept) + @($entry)) -Force
 
     Save-JsonObject $ZCodeConfigFile $cfg
-    Write-Ok "ZCode   -> $ZCodeConfigFile (hooks.events.PreToolUse, matcher 'Bash')"
+    Write-Ok "ZCode   -> $ZCodeConfigFile (hooks.events.PreToolUse, matcher '$Matcher')"
     Write-Ok "ZCode   -> $ZCodeHookPath"
 }
 
@@ -220,13 +224,13 @@ function Set-ClaudeHook() {
 
     $kept = @($existing | Where-Object { -not (Test-Ours $_) })
     $entry = [PSCustomObject]@{
-        matcher = 'Bash'
+        matcher = $Matcher
         hooks   = @(New-HookEntry $ClaudeHookPath)
     }
     $hooks | Add-Member -MemberType NoteProperty -Name 'PreToolUse' -Value (@($kept) + @($entry)) -Force
 
     Save-JsonObject $ClaudeSettings $cfg
-    Write-Ok "Claude  -> $ClaudeSettings (hooks.PreToolUse, matcher 'Bash')"
+    Write-Ok "Claude  -> $ClaudeSettings (hooks.PreToolUse, matcher '$Matcher')"
     Write-Ok "Claude  -> $ClaudeHookPath"
 }
 
@@ -303,6 +307,6 @@ Write-Step "Installing VisualMCP routing guard ($Scope)..."
 if ($wantsZCode)  { Set-ZCodeHook;  Set-AgentsBlock }
 if ($wantsClaude) { Set-ClaudeHook }
 
-Write-Host "`nHook denies read-only shell probes on .NET repos and names the MCP tool instead." -ForegroundColor Green
+Write-Host "`nHook denies read-only shell probes on .NET repos, writes into a memory store and new plan-like .md files, and names the MCP tool (or board call) instead." -ForegroundColor Green
 Write-Host "Escape hatch: include 'vmcp-allow' in a command to keep Bash deliberately." -ForegroundColor DarkYellow
 Write-Host "RESTART ZCode / Claude Code: hooks are read at session start." -ForegroundColor Yellow

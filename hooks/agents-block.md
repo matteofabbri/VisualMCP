@@ -27,7 +27,8 @@ In a .NET repository, use these tools instead of shell probes or reading files b
 | `dotnet test` once per project | `run_tests{projectFilter, extraArgs}` |
 | rename / extract / move / change signature | `apply_rename`, `extract_interface`, `extract_method_candidates`, `change_signature`, `move_type` |
 | `python - <<PY` / `sed -i` / `cat > file <<EOF` rewriting or creating a file | `Edit` / `Write` (never heredoc edits) |
-| "what is missing / what's next / what do we implement" | `board_board` (columns and counts), `board_list` (a filtered view), `board_audit` (which open cards are already done) |
+| "what is missing / what's next / what do we implement" | `board_brief` — one compact call: counts, the card to pick up, every open card with its age and a stale flag. `board_audit` says which open cards this build already ships; `board_board` / `board_list` are the full and the filtered view |
+| remember a fact, a decision or a constraint for the next session | `board_remember{topic, body, kind}` (pinned ones ride along in `board_brief`), read back with `board_recall{query}` — NOT a `MEMORY.md`, a note file or a chat message |
 
 Rules:
 
@@ -44,15 +45,24 @@ Rules:
   `dotnet build`, `dotnet test` or `git` through `grep`/`tail`: the MCP tools return
   structured errors and results instead of a log tail you have to read again.
 - At the start of work on a solution, read `read_project_docs` (README/docs) before code.
-- The board is the backlog. When the user asks what is missing, what comes next, or what to
-  implement, read it first with `board_board` (columns, counts) or `board_list` (a filtered
-  view); `board_audit` cross-checks each open card's tool names against this build and says
-  which cards are probably already done. Memory notes and `docs/gaps.md` are historical
-  records — never answer that question by reading a backlog file.
-- Project memory is the client's, not the server's: this build exposes no `memory_read`,
-  `memory_write` or `memory_append` — never call them, not even when an old build, a cached tool
-  list or an old transcript mentions them. Notes another client keeps under
-  `~/.claude/projects/<slug>/memory` are carried into your own memory store at startup, and
-  `read_project_docs` reports what moved.
-- For multi-step work, `create_task_checklist` first, then `update_task_checklist`.
+- The board is the source of truth for what is missing and what comes next. When the user asks
+  what is missing, what comes next or what to implement, call `board_brief` first — it answers in
+  one call. `board_audit` cross-checks each open card's tool names against this build and says
+  which cards are probably already done (`close: true` records the evidence and closes them).
+  Memory notes, `docs/gaps.md` and any backlog file are historical records: never answer that
+  question by reading one of them. Keep the board alive as you work: `board_move{status:
+  in_progress}` when you start, `board_move{status: done, note: <evidence>}` when you finish,
+  `board_add` for work you discover.
+- `read_project_docs` answers with a `board` block (counts, the card to pick up) — read that
+  instead of the plan documents; the documents describe the project, the board says what to do.
+- Persistent memory lives on the board: a fact, a decision or a constraint goes to
+  `board_remember{topic, body, kind}` and is read back with `board_recall{query}`. Do not write
+  `MEMORY.md`, a `*.md` handoff/plan/backlog file or a chat promise as the place a later session is
+  meant to find something — the hook denies those writes, and the next session reads the board. This
+  build exposes no `memory_read`, `memory_write` or `memory_append`; never call them. Notes another
+  client keeps under `~/.claude/projects/<slug>/memory` (or under `~/.zcode/cli/memories`) are
+  imported onto the board at startup, and `read_project_docs` reports what moved.
+- For multi-step work, `create_task_checklist{title, steps}` puts ONE card on the board with the
+  steps as a checklist (a file is not written), and `update_task_checklist{id, done: [...]}` ticks
+  them off; `board_add{title, steps: [...]}` does the same on a card you describe yourself.
 <!-- VisualMCP:end -->

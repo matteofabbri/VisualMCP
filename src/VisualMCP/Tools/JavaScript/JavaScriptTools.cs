@@ -10,9 +10,10 @@ public static class JavaScriptTools
     [McpServerTool(Name = "js_files"), Description(
         "What the solution's JavaScript/TypeScript is: every .js/.jsx/.mjs/.cjs/.ts/.tsx file under the solution " +
         "(or under `path`), with its line count, whether it is TypeScript and JSX, the modules it imports, the " +
-        "names it exports, its function and class counts and how many findings it carries. node_modules, dist, " +
-        "build, out, coverage and the other generated folders are skipped. Use it to find the source before " +
-        "reading it; analyze_js lists the findings. Read-only.")]
+        "relative ones resolved to the file they point at, the module graph and its import cycles, the names it " +
+        "exports, its function and class counts and how many findings it carries. node_modules, dist, build, out, " +
+        "coverage and the other generated folders are skipped. Use it to find the source before reading it; " +
+        "analyze_js lists the findings. Read-only.")]
     public static Task<object> JsFiles(
         IJavaScriptService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,
@@ -25,9 +26,10 @@ public static class JavaScriptTools
         "JS0003 new Function, JS0004 innerHTML/outerHTML assigned a non-literal, JS0005 dangerouslySetInnerHTML, " +
         "JS0006 document.write, JS0007 loose equality, JS0008 var, JS0009 console, JS0010 debugger, JS0011 empty " +
         "catch, JS0012 @ts-ignore/@ts-nocheck, JS0013 target=_blank without rel=noopener, JS0014 JSX <img> without " +
-        "alt, JS0015 explicit any (TypeScript only), JS0016 setTimeout/setInterval given a string. It masks " +
-        "comments, strings and template literals first, so a keyword inside them does not fire. A pattern " +
-        "scanner, not a parser: it resolves no module and no type. Read-only.")]
+        "alt, JS0015 explicit any (TypeScript only), JS0016 setTimeout/setInterval given a string, JS0017 a " +
+        "relative import that points at no file. It masks comments, strings and template literals first, so a " +
+        "keyword inside them does not fire. A pattern scanner, not a parser: a relative import is resolved " +
+        "against the file system, but a package specifier and a type are not. Read-only.")]
     public static Task<object> AnalyzeJs(
         IJavaScriptService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,

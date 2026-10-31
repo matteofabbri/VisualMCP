@@ -118,6 +118,74 @@ public sealed class JavaScriptAnalyzerTests
     }
 
     [Fact]
+    public void ImportSpecifiersCarryTheirPositionAndWhetherTheyAreRelative()
+    {
+        var analysis = Analyze("import x from './a';\nconst y = require('react');");
+
+        Assert.Equal(2, analysis.ImportReferences.Count);
+        Assert.Equal("./a", analysis.ImportReferences[0].Module);
+        Assert.Equal(1, analysis.ImportReferences[0].Line);
+        Assert.True(analysis.ImportReferences[0].Relative);
+        Assert.Equal("react", analysis.ImportReferences[1].Module);
+        Assert.False(analysis.ImportReferences[1].Relative);
+    }
+
+    [Fact]
+    public async Task ARelativeImportThatDoesNotResolveIsFlagged()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new JavaScriptService(workspace);
+
+        var root = workspace.RootDirectory;
+        Directory.CreateDirectory(Path.Combine(root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "a.ts"),
+            "import { b } from './b';\nimport missing from './missing';\nimport react from 'react';");
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "b.ts"), "export const b = 1;");
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "c.ts"), "import { b } from './b.js';");
+
+        var inventory = ResultAssert.Json(await service.InventoryAsync(root, 100));
+        Assert.Equal(1, inventory.GetProperty("totalUnresolvedImports").GetInt32());
+
+        var analysis = ResultAssert.Json(await service.AnalyzeAsync(root, "info", "JS0017", 100, 100));
+        Assert.Equal(1, analysis.GetProperty("findingCount").GetInt32());
+
+        var finding = analysis.GetProperty("findings")[0];
+        Assert.Equal("src/a.ts", finding.GetProperty("File").GetString());
+        Assert.Equal(2, finding.GetProperty("Line").GetInt32());
+    }
+
+    [Fact]
+    public async Task TheInventoryBuildsTheModuleGraphAndReportsImportCycles()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new JavaScriptService(workspace);
+
+        var root = workspace.RootDirectory;
+        Directory.CreateDirectory(Path.Combine(root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "a.ts"),
+            "import { b } from './b';\nimport react from 'react';");
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "b.ts"), "import { c } from './c';");
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "c.ts"), "import { a } from './a';");
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "d.ts"), "import { b } from './b';");
+
+        var inventory = ResultAssert.Json(await service.InventoryAsync(root, 100));
+        var graph = inventory.GetProperty("moduleGraph");
+
+        Assert.Equal(4, graph.GetProperty("edgeCount").GetInt32());
+        Assert.Equal(1, graph.GetProperty("cycleCount").GetInt32());
+
+        var cycle = graph.GetProperty("cycles")[0].EnumerateArray()
+            .Select(module => module.GetString())
+            .ToList();
+        Assert.Equal(["src/a.ts", "src/b.ts", "src/c.ts"], cycle);
+
+        var a = inventory.GetProperty("files").EnumerateArray()
+            .First(file => file.GetProperty("file").GetString() == "src/a.ts");
+        Assert.Equal(["src/b.ts"],
+            a.GetProperty("dependsOn").EnumerateArray().Select(module => module.GetString()).ToList());
+    }
+
+    [Fact]
     public async Task TheServiceScansTheTreeSkipsNodeModulesAndFiltersByRule()
     {
         using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));

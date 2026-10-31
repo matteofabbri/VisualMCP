@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **399 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **404 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -81,7 +81,7 @@ Conventions:
 |---|---|
 | `get_xml_docs` | A symbol's XML documentation, parsed into summary, params, returns, exceptions, remarks |
 | `find_undocumented_public_api` | Public/protected types and members that lack XML docs |
-| `read_project_docs` | The solution's README and Markdown docs, indexed when the solution opened; the first call of a session also reports project memory carried over from another client's store |
+| `read_project_docs` | The solution's README and Markdown docs, indexed when the solution opened; the answer carries the board block (plan + pinned memory), and the first call of a session also reports the project memory imported onto the board |
 
 ## Analysis
 
@@ -92,7 +92,7 @@ Conventions:
 | `run_code_analysis` | Run the project's configured Roslyn analyzers (StyleCop, Roslynator, .NET analyzers) |
 | `solution_audit` | One-call health report: inspections by id, compiler diagnostics, complexity hotspots, largest files, project graph and cycles, first moves; cached per unchanged solution |
 | `inspect_code` | Built-in Rider-style inspection packs over every project, plus the VisualMCP house rules (`VMC0001`: one type per file) and the opt-in `rider` pack (ReSharper-shaped ids); filter by pack, id, severity, file |
-| `apply_code_fix` | ✎ preview Apply a diagnostic's own code fix, optionally FixAll at document/project/solution scope |
+| `apply_code_fix` | ✎ preview Apply a diagnostic's own code fix, optionally FixAll at document/project/solution scope. Analyzers and fixers are selected by the document's language, so a `.vb` document gets the .NET analyzers' Visual Basic fixers |
 | `inspection_baseline` | ✎ create/check/show/clear a baseline of `inspect_code` findings, so a change is judged only by the findings it introduced |
 | `configure_inspection` | ✎ Set `dotnet_diagnostic.<id>.severity` (none/silent/suggestion/warning/error/default) in the right `.editorconfig`: solution, project or one file. Idempotent; reports the previous value |
 | `configure_formatting` | ✎ Set any other `.editorconfig` option (`csharp_*`, `dotnet_*`, `indent_*`, `end_of_line`, `charset`, `file_header_template`, …) at the same scopes, same upsert |
@@ -113,7 +113,7 @@ Conventions:
 | `find_unused_symbols` | Public/internal types and members with zero references, with the framework-invoked ones reported separately (`frameworkInvoked`) |
 | `framework_entry_points` | The members a framework calls by convention — MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests — with the reason |
 | `find_reflection_usage` | Reflective lookups (`Activator`, `Type.GetType`/`GetMethod`, `Assembly.Load`, …) with the name each uses, and which names resolve to the solution |
-| `list_generated_sources` | Source generators a project references and the syntax trees they emit, which live in the compilation but not as documents |
+| `list_generated_sources` | Source generators a project references and the syntax trees they emit, which live in the compilation but not as documents; `includeSource=true` returns each tree's text |
 | `find_external_usages` | The used surface of assemblies outside the solution: types, members, call sites, per-assembly summary |
 | `verify_change` | Run the suite on the working tree and on a git revision in a detached worktree, then diff the outcomes test by test: regressions, fixes, new/removed tests, verdict |
 | `find_breaking_changes` | Removed or re-signed public/protected members between a git revision and the working tree |
@@ -124,7 +124,7 @@ Conventions:
 | `find_missing_validation` | Public methods taking a reference-type/string parameter with no null guard, plus DTO-shaped public classes/records whose properties carry no `System.ComponentModel.DataAnnotations` validation |
 | `analyze_nullability` | Where nullable reference types actually protect: enabled context, `!` suppressions with lines, CS86xx warnings |
 | `find_security_issues` | CWE-tagged pattern scan: SQL/command injection, weak crypto, secrets, unsafe deserialization, SSRF, XXE, TLS bypass, path traversal |
-| `trace_data_flow` | The taint walk: request query/form/header/cookie/body/route data, console and environment input and model-bound action parameters followed through assignments and call arguments into SQL, `Process.Start`, file operations, redirects, `Html.Raw`/`Response.Write` and HttpClient URLs — each flow with its CWE, the sink and the path; `depth` follows the value into the in-solution methods it is passed to, and the sanitizer list is explicit |
+| `trace_data_flow` | The taint walk: request query/form/header/cookie/body/route data, console and environment input and model-bound action parameters followed through assignments, call arguments and a field of the same type into SQL, `Process.Start`, file operations, redirects, `Html.Raw`/`Response.Write` and HttpClient URLs — each flow with its CWE, the sink and the path; `depth` follows the value into the in-solution methods it is passed to, and the sanitizer list is explicit |
 | `find_throw_sites` | Which methods throw this exception: direct throwers of a type (or of everything deriving from it), the callers that reach one with the shortest call path, and the methods that catch it as a boundary |
 | `find_async_anti_patterns` | `.Result`/`.Wait()`, `async void`, await in loops, `Task.Run` over sync code, missing `ConfigureAwait` |
 | `find_performance_anti_patterns` | Allocation shapes read out of the code with the type model: `string +=` in a loop, a LINQ materialiser inside a loop, a collection or constant-size array allocated per iteration |
@@ -214,7 +214,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `remove_regions` | ✎ Strip `#region`/`#endregion` and keep the code |
 | `safe_delete` | ✎ Delete a symbol only when Roslyn finds zero references |
 | `invert_if` | ✎ Swap an if/else's branches and negate the condition |
-| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators (add and remove), remove an argument name, merge or split an `if` chain, join a null check with its use, `use_var` / `use_explicit_type`, split a declaration, remove braces, `#nullable enable` migration, `ConfigureAwait(false)`, and string literals between regular, verbatim and raw — 36 action ids, compiler-gated |
+| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators (add and remove), remove an argument name, merge or split an `if` chain, join a null check with its use, `use_var` / `use_explicit_type`, split a declaration, remove braces, `#nullable enable` migration, `ConfigureAwait(false)`, LINQ in both directions, StringBuilder and string literals between regular, verbatim and raw — 41 action ids, compiler-gated. A `.vb` document routes to the Visual Basic engine: 33 ids with a VB spelling are implemented (the same families plus Imports, `Select Case`, `&=`, `AndAlso` nesting and `Await … .ConfigureAwait(False)`), and the C#-only ids are refused with the reason |
 | `templates` | ✎ preview ReSharper's templates as data: `list` the 18 live, 10 postfix (`.if`, `.null`, `.var`, `.await`, `.foreach`, …) and 8 file templates plus the team's own in `.visualMCP/templates.json`; `expand` a live shortcut or a postfix expression at a line; `create` a new file (class, interface, record, struct, enum, static class, abstract class, xUnit test); `save`/`delete` the custom ones — compiler-gated |
 | `fix_complexity` | ✎ preview Make the codebase simpler in one call: rank every method, lower the worst with the same moves as `reduce_complexity`, report before/after — whole solution, project or file |
 | `reduce_complexity` | ✎ Lower cyclomatic and cognitive complexity by extracting blocks, naming booleans and adding guard clauses, re-measuring until a target |
@@ -371,7 +371,7 @@ dotnet-stack. Full workflows in [Profiling](guides/profiling.md).
 
 | Tool | What it does |
 |---|---|
-| `ef_migrations` | ✎ Run the project's own `dotnet ef`: `list`, `add`, `script`, `remove`, `update`, `info`, `dbcontext-list`, with the exact command, exit code, stdout and stderr as structured data |
+| `ef_migrations` | ✎ Run the project's own `dotnet ef`: `list`, `add`, `script`, `remove`, `update`, `info`, `dbcontext-list`, `pending-model-changes` (model vs migration snapshot), with the exact command, exit code, stdout and stderr as structured data |
 
 ## Razor and Blazor
 
@@ -409,12 +409,13 @@ claims that a database accepts a statement.
 
 `js`, `jsx`, `mjs`, `cjs`, `ts`, `tsx`, `mts` and `cts` files as a scanned language: comments, strings
 and template literals are masked first, and the JSX rules read a tag only where the mask says it is code.
-`node_typecheck`/`node_lint` still run the project's own `tsc`/`eslint`; this layer resolves no module.
+`node_typecheck`/`node_lint` still run the project's own `tsc`/`eslint`; this layer resolves a relative
+import to a file and no package specifier.
 
 | Tool | What it does |
 |---|---|
-| `js_files` | Inventory: lines, TypeScript and JSX flags, modules imported (including `require` and dynamic `import()`), names exported, function and class counts, findings per file |
-| `analyze_js` | Findings `JS0001`–`JS0016`: unterminated string/template/comment, `eval`, `new Function`, `innerHTML`/`outerHTML` from a non-literal, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`/`@ts-nocheck`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")` |
+| `js_files` | Inventory: lines, TypeScript and JSX flags, modules imported (including `require` and dynamic `import()`), the relative imports resolved into a module graph with its import cycles and unresolved count, names exported, function and class counts, findings per file |
+| `analyze_js` | Findings `JS0001`–`JS0017`: unterminated string/template/comment, `eval`, `new Function`, `innerHTML`/`outerHTML` from a non-literal, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`/`@ts-nocheck`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")`, a relative import that resolves to no file |
 
 ## HTML / CSS
 
@@ -423,8 +424,8 @@ and template literals are masked first, and the JSX rules read a tag only where 
 
 | Tool | What it does |
 |---|---|
-| `markup_files` | Inventory: lines, element count, ids (and how many repeat), findings per file; `kind` picks html, css or both |
-| `analyze_markup` | HTML `HTML0001`–`HTML0014` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance) and CSS `CSS0001`–`CSS0008` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`) |
+| `markup_files` | Inventory: lines, element count, distinct classes / simple selectors, ids (and how many repeat), findings per file; `kind` picks html, css or both |
+| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0009` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a simple selector that matches no element in the scanned pages) |
 
 ## YAML
 
@@ -435,7 +436,7 @@ schema.
 | Tool | What it does |
 |---|---|
 | `yaml_files` | Inventory: lines, documents, top-level keys, and for a manifest its `kind`, `apiVersion` and `metadata.name` |
-| `analyze_yaml` | Findings `YAML0001`–`YAML0008`: a tab in the indentation, a key declared twice, trailing whitespace, an unquoted `yes`/`no`/`on`/`off`, a colon glued to its key, a value containing `': '`, an unbalanced `[ ]`/`{ }`, an alias with no anchor |
+| `analyze_yaml` | Findings `YAML0001`–`YAML0012`: a tab in the indentation, a key declared twice, trailing whitespace, an unquoted `yes`/`no`/`on`/`off`, a colon glued to its key, a value containing `': '`, an unbalanced `[ ]`/`{ }`, an alias with no anchor; then, on a Kubernetes manifest, kind without apiVersion (or the reverse), a metadata block with no name, a container with no image, two containers with the same name |
 
 ## F#
 
@@ -594,13 +595,23 @@ installs it.
 
 ## Planning
 
-`board_list`, `board_show` and `board_board` are read-only; the other board tools change the store.
+The board is the project's plan and the source of truth for what is missing and what comes next:
+`board_brief` answers that in one call, `board_audit` says which open cards the build already ships.
+It is also where durable memory lives: a fact, a decision, a constraint is a `board_remember` topic,
+not a `MEMORY.md` or a note file, and `board_brief` carries the pinned ones.
+`board_brief`, `board_recall`, `board_list`, `board_show`, `board_board` and `board_audit` are
+read-only unless `board_audit` is called with `close=true`; the other board tools change the store.
 
 | Tool | What it does |
 |---|---|
-| `board_add` | Create a kanban card with column, priority, labels and assignee |
+| `board_brief` | Counts, the card to pick up (in_progress → review → todo → backlog, highest priority first), every open card with its age and idle days, the cards that went stale, and the pinned memory |
+| `board_audit` | Cross-checks each open card against this build: the tool names and context-action ids it mentions must exist, the file paths it names must be on disk. `closure-candidate` / `partly-shipped` / `open` per card, with the evidence; `close=true` closes the candidates and records it |
+| `board_remember` | Write a durable note under a topic (`fact`/`decision`/`constraint`/`preference`/`reference`); a new body supersedes the previous version instead of duplicating it |
+| `board_recall` | Find the current notes: an exact topic or a search over topic and body, filtered by kind or label |
+| `board_forget` | Retire a topic; its versions stay as history but are no longer returned |
+| `board_add` | Create a kanban card with column, priority, labels and assignee; `steps` puts a checklist in its description |
 | `board_update` | Edit a card's fields; every change goes into its history |
-| `board_move` | Move a card across backlog → todo → in_progress → review → done |
+| `board_move` | Move a card across backlog → todo → in_progress → review → done; `note=` records the evidence as a comment |
 | `board_comment` | Append a comment to a card |
 | `board_list` | Filter cards by column, priority, assignee, label or text |
 | `board_show` | One card with all comments and its full history |
@@ -608,8 +619,8 @@ installs it.
 | `board_import` | ✎ Create many cards in one call from a written backlog, keyed on the title (`skip`/`update`/`duplicate`) |
 | `board_export` | The board as Markdown, one section per column |
 | `board_delete` | Delete a card with its comments and history |
-| `create_task_checklist` | Write a Markdown `Task \| Done` checklist for a multi-step task |
-| `update_task_checklist` | Tick steps off (or undo) in that checklist |
+| `create_task_checklist` | Put a multi-step plan on the board: one card whose description holds the steps as a checklist (no file) |
+| `update_task_checklist` | Tick steps off (or undo) in a card's checklist, by card id |
 
 ## Automation and protocols
 

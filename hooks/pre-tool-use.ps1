@@ -54,20 +54,66 @@ function Send-Deny([string]$Reason) {
     Send-HookJson ($payload | ConvertTo-Json -Depth 5 -Compress)
 }
 
-function Test-DotNetRepository([string]$Directory, [int]$MaxParents) {
-    if ([string]::IsNullOrWhiteSpace($Directory)) { return $false }
-    try { $dir = [System.IO.DirectoryInfo]::new($Directory) } catch { return $false }
+function Find-RepositoryRoot([string]$Directory, [int]$MaxParents) {
+    if ([string]::IsNullOrWhiteSpace($Directory)) { return $null }
+    try { $dir = [System.IO.DirectoryInfo]::new($Directory) } catch { return $null }
     for ($i = 0; $i -le $MaxParents -and $null -ne $dir; $i++) {
         try {
             if ($dir.Exists) {
                 $hit = Get-ChildItem -LiteralPath $dir.FullName -Filter '*.sln*' -File -ErrorAction SilentlyContinue |
                        Select-Object -First 1
-                if ($hit) { return $true }
+                if ($hit) { return $dir.FullName }
             }
         } catch { }
         $dir = $dir.Parent
     }
-    return $false
+    return $null
+}
+
+function Test-DotNetRepository([string]$Directory, [int]$MaxParents) {
+    return $null -ne (Find-RepositoryRoot $Directory $MaxParents)
+}
+
+function Get-ProtectedWriteReason([string]$ToolName, [string]$Path, [string]$Cwd) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+
+    $normalized = $Path -replace '\\', '/'
+    $name = [System.IO.Path]::GetFileName($normalized)
+
+    # The clients' memory stores, and the index file every client calls MEMORY.md.
+    if ($name -ieq 'MEMORY.md' -or
+        $normalized -match '[\\/]\.zcode[\\/]cli[\\/]memories[\\/]' -or
+        $normalized -match '[\\/]\.claude[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]') {
+        return ("VisualMCP: project memory lives on the board. " +
+            "Use board_remember{topic, body, kind} and read it back with board_recall{query}; pinned notes ride " +
+            "along in board_brief and read_project_docs. A MEMORY.md or a note file is not read by the next session. " +
+            "To write it deliberately, use the MCP tool run_command.")
+    }
+
+    # A NEW plan-like .md at the repository root or in docs/: the plan is a card, not a file.
+    # Editing a document that already exists is never refused (docs/gaps.md stays editable).
+    if ($ToolName -ne 'Write') { return $null }
+    if ($normalized -notmatch '\.md$') { return $null }
+
+    $root = Find-RepositoryRoot $Cwd 3
+    if ($null -eq $root) { return $null }
+
+    $absolute = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $Cwd $Path }
+    try { $absolute = [System.IO.Path]::GetFullPath($absolute) } catch { return $null }
+    if (Test-Path -LiteralPath $absolute) { return $null }
+
+    $folder = [System.IO.Path]::GetDirectoryName($absolute)
+    $allowedRoot = [System.IO.Path]::GetFullPath($root)
+    $allowedDocs = [System.IO.Path]::GetFullPath((Join-Path $root 'docs'))
+    if ($folder -ine $allowedRoot -and $folder -ine $allowedDocs) { return $null }
+
+    if ($name -notmatch '(?i)(checklist|plan|backlog|todo|handoff|notes|gaps|memory)') { return $null }
+
+    return ("VisualMCP: a plan/notes file is not the plan. " +
+        "Put the work on the board: create_task_checklist{title, steps} creates one card with the steps as a " +
+        "checklist (no file), board_add{title, steps} the same on a card you describe, board_move{status, note} " +
+        "records progress. The board is what the next session reads. " +
+        "To write the file deliberately, use the MCP tool run_command.")
 }
 
 try {
@@ -78,6 +124,24 @@ try {
     try { $payload = $raw | ConvertFrom-Json } catch { exit 0 }
 
     $toolName = [string]$payload.tool_name
+    $cwd = [string]$payload.cwd
+    if ([string]::IsNullOrWhiteSpace($cwd)) { $cwd = (Get-Location).Path }
+
+    # A write into a memory store, or the creation of a plan-like .md, belongs on the board.
+    if ($toolName -in @('Write', 'Edit', 'MultiEdit', 'NotebookEdit')) {
+        $path = ''
+        if ($payload.tool_input -and $payload.tool_input.PSObject.Properties['file_path']) {
+            $path = [string]$payload.tool_input.file_path
+        }
+        elseif ($payload.tool_input -and $payload.tool_input.PSObject.Properties['path']) {
+            $path = [string]$payload.tool_input.path
+        }
+
+        $reason = Get-ProtectedWriteReason $toolName $path $cwd
+        if ($reason) { Send-Deny $reason }
+        exit 0
+    }
+
     if ($toolName -ne 'Bash') { exit 0 }
 
     $command = ''
@@ -89,8 +153,6 @@ try {
     # Explicit escape hatch: the model (or a user) can keep the shell on purpose.
     if ($command -match 'vmcp-allow') { exit 0 }
 
-    $cwd = [string]$payload.cwd
-    if ([string]::IsNullOrWhiteSpace($cwd)) { $cwd = (Get-Location).Path }
     if (-not (Test-DotNetRepository $cwd $SolutionSearchParents)) { exit 0 }
 
     $probes = @(

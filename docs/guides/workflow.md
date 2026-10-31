@@ -80,25 +80,35 @@ The board lives in the solution store, so it survives restarts and is scoped to 
 
 ### Checklists
 
-`create_task_checklist` writes a Markdown `Task | Done` table for a multi-step operation;
-`update_task_checklist` ticks steps off as work progresses. It is the lightweight alternative to a board
-card, and it is visible in the editor.
+`create_task_checklist` puts a multi-step operation on the board: one card whose description holds the
+steps as a checklist, so it shows up in `board_brief`, `board_show` and `board_export` like every other
+card. `update_task_checklist` ticks steps off by card id, and `board_add{title, steps: [...]}` does the
+same on a card you describe yourself. No file is written — a Markdown checklist next to the solution is
+invisible to the next session, a card is not.
 
 ### Memory
 
-Persistent memory belongs to the client, not to the server. Claude Code, ZCode and the other MCP clients
-already keep a per-project memory store and load it at the start of a session, so VisualMCP does not expose
-a second one — two stores would only drift apart. The `memory_read` / `memory_write` / `memory_append` tools
-that older builds shipped are gone: if a cached tool list still shows them, they are not part of this server.
+Memory is the board's second lane. A fact, a decision, a constraint goes to
+`board_remember{topic, body, kind}`: a topic has one current version, writing it again supersedes the
+previous one (kept as history) instead of duplicating it, and an identical body is a no-op.
+`board_recall{topic|query}` reads it back, `board_forget{topic}` retires a topic. Pinned notes ride
+along in `board_brief` and in the `board` block of `read_project_docs`, which is what makes writing one
+worth the call. The `memory_read` / `memory_write` / `memory_append` tools of older builds are gone.
 
-Every client keeps its per-project memory in its own place: Claude Code under
-`~/.claude/projects/<slug>/memory/`, where the slug is the project path with `:` and every separator folded
-to `-` (this repository's is `D--REPOSITORY-VisualMCP`), and ZCode under
-`~/.zcode/cli/memories/projects/`. Earlier VisualMCP builds wrote into the Claude Code store, so notes can
-sit in the store of a client you no longer start. At startup the server carries them across: every note the
-current client does not have yet is copied into its store, and the index lines its `MEMORY.md` is missing are
-appended. Nothing is overwritten, a second start moves nothing, and the first `read_project_docs` of a session
-returns a `memoryImport` block saying what moved. Set `VISUALMCP_MEMORY_IMPORT=off` to skip the pass.
+Notes that still live as files are imported once: Claude Code keeps them under
+`~/.claude/projects/<slug>/memory/` (the slug is the project path with `:` and every separator folded to
+`-`, this repository's is `D--REPOSITORY-VisualMCP`) and this client under
+`~/.zcode/cli/memories/projects/<name>-<id>/memory/`. At startup the server reads both and writes every
+note through `board_remember` (topic `imported-<type>-<name>`, the kind mapped from the frontmatter
+`type`), keyed on the body so a second start imports nothing; the files stay where they are but stop
+being the source. The first `read_project_docs` of a session returns a `memoryImport` block saying what
+moved. Set `VISUALMCP_MEMORY_IMPORT=off` to skip the pass.
+
+`docs/gaps.md`, a backlog file and a `MEMORY.md` are historical records; the board is the plan and the
+memory. The routing hooks (`hooks/pre-tool-use.py`, `hooks/pre-tool-use.ps1`) enforce it: they deny a
+`Write`/`Edit` into a memory store and the creation of a plan-like `.md` at the repository root or in
+`docs/`, naming the tool that does the job instead. Editing a document that already exists is never
+refused.
 
 For facts the repository documents itself, `read_project_docs` is the right source and is indexed
 automatically when the solution opens.

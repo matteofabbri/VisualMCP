@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """ZCode / Claude Code PreToolUse hook: route read-only shell probes on .NET
-repositories through VisualMCP instead of Bash.
+repositories through VisualMCP instead of Bash, and keep plans and memory on the
+board.
 
 This is the POSIX counterpart of pre-tool-use.ps1 and behaves identically:
 
-- reads the hook payload from stdin (tool_name + tool_input.command);
+- reads the hook payload from stdin (tool_name + tool_input);
 - when the command is a read-only probe (grep/rg, sed -n, cat/head/tail,
   ls/find, Select-String, Get-Content, Get-ChildItem) inside a .NET repository,
   answers with a PreToolUse "deny" decision whose reason names the MCP tool;
 - refuses shell file rewrites (inline python writes, sed -i, heredoc/redirection
   file creation) in favour of Edit/Write;
-- passes everything else: builds, tests, git, scripts, non-.NET trees;
+- refuses a Write/Edit into a memory store (MEMORY.md, ~/.zcode/.../memories,
+  ~/.claude/projects/<slug>/memory): the memory is board_remember/board_recall;
+- refuses the CREATION of a plan-like .md at the repository root or in docs/
+  (checklist, plan, backlog, todo, handoff, notes, gaps, memory): the plan is
+  a board card, and create_task_checklist writes one instead of a file;
+- passes everything else: builds, tests, git, scripts, non-.NET trees, edits to
+  documents that already exist;
 - never fails the session: any error or unparsable payload exits 0;
-- "vmcp-allow" anywhere in the command is the explicit escape hatch.
+- "vmcp-allow" anywhere in a command is the explicit escape hatch; a protected
+  Write can be done deliberately through the MCP tool run_command.
 
 It needs Python 3 only because the payload is JSON; the installer registers it
 only when an interpreter is found, and says so when it is not.
@@ -30,6 +38,40 @@ PROBES = {
     "list": "list_directory{path} (or search_text to match file names)",
     "rewrite": "Edit (or Write for a new file), not a shell heredoc",
 }
+
+WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+# A path inside a memory store: the client's own (~/.zcode/cli/memories/...) or Claude Code's
+# (~/.claude/projects/<slug>/memory/...). MEMORY.md is checked separately, by name.
+RX_MEMORY_STORE = re.compile(
+    r"[\\/]\.zcode[\\/]cli[\\/]memories[\\/]|[\\/]\.claude[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]",
+    re.IGNORECASE,
+)
+
+# The names of a file that is a plan/backlog rather than documentation.
+RX_PLAN_FILE = re.compile(r"(checklist|plan|backlog|todo|handoff|notes|gaps|memory)", re.IGNORECASE)
+
+# Where a plan-like .md must not be created: the repository root and its docs folder.
+PLAN_FOLDERS = ("", "docs")
+
+
+def memory_route():
+    return (
+        "VisualMCP: project memory lives on the board. "
+        "Use board_remember{topic, body, kind} and read it back with board_recall{query}; pinned notes ride "
+        "along in board_brief and read_project_docs. A MEMORY.md or a note file is not read by the next session. "
+        "To write it deliberately, use the MCP tool run_command."
+    )
+
+
+def plan_route():
+    return (
+        "VisualMCP: a plan/notes file is not the plan. "
+        "Put the work on the board: create_task_checklist{title, steps} creates one card with the steps as a "
+        "checklist (no file), board_add{title, steps} the same on a card you describe, board_move{status, note} "
+        "records progress. The board is what the next session reads. "
+        "To write the file deliberately, use the MCP tool run_command."
+    )
 
 RX_TOOLING = re.compile(
     r"(^|[\s;&|(])(dotnet|msbuild|nuget|git|gh|npm|pnpm|yarn|npx|node|python|python3|py|pip|"
@@ -58,23 +100,58 @@ RX_SEGMENT_SPLIT = re.compile(r"&&|\|\||;")
 
 def is_dotnet_repository(directory, max_parents=3):
     """True when a .sln/.slnx sits in the directory or within max_parents above it."""
+    return repository_root(directory, max_parents) is not None
+
+
+def repository_root(directory, max_parents=3):
+    """The nearest directory at or above `directory` holding a .sln/.slnx, or None."""
     if not directory:
-        return False
+        return None
     try:
         current = os.path.abspath(directory)
     except (OSError, ValueError):
-        return False
+        return None
 
     for _ in range(max_parents + 1):
         if os.path.isdir(current):
             for pattern in ("*.sln", "*.slnx"):
                 if glob.glob(os.path.join(current, pattern)):
-                    return True
+                    return current
         parent = os.path.dirname(current)
         if parent == current:
             break
         current = parent
-    return False
+    return None
+
+
+def protected_write_reason(tool_name, path, cwd):
+    """The deny reason for a memory-store write or a new plan-like .md, or None."""
+    if not isinstance(path, str) or not path.strip():
+        return None
+
+    normalized = path.replace("\\", "/")
+    if os.path.basename(normalized).lower() == "memory.md" or RX_MEMORY_STORE.search(normalized):
+        return memory_route()
+
+    # Only creation is refused, never the edit of a document that already exists: docs/gaps.md stays editable.
+    if tool_name != "Write" or not normalized.lower().endswith(".md"):
+        return None
+
+    root = repository_root(cwd)
+    if root is None:
+        return None
+
+    absolute = os.path.normcase(os.path.abspath(path if os.path.isabs(path) else os.path.join(cwd, path)))
+    # os.path.join(root, "") appends a separator, so the root is added without going through the loop.
+    allowed = {os.path.normcase(root)}
+    allowed.update(os.path.normcase(os.path.join(root, folder)) for folder in PLAN_FOLDERS if folder)
+    if os.path.dirname(absolute) not in allowed:
+        return None
+    if os.path.exists(absolute):
+        return None
+    if not RX_PLAN_FILE.search(os.path.basename(absolute)):
+        return None
+    return plan_route()
 
 
 def is_rewrite(command):
@@ -157,10 +234,21 @@ def main():
     if not isinstance(payload, dict):
         return 0
 
-    if payload.get("tool_name") != "Bash":
+    tool_name = payload.get("tool_name")
+    tool_input = payload.get("tool_input") or {}
+    cwd = payload.get("cwd") or os.getcwd()
+
+    # A write into a memory store, or the creation of a plan-like .md, belongs on the board.
+    if isinstance(tool_name, str) and tool_name in WRITE_TOOLS:
+        path = tool_input.get("file_path") or tool_input.get("path") if isinstance(tool_input, dict) else None
+        reason = protected_write_reason(tool_name, path, cwd)
+        if reason:
+            deny(reason)
         return 0
 
-    tool_input = payload.get("tool_input") or {}
+    if tool_name != "Bash":
+        return 0
+
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(command, str) or not command.strip():
         return 0
@@ -168,7 +256,6 @@ def main():
     if "vmcp-allow" in command:
         return 0
 
-    cwd = payload.get("cwd") or os.getcwd()
     if not is_dotnet_repository(cwd):
         return 0
 

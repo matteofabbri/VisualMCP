@@ -31,7 +31,8 @@ public static class CapabilityReportTool
         "the live count), the rule catalogues it carries (context actions, XAML and Razor rule ids, style " +
         "rewrites, inspection packs) and the language layers with the type that implements each one. Use it " +
         "instead of the documentation tables when the counts matter — these cannot drift from the build. " +
-        "Read-only.")]
+        "It answers what EXISTS; what is MISSING and what comes next is the project's board (board_brief, " +
+        "board_audit) — never a docs/gaps.md or a backlog file. Read-only.")]
     public static object CapabilityReport(VisualMCP.Analysis.ICapabilityReportService report) => report.Report();
 }
 

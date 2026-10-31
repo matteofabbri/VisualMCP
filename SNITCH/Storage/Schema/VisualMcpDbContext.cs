@@ -44,6 +44,8 @@ public sealed class VisualMcpDbContext : DbContext
 
     public DbSet<BoardHistoryRow> BoardHistory => Set<BoardHistoryRow>();
 
+    public DbSet<BoardMemoryRow> BoardMemories => Set<BoardMemoryRow>();
+
     public DbSet<TextIndexDocumentRow> TextIndexDocuments => Set<TextIndexDocumentRow>();
 
     public DbSet<TextIndexLineRow> TextIndexLines => Set<TextIndexLineRow>();
@@ -150,6 +152,16 @@ public sealed class VisualMcpDbContext : DbContext
             row.ToTable("board_history");
             row.HasKey(history => history.Id);
             row.HasIndex(history => history.ItemId).HasDatabaseName("board_history_item");
+        });
+
+        // Durable knowledge, next to the plan. Topic is indexed but not unique: the history of a topic is
+        // what tells a reversed decision from a fact, and only the row with no successor is "current".
+        model.Entity<BoardMemoryRow>(row =>
+        {
+            row.ToTable("board_memory");
+            row.HasKey(memory => memory.Id);
+            row.HasIndex(memory => memory.Topic).HasDatabaseName("board_memory_topic");
+            row.HasIndex(memory => memory.SupersededBy).HasDatabaseName("board_memory_current");
         });
 
         model.Entity<TextIndexDocumentRow>(row =>

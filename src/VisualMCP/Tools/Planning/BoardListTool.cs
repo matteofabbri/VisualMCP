@@ -9,7 +9,8 @@ public static class BoardListTool
 {
     [McpServerTool(Name = "board_list"), Description(
         "List cards, optionally filtered by column, priority, assignee, label or free text in title/description. " +
-        "Ordered by column then position. Read-only — use board_board for the grouped view.")]
+        "Ordered by column then position. The cards are the project's plan; this is the filtered view of it. " +
+        "Read-only — use board_brief for \"what is missing / what comes next\" and board_board for the full columns.")]
     public static Task<object> BoardList(
         IBoardService board,
         [Description("Only this column: backlog, todo, in_progress, review, done.")] string? status = null,

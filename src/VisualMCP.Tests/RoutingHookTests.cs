@@ -72,10 +72,73 @@ public sealed class RoutingHookTests
         }
     }
 
-    private static async Task<(int ExitCode, string Output)> RunAsync(string cwd, string command)
+    [Fact]
+    public async Task A_write_into_a_memory_store_is_denied_in_favour_of_the_board()
+    {
+        using var repo = new DotNetRepo();
+        var (exitCode, output) = await RunPayloadAsync(repo.Directory, "Write", Path.Combine(repo.Directory, "MEMORY.md"));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\"permissionDecision\":\"deny\"", output);
+        Assert.Contains("board_remember", output);
+    }
+
+    [Fact]
+    public async Task Creating_a_plan_file_at_the_repository_root_is_denied_in_favour_of_a_card()
+    {
+        using var repo = new DotNetRepo();
+        var (exitCode, output) = await RunPayloadAsync(repo.Directory, "Write", Path.Combine(repo.Directory, "release-plan.md"));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("deny", output);
+        Assert.Contains("create_task_checklist", output);
+    }
+
+    [Fact]
+    public async Task Editing_an_existing_document_is_not_a_plan_file()
+    {
+        using var repo = new DotNetRepo();
+        var path = Path.Combine(repo.Directory, "docs", "gaps.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, "# gaps\n");
+
+        var (exitCode, output) = await RunPayloadAsync(repo.Directory, "Edit", path);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, output);
+    }
+
+    [Fact]
+    public async Task A_write_outside_a_dotnet_repository_passes()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "vmcp-nowrite-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        try
+        {
+            var (exitCode, output) = await RunPayloadAsync(outside, "Write", Path.Combine(outside, "notes.md"));
+            Assert.Equal(0, exitCode);
+            Assert.Equal(string.Empty, output);
+        }
+        finally
+        {
+            try { Directory.Delete(outside, true); } catch { /* best-effort */ }
+        }
+    }
+
+    private static Task<(int ExitCode, string Output)> RunAsync(string cwd, string command)
     {
         var payload = $$$"""{"tool_name":"Bash","cwd":"{{{cwd.Replace("\\", "/")}}}","tool_input":{"command":"{{{command}}}"}}""";
+        return ExecuteAsync(payload);
+    }
 
+    private static Task<(int ExitCode, string Output)> RunPayloadAsync(string cwd, string tool, string path)
+    {
+        var payload = $$$"""{"tool_name":"{{{tool}}}","cwd":"{{{cwd.Replace("\\", "/")}}}","tool_input":{"file_path":"{{{path.Replace("\\", "/")}}}"}}""";
+        return ExecuteAsync(payload);
+    }
+
+    private static async Task<(int ExitCode, string Output)> ExecuteAsync(string payload)
+    {
         var interpreter = Interpreter();
         var start = new ProcessStartInfo(interpreter)
         {

@@ -504,6 +504,37 @@ get_quality_trend(from=HEAD~1, to=HEAD, repoPath?, path?, top=10)
 its line comments. GitHub is served by the `gh` CLI; `git_host` covers GitLab, Azure DevOps and
 Bitbucket over their HTTP APIs, and both are read-only until `confirm=true`.
 
+## The board, the plan and the memory
+
+```text
+board_remember(topic, body, kind=fact|decision|constraint|preference|reference,
+               labels?, pinned=false, source?)
+                → one CURRENT version per topic: writing the topic again supersedes
+                  the previous row (kept as history, never returned) instead of
+                  duplicating it; an identical body AND kind/labels/pin is a no-op.
+                  `pinned` notes travel with board_brief and read_project_docs.
+board_recall(topic?, query?, kind?, label?, pinnedOnly=false, limit=20)
+                → the exact topic, or a LIKE search over topic and body; pinned
+                  first, then most recently updated. Bodies are clipped at 4000
+                  chars with `truncated: true`.
+board_forget(topic)
+                → retires the topic (SupersededBy = -1): history stays in the table,
+                  nothing is current any more. Use board_remember to correct a fact.
+
+create_task_checklist(title, steps, status=todo, priority?, labels?)
+                → ONE card whose description holds `- [ ] step`; no file is written.
+update_task_checklist(id, done?, notDone?)
+                → 1-based positions inside that card's checklist; refuses a card
+                  with no checklist, and names the call that creates one.
+board_add(title, description?, status?, priority?, labels?, assignee?, steps?)
+                → `steps` is the same checklist on a card you describe yourself.
+```
+
+A memory topic is a slug (`sqlite-ef-linq`), not a sentence: it is the identity that makes a second
+write an update instead of a duplicate. The importer writes the file stores of both clients as
+`imported-<type>-<name>` — kind from the frontmatter (nested under `metadata:` in this client's
+notes), body from the note — and leaves the files where they are.
+
 ## Kubernetes, Node and the scanned languages
 
 ```
@@ -577,13 +608,18 @@ analyze_sql(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
 
 js_files(path?, maxFiles=500)
                 → per file: lines, typeScript, jsx, import count and modules,
-                  exported names, functions, classes, finding count;
-                  node_modules/dist/build/out/coverage/.next are skipped
+                  dependsOn (the relative imports resolved to a file), exported
+                  names, functions, classes, finding count; plus moduleGraph:
+                  nodeCount, edgeCount, edges, cycles (one entry per strongly
+                  connected group of modules); resolved and unresolved relative
+                  imports; node_modules/dist/build/out/coverage/.next are skipped
 
 analyze_js(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
-                → JS0001-JS0016 over masked source (comments, strings and
+                → JS0001-JS0017 over masked source (comments, strings and
                   template literals blanked first); JS0015 (any) fires only for
-                  .ts/.tsx/.mts/.cts. Unknown rule ids return the catalogue.
+                  .ts/.tsx/.mts/.cts; JS0017 is a relative import that names no
+                  file (a package specifier is not resolved). Unknown rule ids
+                  return the catalogue.
 
 markup_files(path?, kind=both, maxFiles=500)
                 → kind is html|css|both; per file: lines, elements, id count,
@@ -600,8 +636,11 @@ yaml_files(path?, maxFiles=500)
                   Kubernetes manifest kind / apiVersion / metadata name
 
 analyze_yaml(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
-                → YAML0001-YAML0008; block scalars, comments and quoted values
-                  are honoured, so their content does not fire a rule
+                → YAML0001-YAML0012; block scalars, comments and quoted values
+                  are honoured, so their content does not fire a rule. On a
+                  Kubernetes manifest: kind without apiVersion or the reverse,
+                  metadata with no name, a container with no image, two
+                  containers with the same name (no schema is fetched).
 
 fsharp_files(path?, maxFiles=500)
                 → per file: lines, modules and namespaces, types, top-level

@@ -12,8 +12,8 @@ public static class BoardImportTool
         "Cards are keyed on the title, so importing the same list again does not duplicate anything: 'existing' " +
         "decides what happens to a title already on the board (skip, default; update its fields; duplicate anyway). " +
         "Each card is {title, description, status, priority, labels, assignee}; a bad card is reported in 'errors' " +
-        "and the rest still import. The document stays the source of truth and the board mirrors it — use " +
-        "board_export to write the board back out. Read-only source documents (docs/*.md) are not modified.")]
+        "and the rest still import. This is a one-way bootstrap: the document is the input, and once imported the " +
+        "BOARD is what the plan is kept in (use board_export for a snapshot of it). Source documents are not modified.")]
     public static Task<object> BoardImport(
         IBoardService board,
         [Description("The cards to create, as an array of objects: {title, description, status, priority, labels, assignee}. " +

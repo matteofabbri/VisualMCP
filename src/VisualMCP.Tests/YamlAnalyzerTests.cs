@@ -95,6 +95,85 @@ public sealed class YamlAnalyzerTests
     }
 
     [Fact]
+    public void AManifestWithOnlyHalfAnIdentityIsFlagged()
+    {
+        Assert.Contains("YAML0009", Rules(Analyze("kind: Deployment\nmetadata:\n  name: api")));
+        Assert.Contains("YAML0009", Rules(Analyze("apiVersion: v1\nmetadata:\n  name: api")));
+        Assert.DoesNotContain("YAML0009", Rules(Analyze("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api")));
+    }
+
+    [Fact]
+    public void AKindThatIsNotKubernetesIsLeftAlone()
+    {
+        Assert.DoesNotContain("YAML0009", Rules(Analyze("kind: Script\nname: build")));
+        Assert.DoesNotContain("YAML0009", Rules(Analyze("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest")));
+    }
+
+    [Fact]
+    public void MetadataWithoutANameIsFlagged()
+    {
+        Assert.Contains("YAML0010", Rules(Analyze("apiVersion: v1\nkind: Service\nmetadata:\n  labels:\n    app: api")));
+        Assert.DoesNotContain("YAML0010", Rules(Analyze("apiVersion: v1\nkind: Service\nmetadata:\n  name: api")));
+    }
+
+    [Fact]
+    public void AContainerWithoutAnImageIsFlagged()
+    {
+        var analysis = Analyze("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: api
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: api
+            """);
+
+        Assert.Contains("YAML0011", Rules(analysis));
+    }
+
+    [Fact]
+    public void TwoContainersWithTheSameNameAreFlagged()
+    {
+        var duplicate = Analyze("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: api
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: api
+                      image: example/api:1.0
+                    - name: api
+                      image: example/sidecar:1.0
+            """);
+
+        Assert.Contains("YAML0012", Rules(duplicate));
+
+        var distinct = Analyze("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: api
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: api
+                      image: example/api:1.0
+                    - name: sidecar
+                      image: example/sidecar:1.0
+            """);
+
+        Assert.DoesNotContain("YAML0012", Rules(distinct));
+        Assert.DoesNotContain("YAML0011", Rules(distinct));
+    }
+
+    [Fact]
     public void ABlockScalarIsNotReadAsKeys()
     {
         var analysis = Analyze("""

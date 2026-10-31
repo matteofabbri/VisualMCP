@@ -7,9 +7,10 @@ namespace Snitch.Languages.CSharp.Analysis.DataFlow;
 /// <summary>
 /// A taint walk over the solution: it seeds a method with the values a caller controls, follows the
 /// assignments and calls that carry them, and reports the ones that arrive at a sink in
-/// <see cref="TaintCatalog"/>. It is a static analysis with a documented reach — locals, parameters
-/// and call arguments, to a caller-set depth — not a proof: a value that passes through a field, a
-/// database or a queue is not followed, and <c>trace_data_flow</c> says so in every answer.
+/// <see cref="TaintCatalog"/>. It is a static analysis with a documented reach — locals, parameters and
+/// call arguments to a caller-set depth, plus a field of the same type (written in one method, read in
+/// another) — not a proof: a field of another object, a database or a queue is not followed, and
+/// <c>trace_data_flow</c> says so in every answer.
 /// </summary>
 public static class TaintAnalyzer
 {
@@ -28,9 +29,20 @@ public static class TaintAnalyzer
             context.Index[method.Definition] = method;
         }
 
+        // Pass one: the fields a type parks tainted data in. A field written by one method and read by
+        // another is the one store an intra-method walk cannot see.
         foreach (var method in context.Models)
         {
-            var state = ComputeTaint(method, seeds: null);
+            var state = ComputeTaint(method, seeds: null, fieldSeeds: null);
+            foreach (var (symbol, origin) in state)
+                if (symbol is IFieldSymbol field && !context.FieldOrigins.ContainsKey(field))
+                    context.FieldOrigins[field] = origin;
+        }
+
+        // Pass two: the report, with those fields seeded in every method of their containing type.
+        foreach (var method in context.Models)
+        {
+            var state = ComputeTaint(method, seeds: null, fieldSeeds: context.FieldOrigins);
             foreach (var hit in FindHits(method, state))
                 context.Add(new TaintFlow(hit.Origin.Source, hit.Sink, hit.Origin.Steps, hit.Origin.Steps.Count));
 
@@ -54,7 +66,9 @@ public static class TaintAnalyzer
     // ── the walk of one method ─────────────────────────────────────────────────
 
     private static Dictionary<ISymbol, Origin> ComputeTaint(
-        MethodDeclarationModel method, IReadOnlyDictionary<IParameterSymbol, Origin>? seeds)
+        MethodDeclarationModel method,
+        IReadOnlyDictionary<IParameterSymbol, Origin>? seeds,
+        IReadOnlyDictionary<IFieldSymbol, Origin>? fieldSeeds)
     {
         var state = new Dictionary<ISymbol, Origin>(SymbolEqualityComparer.Default);
 
@@ -65,6 +79,11 @@ public static class TaintAnalyzer
         if (seeds is not null)
             foreach (var (parameter, origin) in seeds)
                 state[parameter] = origin;
+
+        if (fieldSeeds is not null)
+            foreach (var (field, origin) in fieldSeeds)
+                if (SymbolEqualityComparer.Default.Equals(field.ContainingType, method.Symbol.ContainingType))
+                    state[field] = origin;
 
         var model = method.Model;
 
@@ -87,6 +106,26 @@ public static class TaintAnalyzer
                         break;
 
                     case AssignmentExpressionSyntax assignment:
+                        if (TryOwnField(assignment.Left, model) is { } field)
+                        {
+                            var fieldValue = assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                                ? assignment.Right
+                                : assignment;
+
+                            if (TryOrigin(fieldValue, model, state, out var fieldOrigin))
+                            {
+                                state[field] = WithStep(fieldOrigin, method, assignment, $"stored in field {field.Name}");
+                                changed = true;
+                            }
+                            else if (state.Remove(field))
+                            {
+                                // Last write wins: a clean assignment clears what an earlier one stored.
+                                changed = true;
+                            }
+
+                            break;
+                        }
+
                         if (assignment.Left is MemberAccessExpressionSyntax or ElementAccessExpressionSyntax) break;
                         if (model.GetSymbolInfo(assignment.Left).Symbol is not { } assigned ||
                             assigned is not (ILocalSymbol or IParameterSymbol) || state.ContainsKey(assigned))
@@ -206,7 +245,7 @@ public static class TaintAnalyzer
                     [parameter] = new Origin(origin.Source, steps),
                 };
 
-                var calleeState = ComputeTaint(calleeModel, seeded);
+                var calleeState = ComputeTaint(calleeModel, seeded, context.FieldOrigins);
                 foreach (var hit in FindHits(calleeModel, calleeState))
                     context.Add(new TaintFlow(hit.Origin.Source, hit.Sink, hit.Origin.Steps, hit.Origin.Steps.Count));
 
@@ -302,6 +341,13 @@ public static class TaintAnalyzer
                     return true;
                 }
 
+                if (model.GetSymbolInfo(access).Symbol is IFieldSymbol memberField &&
+                    state.TryGetValue(memberField, out var memberKnown))
+                {
+                    origin = memberKnown;
+                    return true;
+                }
+
                 return TryOrigin(access.Expression, model, state, out origin);
 
             case IdentifierNameSyntax or GenericNameSyntax:
@@ -324,6 +370,24 @@ public static class TaintAnalyzer
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The field an assignment writes when this walk is allowed to follow it: a static field, or one
+    /// reached through <c>this</c>/<c>base</c>. A field of another object would need alias tracking, so it
+    /// is deliberately not followed.
+    /// </summary>
+    private static IFieldSymbol? TryOwnField(ExpressionSyntax left, SemanticModel model)
+    {
+        if (model.GetSymbolInfo(left).Symbol is not IFieldSymbol field) return null;
+
+        return left switch
+        {
+            IdentifierNameSyntax => field,
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax } => field,
+            MemberAccessExpressionSyntax when field.IsStatic => field,
+            _ => null,
+        };
     }
 
     private static bool IsSanitizer(InvocationExpressionSyntax invocation, SemanticModel model)
@@ -497,6 +561,9 @@ public static class TaintAnalyzer
         public List<MethodDeclarationModel> Models { get; } = [];
 
         public Dictionary<IMethodSymbol, MethodDeclarationModel> Index { get; } = new(SymbolEqualityComparer.Default);
+
+        /// <summary>The fields that hold tainted data, collected in pass one and seeded in pass two.</summary>
+        public Dictionary<IFieldSymbol, Origin> FieldOrigins { get; } = new(SymbolEqualityComparer.Default);
 
         public HashSet<string> Visited { get; } = new(StringComparer.Ordinal);
 

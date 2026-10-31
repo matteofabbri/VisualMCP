@@ -340,7 +340,7 @@ instead of ignoring the id: they are layout, team choices or semantic changes, n
 | Run Roslyn analyzers (StyleCop, Roslynator, etc.) | ✅ | `run_code_analysis` |
 | ReSharper-style inspections with Rider ids/severities | ✅ | `inspect_code` (packs: roslynator, netanalyzers, asyncfixer, meziantou, stylecop) |
 | **Whole-solution audit in one call** | ✅ | `solution_audit` — inspections grouped by id, compiler errors/warnings, most complex methods, largest files, project graph + cycles, first moves |
-| **Apply an inspection's fix** | ✅ | `apply_code_fix` — runs the pack's CodeFixProvider (dry run by default) |
+| **Apply an inspection's fix** | ✅ | `apply_code_fix` — runs the pack's CodeFixProvider (dry run by default), selected for the document's language: a `.vb` document gets the .NET analyzers' Visual Basic fixers |
 | Namespace coupling analysis | ✅ | `analyze_namespace_coupling` |
 | Circular dependency detection | ✅ | `analyze_circular_namespace_dependencies` |
 | DI container analysis | ✅ | `analyze_dependency_injection` |
@@ -611,9 +611,10 @@ instead of letting ILSpy fail inside the metadata.
 
 | Feature | Implemented | Notes |
 |---------|:---:|-------|
-| Create a task checklist | ✅ | `create_task_checklist` |
-| Update a task checklist | ✅ | `update_task_checklist` |
-| Kanban board (SQLite) | ✅ | `board_add`/`board_update`/`board_move`/`board_comment`/`board_list`/`board_show`/`board_board`/`board_delete` — 5 columns, priority, labels, assignee, comments, change history |
+| Create a task checklist | ✅ | `create_task_checklist` — on the board, as one card with the steps as a checklist; no file is written |
+| Update a task checklist | ✅ | `update_task_checklist` — by card id |
+| Durable project memory | ✅ | `board_remember` / `board_recall` / `board_forget` — one current version per topic, the previous one kept as history; pinned notes ride along in `board_brief` and `read_project_docs` |
+| Kanban board (SQLite) | ✅ | `board_add`/`board_update`/`board_move`/`board_comment`/`board_list`/`board_show`/`board_board`/`board_delete` — 5 columns, priority, labels, assignee, comments, change history; `board_add{steps}` puts a checklist in the card |
 | Plan a feature change (impact analysis) | ✅ | `plan_feature_change` |
 
 ---
@@ -644,7 +645,7 @@ instead of letting ILSpy fail inside the metadata.
 
 ## 17. Non-.NET toolchain: Kubernetes, Node and SQL (2026-10-31)
 
-Closes section 13 of [docs/gaps.md](docs/gaps.md): the "workaround" rows became tools, or a written boundary
+Closes the workaround table of [docs/gaps.md](docs/gaps.md): the "workaround" rows became tools, or a written boundary
 with the reason. 355 → **373 tools**.
 
 | Feature | Implemented | Notes |
@@ -688,26 +689,27 @@ tail, data flow and the ⚠️ security query. **387 → 397 tools.**
 
 | Feature | Implemented | Notes |
 |---------|:---:|-------|
-| Taint: request data reaching a dangerous operation | ✅ | `trace_data_flow` — sources (query/form/header/cookie/body/route data, `Console.ReadLine`, environment variables, model-bound action parameters) followed through assignments and call arguments into SQL (`FromSqlRaw`/`ExecuteSqlRaw`, Dapper, `CommandText`), `Process.Start`, File/Directory/Path, redirects, `Html.Raw`/`Response.Write`, HttpClient/WebRequest URLs; each flow carries the CWE, the sink and the path; the sanitizer list is explicit; `depth` follows the value into the in-solution methods it is passed to |
+| Taint: request data reaching a dangerous operation | ✅ | `trace_data_flow` — sources (query/form/header/cookie/body/route data, `Console.ReadLine`, environment variables, model-bound action parameters) followed through assignments, call arguments and a field of the same type (written in one method, read in another) into SQL (`FromSqlRaw`/`ExecuteSqlRaw`, Dapper, `CommandText`), `Process.Start`, File/Directory/Path, redirects, `Html.Raw`/`Response.Write`, HttpClient/WebRequest URLs; each flow carries the CWE, the sink and the path; the sanitizer list is explicit; `depth` follows the value into the in-solution methods it is passed to |
 | Which methods throw this exception | ✅ | `find_throw_sites` — direct throwers of the type (or of everything deriving from it), the callers that reach one with the shortest call path, and the catch clauses that stop the propagation (`transitive=false` for direct only) |
 | Context action: LINQ in both directions | ✅ | `context_action linq_query_to_method` / `linq_method_to_query` — from/where/orderby/select over one source; `join`, `let`, `group` and a second `from` are refused with the reason, because a wrong translation would be worse than none |
 | Context action: StringBuilder, patterns, extension block | ✅ | `concat_to_stringbuilder` (declaration, appends and reads rewritten together), `merge_patterns` (`x is A \|\| x is B` → `x is A or B`, and the `&&`/`and` form), `convert_to_extension_block` (a static class of `this` methods becomes a C# 14 `extension(T receiver)` block) |
 | Create from usage: the constructor | ✅ | `create_from_usage` — CS1729 adds the missing constructor with the argument types of the `new` expression |
-| JavaScript / TypeScript source | ✅ | `js_files` (imports, exports, functions, classes, JSX) and `analyze_js` (JS0001–JS0016) over masked source |
-| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates) and `analyze_markup` (HTML0001–HTML0014, CSS0001–CSS0008) with a quote-aware tag scanner |
-| YAML | ✅ | `yaml_files` (documents, top-level keys, `kind`/`apiVersion`/`metadata.name`) and `analyze_yaml` (YAML0001–YAML0008) |
+| JavaScript / TypeScript source | ✅ | `js_files` (imports, exports, functions, classes, JSX, the relative imports resolved into a module graph with its cycles) and `analyze_js` (JS0001–JS0017) over masked source |
+| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates, distinct classes, simple selectors) and `analyze_markup` (HTML0001–HTML0015, CSS0001–CSS0009) with a quote-aware tag scanner; the simple selectors (tag, `.class`, `#id`, `tag.class`) are matched against the page index (CSS0009, HTML0015), the rest of the selector grammar is not resolved |
+| YAML | ✅ | `yaml_files` (documents, top-level keys, `kind`/`apiVersion`/`metadata.name`) and `analyze_yaml` (YAML0001–YAML0012, including the manifest identity and container checks) |
 | F# | ✅ | `fsharp_files` (modules, types, functions, opens) and `analyze_fsharp` (FS0001–FS0010); no semantic model — the scanner resolves nothing |
 
 What stays a boundary rather than a row: a scanner proves the shape of a line, never a binding, a type
 or a schema; ReSharper's proprietary ~2500-id inspection catalogue is a closed-source reimplementation,
-not a tool; and the data-flow walk does not follow a value through a field, a database or a queue.
+not a tool; and the data-flow walk does not follow a value through a field of another object, a database
+or a queue.
 
 ---
 
 
-## 20. Section 9: conventional commits and reviews beyond GitHub (2026-10-31)
+## 20. Version control: conventional commits and reviews beyond GitHub (2026-10-31)
 
-Section 9's last ❌ row closes, and the review loop stops being GitHub-only. **397 → 398 tools.**
+The last ❌ row of the version-control section closes, and the review loop stops being GitHub-only. **397 → 398 tools.**
 
 | Feature | Implemented | Notes |
 |---------|:---:|-------|
@@ -727,7 +729,53 @@ small system drive.
 
 ---
 
+## 22. The board as the source of truth (2026-10-31)
+
+**399 → 401 tools.** The board stops being a place to write things down and becomes the place an agent
+asks what to do next.
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| One-call answer to "what is missing / what comes next" | ✅ | `board_brief` — per-column counts, the card to pick up (in_progress → review → todo → backlog, then by priority), every open card with its age, idle days and a stale flag, the cards that need a look, and the one call that goes next. Deliberately compact: titles and signals, never whole descriptions |
+| The board cross-checked against the build | ✅ | `board_audit` — every open card's snake_case names are matched against the live catalogue (tools **and** the ~40 context-action ids, so a capability that lives inside `context_action` counts) and the paths it names are checked on disk: `closure-candidate` / `partly-shipped` (with the names this build does not have) / `open` / `no-signal`, each with its evidence. `close=true` moves the candidates to done with the evidence as a comment — never silently |
+| Definition of done recorded, not implied | ✅ | `board_move` gains `note=`/`author=`: closing a card appends the evidence (what shipped, which test proved it) as a comment instead of leaving it to the reader |
+| Discovery, not just documentation | ✅ | `capability_report` answers what EXISTS and now points at the board for what is missing; `read_project_docs` attaches a `board` block (counts + the card to pick up) to every answer that is not empty; the server instructions, the installed `AGENTS.md` block and every `board_*` description state that the board — not `docs/gaps.md`, a backlog file or a memory note — is the source of truth |
+
+---
+
+## 23. Visual Basic: the last two C#-shaped surfaces (2026-10-31)
+
+Section 1.2 of the gap inventory closed in two batches; this is the second. No new tool — `context_action`
+and `apply_code_fix` learn the document's language. **401 tools (unchanged).**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Context actions on a `.vb` document | ✅ | `context_action` routes `.vb` to `VbContextActionService`: **33 of the 41 ids** — `import_type` (`Imports`), the eight guards (`If x Is Nothing Then Throw …`, `String.IsNullOrEmpty`, `Count = 0`, `ContainsKey`, `[Enum].IsDefined`, the index bound), `wrap_in_try_catch`/`_try_finally`/`_if`/`_using`/`_region`, `concat_to_interpolated`/`interpolated_to_concat`, digit separators both ways, `name:=value` → positional, `Dim x As T` ↔ `Dim x`, `Await x.ConfigureAwait(False)`, one `Dim` per declarator, `&=` → `StringBuilder.Append`, nested `If` ↔ `AndAlso`, `If x IsNot Nothing Then x.M()` → `x?.M()`, `If`/`ElseIf` → `Select Case`, `From … Select` ↔ `Where(Function(x) …)`, `For Each` ↔ indexed `For`, the descending `For` — each a text edit under the same compiler gate, preview and edit history; the 8 C#-syntax ids (raw/verbatim strings, braces, `#nullable`, patterns, the C# 14 extension block) are refused with the reason |
+| `apply_code_fix` on a VB project | ✅ | analyzers and fixers are selected by `AnalyzersFor(project.Language)` / `FixersFor(language)`; the .NET analyzers' `vb` assembly ships 100+ `CodeFixProvider`s (`Basic…Fixer`), and the service tries each fixer that declares the id until one registers a fix at the location. Before this the C# fixer was picked first for a VB document and did nothing |
+
+The remaining boundary is the refactoring catalogue: its C#-syntax members (primary constructors, records,
+file-scoped namespaces, expression bodies, `using` static, top-level statements) refuse with that reason,
+which is what a C# idiom *is* — it has no VB spelling to implement.
+
+---
+
+## 24. Memory on the board, and plans that are cards (2026-10-31)
+
+**401 → 404 tools.** The board stops being only the plan: a durable fact lives there too, and the two
+checklist tools stop writing a Markdown file.
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Durable project memory | ✅ | `board_remember` / `board_recall` / `board_forget` — a topic has one current version; a new body supersedes the previous one (kept as history) instead of duplicating it, an identical body is a no-op, `forget` retires a topic without losing its versions. `pinned` notes ride along in `board_brief` and in the `board` block of `read_project_docs` |
+| The plan is a card | ✅ | `create_task_checklist{title, steps}` creates ONE card whose description holds the steps as a GFM checklist — no file is written; `update_task_checklist{id, done: [...]}` ticks them, `board_add{title, steps: [...]}` does the same on a card described by hand. `TaskChecklistService` no longer touches the disk |
+| The existing file notes migrate | ✅ | `MemoryImporter` reads `~/.claude/projects/<slug>/memory` and `~/.zcode/cli/memories/projects/<name>-*/memory`, then writes each note through `board_remember` (`topic = imported-<type>-<name>`, kind mapped from the frontmatter `type`), keyed on the body so a second pass imports nothing; the files stay where they are, they simply stop being the source |
+| The file route is refused | ✅ | both routing hooks (`hooks/pre-tool-use.py` for POSIX, `.ps1` for Windows) deny a `Write`/`Edit` into a memory store (`MEMORY.md`, `~/.zcode/.../memories`, `~/.claude/projects/<slug>/memory`) and the CREATION of a plan-like `.md` at the repository root or in `docs/`, naming `board_remember` / `create_task_checklist`; editing a document that already exists is never refused |
+
+---
+
 ## Summary by Category
+
+
 
 Counting: one ✅ row and one ❌ row per section table; the 🔧 (partial) and 💀 (out of scope) rows do not enter
 the total, and every row below is the count of its section.
@@ -762,7 +810,7 @@ and formatting, the "create" family, the inspection baseline, seven analyses), t
 `launch_settings`, `publish_profile`, `nuget_sources`), the **10 of section 19** (`trace_data_flow`,
 `find_throw_sites`, `js_files`, `analyze_js`, `markup_files`, `analyze_markup`, `yaml_files`,
 `analyze_yaml`, `fsharp_files`, `analyze_fsharp`) or `commit_lint` (section 20), nor `disk_usage`
-(section 21). The live count is `capability_report`: **399 tools**.
+(section 21), nor the board pair of section 22. The live count is `capability_report`: **404 tools**.
 
 ---
 
@@ -788,7 +836,7 @@ What remains, in order of impact:
 | Inspection administration (per-scope severity, suppressions, `.DotSettings`, daemon with warm compilation) | 🟡 Medium | ✅ closed: `configure_inspection`, `suppress_finding`, `read_dot_settings`, `custom_inspections`, `naming_rules`, `find_spelling_issues`, `background_analysis`/`analysis_findings`; only ReSharper's proprietary catalogue remains outside |
 | Local history, three-way merge assistance, GitLab/Azure DevOps | 🟢 Low | ✅ closed on 2026-10-31: `local_history`, `git_conflicts` (conflict model), `git_rebase action=plan`, `git_patch`, `git_host` (GitLab/Azure DevOps/Bitbucket), inline review and `code_review` |
 | Minor refactorings: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Low | ✅ closed on 2026-10-31 (`extract_members_to_partial`, `inline_field`, `transform_parameters`, `extension_to_static`, `invert_boolean`, `make_non_static`, `move_type_to_nested_scope`, `generify`) |
-| Taint analysis and quality trend between commits | 🟡 Medium | ❌ not closable with an isolated tool: it needs a data-flow engine, and respectively the findings saved per revision (see §12 of gaps.md) |
+| Taint analysis and quality trend between commits | 🟡 Medium | ❌ not closable with an isolated tool: it needs a data-flow engine, and respectively the findings saved per revision (see §11 of gaps.md) |
 | Real-time collaborative editing | 💀 | Out of scope: shared transport and editor surface, not a local stdio tool |
 
 The complete inventory — language by language and area by area, with what exists today, what exactly is

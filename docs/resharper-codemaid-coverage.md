@@ -3,22 +3,19 @@
 Comparison of VisualMCP tools against ReSharper, Rider and CodeMaid.
 Legend: ✅ implemented · ⚠️ partial · ❌ missing · 💀 not applicable to a headless MCP server
 
-Last updated: 2026-10-31. This revision closes the four points the previous one left open.
+Last updated: 2026-10-31 — **404 tools** in the running build; `capability_report` prints the live count.
+This is the ✅ side of the comparison: each row names a capability that exists, the tool that provides it,
+and the guarantee — what that tool proves and where it stops. The ❌/⚠️ side is
+[What is missing — the gap inventory](gaps.md); a row that reads "scanned", "masked" or "candidate" is
+exactly the boundary it sounds like, and the inventory explains why each one is where it is.
 
-- **Language and platform reach.** JavaScript/TypeScript, HTML/CSS and YAML now have their own scanned
-  layer next to SQL — `js_files`/`analyze_js`, `markup_files`/`analyze_markup`,
-  `yaml_files`/`analyze_yaml` — and F# a declaration scanner, `fsharp_files`/`analyze_fsharp`. Each
-  masks comments and literals first and states what it proves; none claims to be a compiler.
-- **The context-action long tail.** `context_action` gained `merge_patterns` (a chain of `is` checks
-  into one `or`/`and` pattern), `concat_to_stringbuilder`, `linq_query_to_method`,
-  `linq_method_to_query` and `convert_to_extension_block` (C# 14 extension members), and
-  `create_from_usage` added CS1729 (a missing constructor).
-- **Data-flow analysis.** `trace_data_flow` is a taint walk from request sources to the SQL, process,
-  file, redirect, XSS and SSRF sinks, through the in-solution calls a value is passed to;
-  `find_throw_sites` answers the "methods that throw X" semantic query — direct throwers, the callers
-  that reach one with the shortest path, and the methods that catch it as a boundary.
-- **Inspection administration** was already closed and is unchanged: the only absence left is
-  ReSharper's proprietary id catalogue, which is a boundary of the product, not a tool gap.
+**A limit is a row, never a paragraph.** Whatever is not covered lives in the cell it belongs to — a ⚠️
+row in the feature table, a sentence in the "Where it stops" column — so a table that reads ✅ never has
+an exception explained below it.
+
+## Contents
+
+[ReSharper](#resharper) · [CodeMaid](#codemaid) · [Other languages and file kinds](#other-languages-and-file-kinds) · [Revision log](#revision-log)
 
 ---
 
@@ -34,8 +31,8 @@ Last updated: 2026-10-31. This revision closes the four points the previous one 
 | Implementations / derived types | `find_implementations`, `find_derived_types` | ✅ |
 | Symbol info / type members | `get_symbol_info`, `get_type_members` | ✅ |
 | Go to declaration, with the body | `read_symbol` | ✅ |
-| Full-text search + regex | `search_text`, `text_index` (FTS5) | ✅ |
-| **Structural search & replace** | `structural_search` | ✅ AST pattern with `$holes$`, compiler-gated rewrite |
+| Full-text search + regex | `search_text`, `search_code`, `text_index` | ✅ raw matching lines, the same regex resolved to the declaration that contains each hit, and a persisted FTS5 index |
+| **Structural search & replace** | `structural_search` | ✅ AST pattern with `$holes$`, compiler-gated rewrite, C# and Visual Basic |
 | Search by semantic query ("methods that throw X") | `find_throw_sites` | ✅ the direct throwers of a type (or of everything derived from it), the callers that reach one with the shortest call path, and the methods that catch it as a boundary |
 | Go to file by fuzzy name / Search Everywhere / MRU | `find_file` | ✅ fuzzy and CamelHumps file-name search; the MRU list and the popup are the client's |
 
@@ -43,7 +40,7 @@ Last updated: 2026-10-31. This revision closes the four points the previous one 
 
 | Feature | Tool | Status |
 |---|---|---|
-| Rename (preview + apply) | `preview_rename`, `apply_rename` | ✅ |
+| Rename (preview + apply) | `preview_rename`, `apply_rename`, `rename_namespace` | ✅ symbols across the solution, and a namespace's last segment with every declaration and using updated |
 | Extract method / interface / class / superclass | `extract_method`, `extract_interface`, `extract_class`, `extract_superclass` | ✅ |
 | Extract variable / field / parameter / part of string | `introduce_variable`, `introduce_field`, `introduce_parameter`, `introduce_part_of_string` | ✅ |
 | Inline method / variable / parameter / class / field | `inline_symbol`, `inline_parameter`, `inline_class`, `inline_field` | ✅ |
@@ -67,7 +64,7 @@ Last updated: 2026-10-31. This revision closes the four points the previous one 
 
 All ~51 refactorings of Rider's "main set" are implemented; the table above is the tool for each one.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
-`simplify_code` (87 IDE ids) and `simplify_vb_code` (15 VB ids), the fixes come from `apply_code_fix`,
+`simplify_code` (97 IDE ids) and `simplify_vb_code` (15 VB ids), the fixes come from `apply_code_fix`,
 and 41 context-action ids are applied directly by `context_action` — the guards, the wrap actions, the
 statement and declaration shapes, the string conversions, LINQ in both directions, StringBuilder,
 pattern merging and the extension block, named in its table below.
@@ -78,7 +75,7 @@ pattern merging and the extension block, named in its table below.
 |---|---|---|
 | Implement missing interface/abstract members | `implement_members` | ✅ compiler-gated |
 | Create class/member from usage | `create_from_usage` | ✅ the six declaration shapes the compiler can ask for — CS1061 member, CS0117 static member, CS1501/CS7036 overload, CS1729 constructor, CS0246 type, CS0103 method — each built from the call site and compiler-gated |
-| Context actions outside the style/refactoring families | `context_action` | ✅ 41 action ids: import, eight argument guards, five wrap actions, the statement/declaration family, nullable migration, the string re-encodings, LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block — see [the 307-action census](resharper-context-actions.md) |
+| Context actions outside the style/refactoring families | `context_action` | ⚠️ 41 of the 307 actions in the census: import, eight argument guards, five wrap actions, the statement/declaration family, nullable migration, the string re-encodings, LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block. **Visual Basic** implements the 33 ids that have a VB spelling and refuses the C#-syntax ones with the reason. What remains is the proprietary tail — actions whose condition is a type-system fact rather than a shape — and the IDE-only ones; see [the census](resharper-context-actions.md) |
 | Generate XML documentation | `generate_docs` | ✅ summary/param/typeparam/returns |
 | Generate constructor / Equals / GetHashCode / ToString | `generate_members` | ✅ |
 | Implement INotifyPropertyChanged | `implement_inpc` | ✅ |
@@ -107,6 +104,26 @@ pattern merging and the extension block, named in its table below.
 | Per-file snapshots independent of commits | `local_history` | ✅ snapshot/history/diff/restore in the solution store |
 | Undo of a write this server made | `edit_history`, `revert_edit` | ✅ |
 
+### Version control & collaboration
+
+| Feature | Tool | Status |
+|---|---|---|
+| Working-tree state, diff and history | `git_status`, `git_diff`, `git_log`, `git_show`, `git_blame` | ✅ read-only; a diff of the working tree, the index or any ref/range, a per-file stat, a commit in full, and blame over a line range |
+| Stage, commit, amend, squash | `git_stage`, `git_commit`, `git_amend`, `git_squash` | ✅ a commit can stage everything first, and `git_commit conventional=true` refuses a message that breaks Conventional Commits |
+| Branches, tags, remotes, sync | `git_branch`, `git_create_branch`, `git_tag`, `git_remote`, `git_sync` | ✅ fetch/pull/push; a forced push uses `--force-with-lease` behind `confirm=true` |
+| Merge, cherry-pick, revert, reset | `git_merge`, `git_cherry_pick`, `git_revert`, `git_reset` | ✅ the strategies of each operation, abort/skip/continue where git has them, and a hard reset behind `confirm=true` |
+| **The conflict model** | `git_conflicts` | ✅ the `<<<<<<<` blocks parsed into hunks with all three sides (`ours`, `theirs`, the `\|\|\|\|\|\|\|` base with diff3), resolved per hunk or per file (`ours`/`theirs`/`both`/`base`/`custom`) and staged once no marker remains |
+| Rebase, including an interactive plan | `git_rebase` | ✅ start/continue/abort/skip; `action=plan` takes a JSON todo list (`pick`/`reword`/`squash`/`fixup`/`drop` with messages) through `GIT_SEQUENCE_EDITOR` and never opens an editor |
+| Shelves: named patches and the anonymous stash | `git_patch`, `git_stash` | ✅ a patch is created from the working tree, the index or any revision/range, listed, shown, applied with `--check`/`--3way`/reverse and deleted; the stash keeps the quick anonymous case |
+| Worktree, bisect, submodule | `git_worktree`, `git_bisect`, `git_submodule` | ✅ linked working trees, a binary search that reports the first bad commit, and submodule status/update/init/sync/deinit |
+| Commit convention as data | `commit_lint` | ✅ Conventional Commits linted from a message, one revision or a range — the parsed type/scope/description/breaking/footers plus every violation with its rule id, with no Node toolchain; merge and `git revert` messages exempt |
+| GitHub | `gh_repo`, `gh_pr`, `gh_issue`, `gh_release`, `gh_actions`, `gh_secret`, `github` | ✅ repositories, pull requests through their whole lifecycle, issues, releases, Actions runs, repository secrets, plus the raw `gh` escape hatch |
+| GitHub review with inline comments | `gh_pr action=review`/`review-comments`/`checks` | ✅ comments anchored to `path`/`line`/`side`, approve/request-changes/comment, the inline comments a PR already carries, and the check runs on its head |
+| Branch protection and rulesets | `gh_branch_protection` | ✅ protection, required status checks and the repository rulesets that apply |
+| GitLab, Azure DevOps, Bitbucket Cloud | `git_host` | ✅ merge/pull requests, comments, merge, `review-pr`, close/reopen/update, issues/work items and pipelines; provider and coordinates parsed from the remote, credentials from `GITLAB_TOKEN`/`AZURE_DEVOPS_EXT_PAT`/`BITBUCKET_*`; GitLab's missing request-changes vote is stated, not faked |
+| The review brief for a diff | `code_review` | ✅ changed files by kind, the risk checklist, new TODO/FIXME markers with their line, the worst methods of each changed C# file, and optionally the inspection findings inside them |
+| Real-time collaborative editing | — | 💀 a shared transport and an editor surface, not a tool a local stdio server can offer ([gaps.md §10](gaps.md#10-ui-bound-features--not-applicable-by-design)) |
+
 ### Analysis & inspections
 
 | Feature | Tool | Status |
@@ -115,20 +132,20 @@ pattern merging and the extension block, named in its table below.
 | Inspections from the shipped packs | `inspect_code` | ✅ ~800 ids from 5 packs |
 | Apply an inspection's own code fix | `apply_code_fix` | ✅ dry run, FixAll by scope |
 | **Baseline: only the findings a change introduced** | `inspection_baseline` | ✅ |
-| ReSharper's proprietary inspection set (~2500) | `resharper_inspection_map` | ⚠️ overlap only: 8 ids are implemented natively under ReSharper's names in the opt-in `rider` pack, ~30 map to an existing capability, and the map says which |
+| ReSharper's proprietary inspection set (~2500) | `resharper_inspection_map` | ⚠️ overlap only: 8 ids are implemented natively under ReSharper's names in the opt-in `rider` pack, ~30 map to an existing capability, and the map says which. The rest are closed-source analyzers over JetBrains' PSI — a reimplementation of each, not a registration |
 | Severity configuration / suppressions / `.DotSettings` | `configure_inspection`, `suppress_finding`, `read_dot_settings` | ✅ severity per solution/project/file, a `#pragma` or `SuppressMessage` suppression, and reading the team's `.DotSettings` layers (its ids are reported, not applied to Roslyn) |
 | Solution-wide background analysis | `background_analysis`, `analysis_findings` | ✅ a warm loop re-runs the packs when the solution changes; the findings are served from its cache |
 | Dead code, unused symbols | `find_dead_code`, `find_unused_symbols` | ✅ |
-| Code smells, async anti-patterns | `find_code_smells`, `find_async_anti_patterns` | ✅ |
+| Code smells, async and performance anti-patterns | `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns` | ✅ the semantic shapes — blocking calls and `async void`, a concatenation, a LINQ materialiser or a collection allocated inside a loop |
 | Complexity (cyclomatic, cognitive, Halstead, Big-O) | `complexity_report`, `get_complexity_hotspots`, `analyze_complexity`, `get_metrics` | ✅ |
 | Reduce complexity (applies refactorings) | `reduce_complexity` | ✅ |
 | Fix complexity across the solution in one call (rank + reduce + report) | `fix_complexity` | ✅ |
 | Duplicate code (clone detection) | `find_duplicate_code` | ✅ |
-| Security rules | `find_security_issues`, `trace_data_flow` | ✅ the pattern rules (SQL injection, command injection, weak crypto, secrets, deserialization, SSRF, XXE, TLS, path traversal) plus a taint walk from request data to the SQL, process, file, redirect, XSS and SSRF sinks, across the calls the value is passed into |
+| Security rules | `find_security_issues` | ✅ SQL injection, command injection, weak crypto, secrets, deserialization, SSRF, XXE, TLS validation, path traversal |
 | DI analysis | `analyze_dependency_injection` | ✅ |
 | Project/namespace dependencies, cycles, coupling | `analyze_dependencies`, `analyze_circular_namespace_dependencies`, `analyze_namespace_coupling` | ✅ |
 | **Layer rules (a dependency pointing up)** | `check_layer_violations` | ✅ |
-| **Dependency graph as a diagram** | `export_dependency_graph` | ✅ DOT/Mermaid |
+| **Dependency graph as a diagram** | `export_dependency_graph` | ✅ DOT/Mermaid, at project, namespace and type level |
 | **Cohesion (LCOM4)** | `get_cohesion_metrics` | ✅ |
 | **Test quality** | `analyze_test_quality` | ✅ |
 | **Missing validation (parameters and DTOs)** | `find_missing_validation` | ✅ unguarded public parameters, plus DTO-shaped public classes/records whose properties carry no `System.ComponentModel.DataAnnotations` validation |
@@ -136,8 +153,11 @@ pattern merging and the extension block, named in its table below.
 | **Breaking changes in the public API** | `find_breaking_changes` | ✅ vs a git ref |
 | **Quality trend between two revisions** | `get_quality_trend` | ✅ the same syntactic rule set on both sides (average complexity, methods over 10/20, long methods, TODOs), with a verdict and the files that moved most; `to=worktree` measures the uncommitted tree |
 | Value tracking / data-flow origin-destination | `track_value` | ✅ definitions (writes, including the declaration) and uses (reads), each with file:line and the member it happens in |
-| **Taint: request data reaching a dangerous operation** | `trace_data_flow` | ✅ sources (query/form/header/cookie/body/route data, console and environment input, model-bound action parameters) to sinks, with the CWE, the path of assignments and calls, and a documented sanitizer list |
-| **Which methods throw this exception** | `find_throw_sites` | ✅ direct throwers, transitive callers with the shortest call path, and the catch clauses that stop the propagation |
+| **Taint: request data reaching a dangerous operation** | `trace_data_flow` | ⚠️ sources (query/form/header/cookie/body/route data, console and environment input, model-bound action parameters) to the SQL, process, file, redirect, XSS and SSRF sinks, with the CWE, the path of assignments and calls, and an explicit source/sink/sanitizer table. It follows locals, parameters and call arguments to a caller-set depth, plus a value stored in a field of the same type (written by one method, read by another); a field of another object, a database or a queue is not followed, and the sanitizer list — parsed numbers, GUIDs, `Path.GetFileName`, encoded strings — is what ends a flow. Candidates to check, not proofs |
+| Reflection and framework entry points | `find_reflection_usage`, `framework_entry_points` | ✅ the names a reflective lookup asks for and whether they resolve in the solution, and the members a framework calls by convention — what a static call graph cannot see |
+| External API surface actually used | `find_external_usages` | ✅ which third-party assemblies the solution uses, with call sites and a per-assembly summary |
+| Churn × complexity | `git_churn_hotspots` | ✅ git history joined with the complexity of each file's worst method |
+| Generated sources | `list_generated_sources` | ✅ the generators a project references and the syntax trees they produce — trees that exist in the compilation but not as documents |
 | Whole-solution report | `solution_audit` | ✅ |
 | Change plan for a feature | `plan_feature_change` | ✅ |
 | Analyze a stack trace | `analyze_stack_trace` | ✅ frames resolved to file:line, grouped by file |
@@ -149,43 +169,25 @@ pattern merging and the extension block, named in its table below.
 | Run tests, structured results | `run_tests` | ✅ `dotnet test`, project filter, raw args |
 | Per-class/per-method coverage | `get_test_coverage_map` | ✅ coverlet, branch coverage included |
 | Run one test / rerun failed | `run_test`, `rerun_failed` | ✅ TRX result, and exactly the failures of the last run |
+| Test discovery, with parameterized data | `list_tests` | ✅ class, method, framework, and the `[InlineData]`/`[TestCase]`/`[DataRow]` rows; `MemberData`/`TestCaseSource`/`DynamicData` named as dynamic |
 | Debug a test / continuous testing / covering tests | `debug_test`, `continuous_testing`, `tests_covering_symbol` | ✅ the test host under the DAP debugger, run-on-save, and the test methods that reference a symbol |
 | Test scaffolding | `generate_tests` | ✅ xUnit, compiler-gated |
-| Mutation testing, flaky detection, affected tests | `run_mutation_tests`, `find_flaky_tests`, `run_affected_tests` | ✅ Stryker score and survivors, outcome changes between runs, and the tests a diff affects |
+| Mutation testing, flaky detection | `run_mutation_tests`, `find_flaky_tests` | ✅ Stryker score and survivors; outcome changes between runs, apart from the tests that never passed |
+| Which tests a change affects | `test_impact_analysis`, `run_affected_tests` | ✅ git diff → the symbols the changed files declare → the test methods that reference them, and the same filter executed in one call |
+| Behaviour preserved by a change | `verify_change` | ✅ the suite on the working tree and on the base revision in a detached worktree, diffed test by test: regressions, fixes, new tests, verdict |
 
 ### Decompilation & profiling
 
 | Feature | Tool | Status |
 |---|---|---|
-| Inspect/decompile an assembly or a type | `inspect_assembly`, `decompile_type`, `decompile_assembly` | ✅ |
-| NuGet package API / type source | `inspect_package`, `decompile_package_type` | ✅ |
+| Inspect/decompile an assembly or a type | `inspect_assembly`, `inspect_assemblies`, `decompile_type`, `decompile_types`, `decompile_assembly` | ✅ public API from metadata, or the C# from ILSpy — one type or a whole page of them |
+| NuGet package API / type source | `inspect_package`, `inspect_packages`, `decompile_package_type`, `find_assembly_api` | ✅ the package's DLL located in the cache and its API read, without a path |
 | Pseudocode view (metacode) | `metacode_translate`, `decompile_to_metacode`, `metacode_compare` | ✅ |
 | Native binary → pseudocode | `analyze_native_binary` (Ghidra) | ✅ |
 | Navigate inside decompiled code | `assembly_workspace` | ✅ search, source, references and outline over a Roslyn workspace keyed on the MVID; rename is not possible (there is no source to write) |
 | IL viewer | `disassemble` | ✅ the IL of one type or method, with tokens resolved against the metadata |
-| CPU/memory/I-O diagnosis | `profile_*` (20+ tools) | ✅ |
+| CPU/memory/I-O diagnosis | `profile_*` (27 tools) | ✅ sampling, allocation sites, GC, heap retention, thread-pool and lock analysis, async and database event analysis, instrumentation, plus the verdict tools (`profile_slowdown`, `profile_threadpool`, `profile_review_change`, `profile_root_cause`) |
 | Interactive timeline, object-graph explorer | `profile_*` | 💀 the data is a tool result; the client draws the timeline and the graph |
-
----
-
-## Other languages and file kinds
-
-The engine's semantic model is Roslyn, over C# and Visual Basic. The other languages a repository
-carries get a **scanned** layer — masked source, the rules that need no type information, an inventory
-tool — which is the same contract SQL, XAML and Razor already had. Each row states what its layer
-actually proves.
-
-| Language / kind | Tool | What it proves |
-|---|---|---|
-| JavaScript, TypeScript, JSX, TSX | `js_files`, `analyze_js` | modules imported and exported, functions and classes, JSX presence; 16 rules over masked source — `eval`, `new Function`, `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")` |
-| HTML, CSS, SCSS | `markup_files`, `analyze_markup` | tags read by a quote-aware scanner, with balance, duplicate ids, `alt`, `lang`, viewport, label binding, nested forms, deprecated elements, inline handlers, `target="_blank"`, empty href, `button` type, control names, `http://` subresources; for CSS `!important`, ID selectors, empty rules, `@import`, duplicate selectors, unbalanced braces, `javascript:` URLs, `expression()` |
-| YAML | `yaml_files`, `analyze_yaml` | documents and top-level keys, and for a Kubernetes manifest its `kind`/`apiVersion`/`metadata.name`; tabs in indentation, duplicate keys, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collections, an alias with no anchor |
-| F# | `fsharp_files`, `analyze_fsharp` | modules, types, top-level functions and opens — the declaration inventory F# has no symbol index for; tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open` |
-| SQL | `sql_files`, `analyze_sql` | statements, verbs and tables; the lexical, safety, security and performance rules SQL0001–SQL0010 |
-
-What none of them does: resolve a symbol, type-check an expression, validate against a schema or render
-a page. `node_typecheck` and `node_lint` run the project's own `tsc`/`eslint` when a JavaScript project
-has them installed; `build_project` returns the F# compiler's own `FS####` diagnostics.
 
 ---
 
@@ -203,60 +205,33 @@ has them installed; `build_project` returns the F# compiler's own `FS####` diagn
 
 ---
 
-## Remaining boundaries
+## Other languages and file kinds
 
-The full inventory — every missing capability with what exists instead and the reason it matters — is
-[What is missing — the gap inventory](gaps.md). What is left on this page is not a list of missing
-tools but the reach of the ones that exist:
+The engine's semantic model is Roslyn, over C# and Visual Basic. The other languages a repository
+carries get a **scanned** layer — masked source, the rules that need no type information, an inventory
+tool — which is the same contract SQL, XAML and Razor already had. Each row states what its layer proves
+and, in the last column, exactly where it stops.
 
-1. **Depth of the scanned languages.** JavaScript/TypeScript, HTML/CSS, YAML and F# are read as text
-   with comments and literals masked. A rule proves the *shape* of a line; nothing resolves a module,
-   a type, a CSS selector or a YAML schema. **F#** in particular has no semantic model — it is not a
-   Roslyn language — so there is no symbol navigation in it, only the declaration inventory
-   `fsharp_files` returns and the compiler's own diagnostics from `build_project`.
-2. **The rest of the context-action family.** `context_action` implements 41 of the 307 actions in the
-   census — the guards, the wrap actions, the statement and declaration shapes, nullable migration, the
-   string conversions, LINQ in both directions, StringBuilder, pattern merging and the extension block.
-   What remains is the proprietary tail: actions whose condition is a type-system fact rather than a
-   shape, and the IDE-only ones.
-3. **Inspection administration** is closed — severity per scope, suppressions, custom rules, the
-   `.DotSettings` layers, naming rules and a warm background loop all exist. The only absence is
-   ReSharper's own ~2500-id catalogue, a closed-source reimplementation and not a tool gap.
-4. **The reach of the data-flow walk.** `trace_data_flow` follows locals, parameters and call arguments
-   to a caller-set depth, with an explicit source/sink/sanitizer table. A value parked in a field, a
-   database or a queue is not followed, and the sanitizer list — parsed numbers, GUIDs,
-   `Path.GetFileName`, encoded strings — is what ends a flow. It reports candidates to check, not
-   proofs.
+| Language / kind | Tool | What it proves | Where it stops |
+|---|---|---|---|
+| JavaScript, TypeScript, JSX, TSX | `js_files`, `analyze_js` | modules imported and exported, functions and classes, JSX presence, the relative imports resolved into a module graph with its import cycles; 17 rules over masked source — `eval`, `new Function`, `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")`, an unresolvable relative import | no parser and no type model: symbols, references, rename and refactorings inside JS/TS are absent, JSX/TSX components, props/state and bundler configuration are not analysed, and a package specifier is not resolved — only `./` and `../` are checked against the file system. `node_typecheck` and `node_lint` run the project's own `tsc`/`eslint` |
+| HTML, CSS, SCSS | `markup_files`, `analyze_markup` | tags read by a quote-aware scanner, with balance, duplicate ids, `alt`, `lang`, viewport, label binding, nested forms, deprecated elements, inline handlers, `target="_blank"`, empty href, `button` type, control names, `http://` subresources; for CSS `!important`, ID selectors, empty rules, `@import`, duplicate selectors, unbalanced braces, `javascript:` URLs, `expression()` | no DOM and no selector matching against a document: a tag is scanned, not parsed into a tree, so class/id selectors are not resolved against the page and CSS-in-JS, CSS isolation and formatting are not analysed |
+| YAML | `yaml_files`, `analyze_yaml` | documents and top-level keys, and for a Kubernetes manifest its `kind`/`apiVersion`/`metadata.name`; tabs in indentation, duplicate keys, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collections, an alias with no anchor; then the manifest shape — kind without apiVersion or the reverse, metadata with no name, a container with no image, two containers with the same name | no schema validation against Kubernetes, Helm or a CI schema, and not a YAML parser: the manifest rules check identity and container shape, not the schema, and an indentation-aware line scan leaves nested-value typing and anchors beyond a missing definition unchecked |
+| F# | `fsharp_files`, `analyze_fsharp` | modules, types, top-level functions and opens — the declaration inventory F# has no symbol index for; tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open` | no semantic model — F# is not a Roslyn language — so no symbols, references, rename, refactorings, inspections or complexity; the scanner resolves nothing, and `build_project` returns only the compiler's own `FS####` diagnostics |
+| SQL | `sql_files`, `analyze_sql` | statements, verbs and tables; the lexical, safety, security and performance rules SQL0001–SQL0010 | not a dialect parser: no schema object model, no validation against a database, no execution, no query plan, no formatting, and SQL inside a C# string is a `trace_data_flow` sink rather than parsed text |
 
-Rows that used to be here and closed on 2026-10-31, each verified against the live tool inventory:
-the **debugger** (16 `debug_*` tools over netcoredbg), the **test workflow** (`run_test`,
-`continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `debug_test`),
-**decompiled code as a workspace** (`assembly_workspace`), the **diagram and exploration** tools
-(`call_graph`, `sequence_diagram`, `control_flow_graph`, `find_todos`, `find_endpoints`, `find_file`,
-`solution_map`), the **smaller refactorings** (`transform_parameters`, `make_non_static`,
-`move_type_to_nested_scope`, `generify`, `remove_params`, `extension_to_static`, `invert_boolean`,
-`inline_field`, `extract_members_to_partial`), and the last ReSharper/CodeMaid rows: **templates**
-(`templates`), **cleanup profiles** (`code_cleanup profile=`), **CodeMaid's layout rules**
-(`layout_code`), **fuzzy symbol search** (`find_symbol`), ten more **context actions** (merge/split
-conditions, a null check joined with its use, `var` and back, split declaration, remove braces, nullable
-migration, digit separators, `ConfigureAwait(false)`) and the **create-from-usage long tail**
-(CS0117, CS1501, CS7036 next to CS1061/CS0246/CS0103).
+---
 
-This revision added the last of each open family: `js_files`/`analyze_js`, `markup_files`/
-`analyze_markup`, `yaml_files`/`analyze_yaml`, `fsharp_files`/`analyze_fsharp`, `trace_data_flow` and
-`find_throw_sites` (ten tools, 387 → 397), the five context-action ids above and CS1729 in
-`create_from_usage`; then `commit_lint` (Conventional Commits as data, and the gate on
-`git_commit conventional=true`) brought the count to **398**, and `disk_usage` — the disk report, safe
-cleanup and redirect policy of `CAPABILITY_MAP.md` §21 — to **399**.
+## Revision log
 
-The VCS row that used to be here closed on 2026-10-31: `git_conflicts` is the 3-way merge assistant
-(the hunks as data, resolved per side and staged), `git_rebase action=plan` is the interactive rebase
-without an editor, `git_patch` is shelving as named patches, `git_host` covers GitLab, Azure DevOps
-and Bitbucket next to the GitHub `gh_*` tools — now including `review-pr`, `close-pr`, `reopen-pr` and
-`update-pr`, so the review loop is not GitHub-only — and `commit_lint` enforces the commit convention
-without a Node toolchain. Real-time co-editing remains out of scope by design
-(a shared transport, not a tool).
+The batches that changed this page or the count it quotes, newest first. A count is the live inventory at
+the end of the batch (`capability_report` prints the current one); the product-wide numbered log, with
+every batch and the rows it closed, is [gaps.md §14](gaps.md#14-revision-log).
 
-UI-bound features (editor, completion popups, tool windows, on-save cleanup, designers) are deliberately
-out of scope for a headless MCP server and are listed as such in
-[gaps.md](gaps.md#11-ui-bound-features--not-applicable-by-design).
+| Date | What changed | Tools |
+|---|---|---|
+| 2026-10-31 | **The depth of the scanned layers and the data-flow reach**: `analyze_yaml` gains YAML0009–YAML0012 (kind/apiVersion asymmetry, metadata without a name, a container with no image, duplicate container names), `analyze_js` resolves a relative import and reports JS0017, and `trace_data_flow` follows a value stored in a field of the same type across the method that writes it and the method that reads it. No new tool: the range of three existing ones | 401 (unchanged) |
+| 2026-10-31 | **Version control and collaboration** stops being a row in [gaps.md](gaps.md) and becomes a feature section here: the 37 tools — 28 in the Git family (27 `git_*` and `commit_lint`), 8 GitHub and `code_review`. The section adds no tool, it moves ones already counted; real-time co-editing stays the one boundary and is UI-bound by design | 401 (unchanged) |
+| 2026-10-31 | **The board becomes the source of truth**: `board_brief` (counts, the card to pick up, staleness) and `board_audit` (each open card cross-checked against the live tool and context-action catalogue); the rows on this page do not move, the inventory does | 399 → 401 |
+| 2026-10-31 | **The last point of every open family**: the scanned layers (`js_files`/`analyze_js`, `markup_files`/`analyze_markup`, `yaml_files`/`analyze_yaml`, `fsharp_files`/`analyze_fsharp`), `trace_data_flow`, `find_throw_sites` (387 → 397), five context actions (`merge_patterns`, `concat_to_stringbuilder`, `linq_query_to_method`, `linq_method_to_query`, `convert_to_extension_block`) and CS1729 in `create_from_usage`; then `commit_lint` (→ 398) and `disk_usage` (→ 399) | 387 → 399 |
+| 2026-10-31 | **The rows that used to close this page**: the debugger (16 `debug_*` tools over netcoredbg), the test workflow (`run_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `debug_test`), decompiled code as a workspace (`assembly_workspace`), the diagram and exploration tools (`call_graph`, `sequence_diagram`, `control_flow_graph`, `find_todos`, `find_endpoints`, `find_file`, `solution_map`), the smaller refactorings (`transform_parameters`, `make_non_static`, `move_type_to_nested_scope`, `generify`, `remove_params`, `extension_to_static`, `invert_boolean`, `inline_field`, `extract_members_to_partial`), and the last ReSharper/CodeMaid rows: templates (`templates`), cleanup profiles (`code_cleanup profile=`), CodeMaid's layout rules (`layout_code`), fuzzy symbol search (`find_symbol`), ten more context actions (merge/split conditions, a null check joined with its use, `var` and back, split declaration, remove braces, nullable migration, digit separators, `ConfigureAwait(false)`) and the create-from-usage long tail (CS0117, CS1501, CS7036 next to CS1061/CS0246/CS0103) | — |

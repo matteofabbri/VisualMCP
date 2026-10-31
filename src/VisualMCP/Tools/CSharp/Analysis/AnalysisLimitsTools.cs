@@ -22,11 +22,14 @@ public static class AnalysisLimitsTools
         "Show what source generators contributed to each project: the generators the project references and " +
         "the syntax trees they produced. Those trees exist in the compilation but not as documents, so " +
         "navigation, read_symbol and the editors cannot address them — this answers 'is that type generated, " +
-        "and by what'. Read-only.")]
+        "and by what'. With includeSource=true each tree's text is returned (capped at maxCharsPerTree), which " +
+        "is how generated code is read without a document. Read-only.")]
     public static Task<object> ListGeneratedSources(
         IGeneratedSourcesService service,
-        [Description("Optional: restrict to one project (exact name).")] string? projectName = null)
-        => service.ListAsync(projectName);
+        [Description("Optional: restrict to one project (exact name).")] string? projectName = null,
+        [Description("Return each generated tree's text as well as its metadata (default false).")] bool includeSource = false,
+        [Description("Characters of each tree's text to return when includeSource is true (default 20000, max 200000).")] int maxCharsPerTree = 20_000)
+        => service.ListAsync(projectName, includeSource, maxCharsPerTree);
 
     [McpServerTool(Name = "find_external_usages"), Description(
         "Which types and members of assemblies OUTSIDE the solution it actually uses, with call sites and a " +

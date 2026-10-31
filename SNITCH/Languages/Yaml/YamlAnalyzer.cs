@@ -7,8 +7,11 @@ namespace Snitch.Languages.Yaml;
 /// handles what a manifest in a repository actually contains — block mappings, sequence items, block
 /// scalars, comments, anchors and aliases — and reports the mistakes that change the meaning of a file
 /// silently: a tab in the indentation, a key declared twice, a colon glued to its key, the YAML 1.1
-/// booleans, an alias with no anchor, an unclosed flow collection. It also reads the few keys a
-/// Kubernetes manifest is identified by, which is what `yaml_files` shows.
+/// booleans, an alias with no anchor, an unclosed flow collection. On top of the line rules it reads the
+/// identity of a Kubernetes manifest — kind, apiVersion, metadata.name — and the containers it declares,
+/// which is what `yaml_files` shows and what YAML0009–YAML0012 judge: an identity with one half missing,
+/// an unnamed object, a container with no image, two containers sharing a name. The judgement is still
+/// structural: no schema is fetched and no chart is rendered.
 /// </summary>
 public static class YamlAnalyzer
 {
@@ -29,6 +32,29 @@ public static class YamlAnalyzer
         ["YAML0006"] = "A value containing ': ' outside quotes (it parses as a nested mapping)",
         ["YAML0007"] = "Unbalanced flow collection ([ ] or { })",
         ["YAML0008"] = "An alias (*name) with no anchor (&name)",
+        ["YAML0009"] = "A Kubernetes manifest with only one of kind / apiVersion",
+        ["YAML0010"] = "A metadata block with no name",
+        ["YAML0011"] = "A container with no image",
+        ["YAML0012"] = "Two containers in one list with the same name",
+    };
+
+    /// <summary>
+    /// The kinds this scanner is willing to call a manifest. A file that declares neither apiVersion nor one of
+    /// these is left alone: a YAML document with a `kind` key is not necessarily Kubernetes.
+    /// </summary>
+    private static readonly HashSet<string> KnownKinds = new(StringComparer.Ordinal)
+    {
+        "Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob",
+        "Service", "Ingress", "ConfigMap", "Secret", "Namespace", "ServiceAccount", "Role", "ClusterRole",
+        "RoleBinding", "ClusterRoleBinding", "PersistentVolume", "PersistentVolumeClaim",
+        "HorizontalPodAutoscaler", "NetworkPolicy", "CustomResourceDefinition", "StorageClass", "ResourceQuota",
+        "LimitRange", "PodDisruptionBudget",
+    };
+
+    /// <summary>The kinds that own a container list; the container rules only apply inside one.</summary>
+    private static readonly HashSet<string> WorkloadKinds = new(StringComparer.Ordinal)
+    {
+        "Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob",
     };
 
     private static readonly Regex KeyPattern = new(
@@ -56,7 +82,28 @@ public static class YamlAnalyzer
 
         var inBlockScalar = false;
         var blockScalarIndent = -1;
+
+        // Per-document identity: kind and apiVersion, and the metadata block that must name the object.
+        string? documentKind = null;
+        string? documentApiVersion = null;
+        var documentKindLine = 0;
+        var documentApiVersionLine = 0;
+
         var metadataIndent = -1;
+        var metadataLine = 0;
+        var metadataNameSeen = false;
+        var metadataMissingName = false;
+        var metadataMissingNameLine = 0;
+
+        // The containers of a workload document: one list, each item judged when it closes.
+        var containersIndent = -1;
+        var containerItemIndent = -1;
+        var containerOpen = false;
+        var containerStartLine = 0;
+        var containerHasImage = false;
+        string? containerName = null;
+        var containerNameLine = 0;
+        var containerNames = new HashSet<string>(StringComparer.Ordinal);
 
         var lines = text.Replace("\r\n", "\n").Split('\n');
 
@@ -98,6 +145,7 @@ public static class YamlAnalyzer
                     sawDocumentMarker = true;
                 }
 
+                CloseDocument();
                 stack.Clear();
                 continue;
             }
@@ -148,10 +196,70 @@ public static class YamlAnalyzer
             if (keyIndent == 0 && !sequenceItem && !topLevel.Contains(key, StringComparer.Ordinal))
                 topLevel.Add(key);
 
-            if (key == "kind" && kind is null && value.Length > 0) kind = value;
-            if (key == "apiVersion" && apiVersion is null && value.Length > 0) apiVersion = value;
-            if (key == "metadata") metadataIndent = keyIndent;
-            if (key == "name" && name is null && metadataIndent >= 0 && keyIndent > metadataIndent) name = value;
+            // A key at or above the metadata block closes it: a sibling or a parent, not a member.
+            if (metadataIndent >= 0 && keyIndent <= metadataIndent) CloseMetadata();
+
+            if (key == "kind" && keyIndent == 0 && !sequenceItem && documentKind is null)
+            {
+                documentKind = value;
+                documentKindLine = line;
+                kind ??= value;
+            }
+
+            if (key == "apiVersion" && keyIndent == 0 && !sequenceItem && documentApiVersion is null)
+            {
+                documentApiVersion = value;
+                documentApiVersionLine = line;
+                apiVersion ??= value;
+            }
+
+            if (key == "metadata" && !sequenceItem && value.Length == 0)
+            {
+                metadataIndent = keyIndent;
+                metadataLine = line;
+                metadataNameSeen = false;
+            }
+            else if (key == "name" && metadataIndent >= 0 && keyIndent > metadataIndent)
+            {
+                metadataNameSeen = true;
+                name ??= value;
+            }
+
+            // A container list: the item keys sit at one indent, and anything at or above the list closes it.
+            if (key == "containers" && !sequenceItem && value.Length == 0)
+            {
+                CloseContainers();
+                containersIndent = keyIndent;
+            }
+            else if (containersIndent >= 0)
+            {
+                if (sequenceItem && (containerItemIndent < 0
+                        ? keyIndent > containersIndent
+                        : keyIndent == containerItemIndent))
+                {
+                    CloseContainer();
+                    containerOpen = true;
+                    containerStartLine = line;
+                    containerItemIndent = keyIndent;
+                }
+                else if (!sequenceItem && keyIndent <= containersIndent)
+                {
+                    CloseContainers();
+                }
+            }
+
+            if (containerOpen && keyIndent == containerItemIndent)
+            {
+                if (key == "name")
+                {
+                    containerName = value;
+                    containerNameLine = line;
+                }
+                else if (key == "image" && value.Length > 0)
+                {
+                    containerHasImage = true;
+                }
+            }
 
             if (value.StartsWith('|') || value.StartsWith('>'))
             {
@@ -190,6 +298,8 @@ public static class YamlAnalyzer
                 $"The alias '*{aliasName}' has no matching '&{aliasName}' anchor in this file.",
                 aliasLine, aliasColumn, "Declare the anchor, or fix the name.");
 
+        CloseDocument();
+
         return new YamlAnalysis(
             lines.Length,
             documentCount,
@@ -198,6 +308,81 @@ public static class YamlAnalyzer
             apiVersion,
             name,
             findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList());
+
+        void CloseContainer()
+        {
+            if (containerOpen && WorkloadKinds.Contains(documentKind ?? string.Empty))
+            {
+                if (!containerHasImage)
+                    Add("YAML0011", "error", "Correctness",
+                        "The container has no image, so a pod built from this manifest has nothing to run.",
+                        containerStartLine, 1, "Add image: repository/name:tag.");
+
+                if (containerName is not null && !containerNames.Add(containerName))
+                    Add("YAML0012", "warning", "Correctness",
+                        $"A second container in this list is also called '{containerName}'.",
+                        containerNameLine, 1, "Give each container a distinct name.");
+            }
+
+            containerOpen = false;
+            containerHasImage = false;
+            containerName = null;
+            containerNameLine = 0;
+        }
+
+        void CloseContainers()
+        {
+            CloseContainer();
+            containersIndent = -1;
+            containerItemIndent = -1;
+            containerNames.Clear();
+        }
+
+        void CloseMetadata()
+        {
+            if (metadataIndent < 0) return;
+
+            if (!metadataNameSeen)
+            {
+                metadataMissingName = true;
+                metadataMissingNameLine = metadataLine;
+            }
+
+            metadataIndent = -1;
+            metadataLine = 0;
+            metadataNameSeen = false;
+        }
+
+        void CloseDocument()
+        {
+            CloseContainers();
+            CloseMetadata();
+
+            var manifest = documentApiVersion is not null || KnownKinds.Contains(documentKind ?? string.Empty);
+            if (manifest)
+            {
+                if (documentKind is null)
+                    Add("YAML0009", "error", "Correctness",
+                        "The manifest declares apiVersion but no kind, so Kubernetes cannot tell what object it is.",
+                        documentApiVersionLine, 1, "Add kind: Deployment (or the object's kind).");
+                else if (documentApiVersion is null)
+                    Add("YAML0009", "error", "Correctness",
+                        "The manifest declares kind but no apiVersion, so it cannot be submitted to a cluster.",
+                        documentKindLine, 1, "Add the apiVersion for that kind, e.g. apps/v1.");
+            }
+
+            if (manifest && metadataMissingName)
+                Add("YAML0010", "warning", "Correctness",
+                    "The metadata block has no name, so two objects from this manifest are indistinguishable.",
+                    metadataMissingNameLine, 1, "Add metadata.name.");
+
+            documentKind = null;
+            documentApiVersion = null;
+            documentKindLine = 0;
+            documentApiVersionLine = 0;
+            metadataMissingName = false;
+            metadataMissingNameLine = 0;
+        }
 
         void Add(string rule, string severity, string category, string message, int line, int column, string fix) =>
             findings.Add(new YamlFinding(rule, severity, category, message, filePath, line, column,

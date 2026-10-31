@@ -24,3 +24,8 @@ __pycache__/
 _*.txt
 *.tmp.txt
 /.artifacts-zcode/publish
+
+# Atomic-write temps left behind by an interrupted tool write (name.md.tmp.<pid>.<hash>)
+*.tmp.*
+# Output of `dotnet test` when it was not given --artifacts-path
+TestResults/

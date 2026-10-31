@@ -17,7 +17,7 @@ public interface IEfMigrationsService
 public sealed class EfMigrationsService : IEfMigrationsService
 {
     private static readonly string[] Actions =
-        ["list", "add", "script", "remove", "update", "info", "dbcontext-list"];
+        ["list", "add", "script", "remove", "update", "info", "dbcontext-list", "pending-model-changes"];
 
     private readonly IRoslynWorkspace _workspace;
     public EfMigrationsService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -62,17 +62,7 @@ public sealed class EfMigrationsService : IEfMigrationsService
         if (project.FilePath is null) return new { error = $"Project '{project.Name}' has no file on disk." };
 
         var directory = Path.GetDirectoryName(project.FilePath)!;
-        var args = new List<string> { "ef", "migrations" };
-        if (command == "info") { args = ["ef", "dbcontext", "info"]; }
-        else if (command == "dbcontext-list") { args = ["ef", "dbcontext", "list"]; }
-        else { args.Add(command == "list" ? "list" : command); }
-
-        switch (command)
-        {
-            case "add": args.Add(Quote(name!)); break;
-            case "update" when !string.IsNullOrWhiteSpace(name): args.Add(Quote(name)); break;
-            case "script" when !string.IsNullOrWhiteSpace(output): args.AddRange(["--output", Quote(output)]); break;
-        }
+        var args = CommandArguments(command, name, output);
 
         args.AddRange(["--project", Quote(project.FilePath)]);
         if (!string.IsNullOrWhiteSpace(startupProject))
@@ -90,6 +80,10 @@ public sealed class EfMigrationsService : IEfMigrationsService
         var (exitCode, timedOut, stdout, stderr, elapsed) =
             await ProcessRunner.RunAsync("dotnet", string.Join(" ", args), directory, timeout);
 
+        bool? pendingModelChanges = command != "pending-model-changes" || timedOut
+            ? null
+            : exitCode switch { 0 => false, 1 => true, _ => null };
+
         return new
         {
             project = project.Name,
@@ -101,14 +95,37 @@ public sealed class EfMigrationsService : IEfMigrationsService
             exitCode = timedOut ? (int?)null : exitCode,
             durationMs = (long)elapsed.TotalMilliseconds,
             succeeded = !timedOut && exitCode == 0,
+            pendingModelChanges,
             stdout = ProcessRunner.Truncate(stdout),
             stderr = ProcessRunner.Truncate(stderr),
-            hint = exitCode != 0
-                ? "A failing 'dotnet ef' usually means the 'dotnet-ef' tool is missing (dotnet tool install --global dotnet-ef) " +
-                  "or the project does not reference Microsoft.EntityFrameworkCore.Design."
-                : "A migration file is C#: review it with the normal C# tools; nothing here proves the model and the " +
-                  "migrations agree, which is what a script does.",
+            hint = command == "pending-model-changes"
+                ? "Exit code 0: the model and the migrations agree. 1: the model has changed since the last " +
+                  "migration, so a migration is pending. Any other code is a tool or project error."
+                : exitCode != 0
+                    ? "A failing 'dotnet ef' usually means the 'dotnet-ef' tool is missing (dotnet tool install --global dotnet-ef) " +
+                      "or the project does not reference Microsoft.EntityFrameworkCore.Design."
+                    : "A migration file is C#: review it with the normal C# tools; nothing here proves the model and the " +
+                      "migrations agree, which is what a script does.",
         };
+    }
+
+    /// <summary>The 'dotnet ef' arguments before the common project options.</summary>
+    public static List<string> CommandArguments(string action, string? name, string? output)
+    {
+        if (action == "info") return ["ef", "dbcontext", "info"];
+        if (action == "dbcontext-list") return ["ef", "dbcontext", "list"];
+
+        var args = new List<string> { "ef", "migrations" };
+        args.Add(action == "pending-model-changes" ? "has-pending-model-changes" : action);
+
+        switch (action)
+        {
+            case "add" when !string.IsNullOrWhiteSpace(name): args.Add(Quote(name)); break;
+            case "update" when !string.IsNullOrWhiteSpace(name): args.Add(Quote(name)); break;
+            case "script" when !string.IsNullOrWhiteSpace(output): args.AddRange(["--output", Quote(output)]); break;
+        }
+
+        return args;
     }
 
     private static string Quote(string value) => value.Contains(' ') ? $"\"{value}\"" : value;

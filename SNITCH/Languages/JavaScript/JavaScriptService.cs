@@ -30,8 +30,10 @@ public sealed class JavaScriptService : IJavaScriptService
         var (root, files, truncated) = Discover(path, maxFiles);
 
         var entries = new List<object>();
+        var edges = new List<(string From, string To)>();
         var totalImports = 0;
         var totalFindings = 0;
+        var totalUnresolvedImports = 0;
 
         foreach (var file in files)
         {
@@ -40,20 +42,48 @@ public sealed class JavaScriptService : IJavaScriptService
 
             totalImports += analysis.Imports.Count;
             totalFindings += analysis.Findings.Count;
+
+            var unresolved = analysis.Findings.Count(finding => finding.RuleId == "JS0017");
+            var relative = analysis.ImportReferences.Count(reference => reference.Relative);
+            totalUnresolvedImports += unresolved;
+
+            var name = Relative(root, file);
+            var dependsOn = analysis.ImportReferences
+                .Where(reference => reference.Relative)
+                .Select(reference => ResolveRelative(file, reference.Module))
+                .Where(target => target is not null)
+                .Select(target => Relative(root, target!))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(target => target, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var target in dependsOn)
+                edges.Add((name, target));
+
             entries.Add(new
             {
-                file = Relative(root, file),
+                file = name,
                 lines = analysis.Lines,
                 typeScript = analysis.TypeScript,
                 jsx = analysis.Jsx,
                 imports = analysis.Imports.Count,
+                resolvedImports = relative - unresolved,
+                unresolvedImports = unresolved,
                 modules = analysis.Imports.Take(50).ToList(),
+                dependsOn = dependsOn.Take(50).ToList(),
                 exports = analysis.Exports.Take(50).ToList(),
                 functions = analysis.Functions,
                 classes = analysis.Classes,
                 findings = analysis.Findings.Count,
             });
         }
+
+        var moduleEdges = edges
+            .Distinct()
+            .OrderBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(edge => edge.To, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var (cycles, cyclesSkipped) = FindCycles(moduleEdges);
 
         return new
         {
@@ -62,9 +92,24 @@ public sealed class JavaScriptService : IJavaScriptService
             truncated,
             maxFiles,
             totalImports,
+            totalUnresolvedImports,
             totalFindings,
+            moduleGraph = new
+            {
+                nodeCount = entries.Count,
+                edgeCount = moduleEdges.Count,
+                edges = moduleEdges.Take(500).Select(edge => new { from = edge.From, to = edge.To }).ToList(),
+                edgesTruncated = moduleEdges.Count > 500,
+                cycleCount = cycles.Count,
+                cycles = cycles.Take(20).ToList(),
+                cyclesTruncated = cycles.Count > 20,
+                cyclesSkipped,
+            },
             files = entries,
-            hint = "analyze_js lists the findings themselves; js_files only says what is there.",
+            hint = "analyze_js lists the findings themselves; js_files only says what is there. " +
+                   "unresolvedImports counts the relative specifiers that point at no file (JS0017). " +
+                   "moduleGraph resolves relative specifiers only — a package specifier needs the project's " +
+                   "own resolver — and reports each strongly connected group as one import cycle.",
         };
     }
 
@@ -125,8 +170,10 @@ public sealed class JavaScriptService : IJavaScriptService
             findings = shown,
             truncated = findings.Count > shown.Count,
             note = "A pattern scan over masked source, not a parser: it proves the shape of a line, never that a " +
-                   "module resolves or a type holds. Template literals are masked whole, so a rule inside `${…}` " +
-                   "does not fire; regular-expression literals are not detected and a rule may fire inside one.",
+                   "module resolves or a type holds. A relative import IS resolved against the file system " +
+                   "(JS0017) — the path itself, a source extension, or an index file; a package specifier is not. " +
+                   "Template literals are masked whole, so a rule inside `${…}` does not fire; regular-expression " +
+                   "literals are not detected and a rule may fire inside one.",
         };
     }
 
@@ -137,10 +184,161 @@ public sealed class JavaScriptService : IJavaScriptService
             var info = new FileInfo(file);
             if (info.Length > 2_000_000) return null;
             var text = await File.ReadAllTextAsync(file);
-            return JavaScriptAnalyzer.AnalyzeText(text, file);
+            var analysis = JavaScriptAnalyzer.AnalyzeText(text, file);
+
+            // A relative specifier is the one import a scanner can check: it names a file next to this
+            // one. A package specifier needs the resolver in node_modules, which the project's own tools own.
+            var unresolved = analysis.ImportReferences
+                .Where(reference => reference.Relative)
+                .Where(reference => ResolveRelative(file, reference.Module) is null)
+                .Select(reference => new JsFinding(
+                    "JS0017", "warning", "Correctness",
+                    $"The relative import '{reference.Module}' does not resolve to a file.",
+                    file, reference.Line, reference.Column, SnippetAt(text, reference.Line),
+                    "Fix the path; a directory resolves through index.ts/index.js."))
+                .ToList();
+
+            return unresolved.Count == 0
+                ? analysis
+                : analysis with
+                {
+                    Findings = analysis.Findings.Concat(unresolved)
+                        .OrderBy(finding => finding.Line)
+                        .ThenBy(finding => finding.Column)
+                        .ToList(),
+                };
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>
+    /// The import cycles of the module graph: one entry per strongly connected component with more than one
+    /// module, or one module that imports itself. Only relative specifiers are edges a scanner can prove, so a
+    /// package import never creates one. Above 2000 modules the walk is skipped and the caller is told.
+    /// </summary>
+    private static (List<List<string>> Cycles, bool Skipped) FindCycles(List<(string From, string To)> edges)
+    {
+        var adjacency = edges
+            .GroupBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(edge => edge.To).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var nodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edge in edges)
+        {
+            nodes.Add(edge.From);
+            nodes.Add(edge.To);
+        }
+
+        if (nodes.Count > 2_000) return ([], true);
+
+        var index = 0;
+        var indices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var lowLinks = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var onStack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var stack = new Stack<string>();
+        var cycles = new List<List<string>>();
+
+        void Visit(string node)
+        {
+            indices[node] = index;
+            lowLinks[node] = index;
+            index++;
+            stack.Push(node);
+            onStack.Add(node);
+
+            if (adjacency.TryGetValue(node, out var targets))
+            {
+                foreach (var target in targets)
+                {
+                    if (!indices.ContainsKey(target))
+                    {
+                        Visit(target);
+                        lowLinks[node] = Math.Min(lowLinks[node], lowLinks[target]);
+                    }
+                    else if (onStack.Contains(target))
+                    {
+                        lowLinks[node] = Math.Min(lowLinks[node], indices[target]);
+                    }
+                }
+            }
+
+            if (lowLinks[node] != indices[node]) return;
+
+            var component = new List<string>();
+            string member;
+            do
+            {
+                member = stack.Pop();
+                onStack.Remove(member);
+                component.Add(member);
+            } while (!member.Equals(node, StringComparison.OrdinalIgnoreCase));
+
+            var selfLoop = component.Count == 1 &&
+                           adjacency.TryGetValue(component[0], out var self) &&
+                           self.Contains(component[0], StringComparer.OrdinalIgnoreCase);
+            if (component.Count > 1 || selfLoop)
+            {
+                component.Sort(StringComparer.OrdinalIgnoreCase);
+                cycles.Add(component);
+            }
+        }
+
+        foreach (var node in nodes)
+            if (!indices.ContainsKey(node))
+                Visit(node);
+
+        return (cycles.OrderBy(cycle => cycle[0], StringComparer.OrdinalIgnoreCase).ToList(), false);
+    }
+
+    /// <summary>The source extensions a relative import may omit, in the order TypeScript resolves them.</summary>
+    private static readonly string[] ResolutionSuffixes =
+        [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+    /// <summary>
+    /// The file a relative specifier points at: the path itself, the path with a source extension, a
+    /// directory index, or the TypeScript source behind a compiled <c>.js</c> specifier. Null when none exists.
+    /// </summary>
+    private static string? ResolveRelative(string fromFile, string specifier)
+    {
+        var directory = Path.GetDirectoryName(fromFile);
+        if (directory is null) return null;
+
+        var target = Path.GetFullPath(Path.Combine(directory, specifier.Replace('/', Path.DirectorySeparatorChar)));
+        if (File.Exists(target)) return target;
+
+        // A TypeScript project imports './x.js' although the source on disk is './x.ts'.
+        if (target.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
+            target.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase))
+        {
+            var stem = Path.ChangeExtension(target, null);
+            foreach (var suffix in ResolutionSuffixes)
+                if (File.Exists(stem + suffix))
+                    return stem + suffix;
+        }
+
+        foreach (var suffix in ResolutionSuffixes)
+            if (File.Exists(target + suffix))
+                return target + suffix;
+
+        foreach (var suffix in ResolutionSuffixes)
+        {
+            var index = Path.Combine(target, "index" + suffix);
+            if (File.Exists(index)) return index;
+        }
+
+        return null;
+    }
+
+    private static string SnippetAt(string text, int line)
+    {
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        if (line < 1 || line > lines.Length) return string.Empty;
+        var snippet = lines[line - 1].Trim();
+        return snippet.Length <= 160 ? snippet : snippet[..160] + "…";
     }
 
     private (string Root, List<string> Files, bool Truncated) Discover(string? path, int maxFiles)

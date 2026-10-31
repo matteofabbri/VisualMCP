@@ -15,7 +15,7 @@ public sealed record GeneratedTreeInfo(string Path, int Length, bool HasGenerate
 /// </summary>
 public interface IGeneratedSourcesService
 {
-    Task<object> ListAsync(string? projectName);
+    Task<object> ListAsync(string? projectName, bool includeSource = false, int maxCharsPerTree = 20_000);
 }
 
 public sealed class GeneratedSourcesService : IGeneratedSourcesService
@@ -23,8 +23,10 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
     private readonly IRoslynWorkspace _workspace;
     public GeneratedSourcesService(IRoslynWorkspace workspace) => _workspace = workspace;
 
-    public async Task<object> ListAsync(string? projectName = null)
+    public async Task<object> ListAsync(string? projectName = null, bool includeSource = false,
+        int maxCharsPerTree = 20_000)
     {
+        maxCharsPerTree = Math.Clamp(maxCharsPerTree, 200, 200_000);
         var solution = await _workspace.EnsureSolutionLoadedAsync();
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };
@@ -53,13 +55,20 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
             var generated = FindGeneratedTrees(documentPaths, compilation.SyntaxTrees);
             totalGenerated += generated.Count;
 
+            var trees = compilation.SyntaxTrees
+                .Where(tree => tree.FilePath.Length > 0)
+                .GroupBy(tree => Path.GetFullPath(tree.FilePath), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
             perProject.Add(new
             {
                 project = project.Name,
                 generators = GeneratorsOf(project),
                 documentCount = project.Documents.Count(),
                 generatedTreeCount = generated.Count,
-                generatedTrees = generated,
+                generatedTrees = generated
+                    .Select(info => Describe(info, trees, includeSource, maxCharsPerTree))
+                    .ToList(),
             });
         }
 
@@ -68,12 +77,44 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
             projectFilter = projectName ?? "all",
             projects = perProject.Count,
             generatedTreeCount = totalGenerated,
+            includeSource,
+            maxCharsPerTree,
             byProject = perProject,
             note = totalGenerated == 0
                 ? "No generated tree was found: either the project uses no source generator, or this workspace does not run them (an Adhoc workspace never does)."
                 : "Generated trees exist in the compilation but not as documents: navigation, read_symbol and the editors " +
                   "cannot address them. Their types are visible to the compiler, so a symbol with no source location is " +
-                  "usually one of these.",
+                  "usually one of these. includeSource=true returns each tree's text, capped at maxCharsPerTree.",
+        };
+    }
+
+    /// <summary>The text of one generated tree, capped. <c>Truncated</c> says the cap cut it.</summary>
+    public static (string Source, bool Truncated) ReadSource(SyntaxTree tree, int maxChars)
+    {
+        var source = tree.GetText().ToString();
+        return source.Length > maxChars
+            ? (source[..maxChars], true)
+            : (source, false);
+    }
+
+    /// <summary>The report row for one tree: its metadata, or metadata plus text when the text was asked for.</summary>
+    private static object Describe(GeneratedTreeInfo info, IReadOnlyDictionary<string, SyntaxTree> trees,
+        bool includeSource, int maxChars)
+    {
+        if (!includeSource) return info;
+
+        var (source, truncated) = trees.TryGetValue(Path.GetFullPath(info.Path), out var tree)
+            ? ReadSource(tree, maxChars)
+            : (string.Empty, false);
+
+        return new
+        {
+            path = info.Path,
+            length = info.Length,
+            hasGeneratedCodeAttribute = info.HasGeneratedCodeAttribute,
+            types = info.Types,
+            source,
+            truncated,
         };
     }
 

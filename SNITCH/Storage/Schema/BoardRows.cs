@@ -25,6 +25,26 @@ public sealed class BoardCommentRow
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+/// <summary>
+/// One version of a durable note: a fact, a decision, a constraint. A topic has exactly one current row
+/// (the one with no successor); an update inserts a new row and points the old one at it, so a reversed
+/// decision stays readable instead of being overwritten. <see cref="SupersededBy"/> = -1 marks a forgotten
+/// topic, which keeps its history but is no longer returned.
+/// </summary>
+public sealed class BoardMemoryRow
+{
+    public int Id { get; set; }
+    public string Topic { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public string Kind { get; set; } = "fact";
+    public string? Labels { get; set; }
+    public bool Pinned { get; set; }
+    public string? Source { get; set; }
+    public int? SupersededBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 /// <summary>One field change of a card, so its state is never a guess.</summary>
 public sealed class BoardHistoryRow
 {

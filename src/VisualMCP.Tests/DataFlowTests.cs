@@ -146,6 +146,75 @@ public sealed class DataFlowTests
     }
 
     [Fact]
+    public async Task AValueStoredInAFieldIsFollowedWithinTheMethod()
+    {
+        var json = await TraceAsync("""
+            using System;
+            using System.IO;
+
+            public class Probe
+            {
+                private string _path;
+
+                public void Run()
+                {
+                    _path = Console.ReadLine();
+                    File.ReadAllText(_path);
+                }
+            }
+            """);
+
+        Assert.Equal(1, json.GetProperty("flowCount").GetInt32());
+        Assert.Contains(
+            json.GetProperty("flows")[0].GetProperty("steps").EnumerateArray(),
+            step => step.GetProperty("what").GetString() == "stored in field _path");
+    }
+
+    [Fact]
+    public async Task AFieldWrittenInOneMethodIsFollowedInAnother()
+    {
+        var json = await TraceAsync("""
+            using System;
+            using System.IO;
+
+            public class Probe
+            {
+                private string _path;
+
+                public void Store() => _path = Console.ReadLine();
+
+                public void Sink() => File.ReadAllText(_path);
+            }
+            """);
+
+        Assert.Equal(1, json.GetProperty("flowCount").GetInt32());
+        Assert.Contains(
+            json.GetProperty("flows")[0].GetProperty("steps").EnumerateArray(),
+            step => step.GetProperty("what").GetString() == "stored in field _path");
+    }
+
+    [Fact]
+    public async Task AFieldThatNeverHoldsATaintedValueProducesNoFlow()
+    {
+        var json = await TraceAsync("""
+            using System.IO;
+
+            public class Probe
+            {
+                private string _path = "default.txt";
+
+                public void Run()
+                {
+                    _path = "other.txt";
+                    File.ReadAllText(_path);
+                }
+            }
+            """);
+
+        Assert.Equal(0, json.GetProperty("flowCount").GetInt32());
+    }
+
+    [Fact]
     public async Task CleanCodeHasNoFlows()
     {
         var json = await TraceAsync("""

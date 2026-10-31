@@ -23,6 +23,12 @@ public static class JavaScriptAnalyzer
     public static bool IsTypeScript(string path) =>
         Path.GetExtension(path).ToLowerInvariant() is ".ts" or ".tsx" or ".mts" or ".cts";
 
+    /// <summary>True for a specifier the scanner can resolve against the file system: ./ and ../.</summary>
+    public static bool IsRelativeSpecifier(string module) =>
+        module is "." or ".." ||
+        module.StartsWith("./", StringComparison.Ordinal) ||
+        module.StartsWith("../", StringComparison.Ordinal);
+
     /// <summary>The rule catalogue, id to what the rule proves.</summary>
     public static IReadOnlyDictionary<string, string> Rules { get; } = new Dictionary<string, string>
     {
@@ -42,6 +48,7 @@ public static class JavaScriptAnalyzer
         ["JS0014"] = "JSX <img> without alt",
         ["JS0015"] = "Explicit any in a TypeScript annotation",
         ["JS0016"] = "setTimeout / setInterval given a string",
+        ["JS0017"] = "A relative import that does not resolve to a file",
     };
 
     private static readonly Regex Eval = new(@"\beval\s*\(", Options);
@@ -155,15 +162,27 @@ public static class JavaScriptAnalyzer
 
         // A module specifier is a string, so the mask blanked it: the patterns run on the raw text and
         // the keyword's own offset decides whether the match is code or a string that mentions it.
-        var imports = ImportFrom.Matches(text)
-            .Where(match => IsVisible(masked, match.Index))
-            .Select(match => match.Groups["module"].Value)
-            .Concat(Require.Matches(text)
-                .Where(match => IsVisible(masked, match.Index))
-                .Select(match => match.Groups["module"].Value))
-            .Concat(DynamicImport.Matches(text)
-                .Where(match => IsVisible(masked, match.Index))
-                .Select(match => match.Groups["module"].Value))
+        var referenceMatches = new List<(Match Match, string Module)>();
+        foreach (Match match in ImportFrom.Matches(text))
+            if (IsVisible(masked, match.Index))
+                referenceMatches.Add((match, match.Groups["module"].Value));
+        foreach (Match match in Require.Matches(text))
+            if (IsVisible(masked, match.Index))
+                referenceMatches.Add((match, match.Groups["module"].Value));
+        foreach (Match match in DynamicImport.Matches(text))
+            if (IsVisible(masked, match.Index))
+                referenceMatches.Add((match, match.Groups["module"].Value));
+
+        var references = referenceMatches
+            .Select(entry =>
+            {
+                var (line, column) = Position(lineStarts, entry.Match.Groups["module"].Index);
+                return new JsImport(entry.Module, line, column, IsRelativeSpecifier(entry.Module));
+            })
+            .ToList();
+
+        var imports = references
+            .Select(reference => reference.Module)
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
@@ -180,7 +199,8 @@ public static class JavaScriptAnalyzer
             Classes: ClassDeclaration.Matches(masked).Count,
             Jsx: JsxElement.IsMatch(masked) || JsxClosing.IsMatch(masked),
             TypeScript: IsTypeScript(filePath),
-            Findings: findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList());
+            Findings: findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList(),
+            ImportReferences: references);
     }
 
     // ── masking ────────────────────────────────────────────────────────────────
@@ -351,7 +371,10 @@ public sealed record JsFinding(
     string RuleId, string Severity, string Category, string Message, string File, int Line, int Column,
     string Snippet, string? Fix);
 
+/// <summary>An import specifier with the position it is written at; Relative is true for ./ and ../.</summary>
+public sealed record JsImport(string Module, int Line, int Column, bool Relative);
+
 /// <summary>The facts a scan of one file produces.</summary>
 public sealed record JsAnalysis(
     int Lines, IReadOnlyList<string> Imports, IReadOnlyList<string> Exports, int Functions, int Classes,
-    bool Jsx, bool TypeScript, IReadOnlyList<JsFinding> Findings);
+    bool Jsx, bool TypeScript, IReadOnlyList<JsFinding> Findings, IReadOnlyList<JsImport> ImportReferences);
