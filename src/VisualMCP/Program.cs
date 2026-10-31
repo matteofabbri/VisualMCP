@@ -175,6 +175,12 @@ static async Task RunServerAsync(string[] args)
         "- Administer the inspections: set a diagnostic's severity in the right .editorconfig (solution, project or " +
         "one file) -> configure_inspection; silence one finding with a #pragma around the member or a SuppressMessage " +
         "attribute on it (compiler-gated) -> suppress_finding.\n" +
+        "- Inspections the repository owns rather than an analyzer: declarative rules (banned symbols/namespaces/" +
+        "attributes, identifier and comment patterns) in .visualMCP/inspections.json -> custom_inspections; the " +
+        "ReSharper .DotSettings a team shares (severities, disabled ids, custom dictionary words) -> read_dot_settings; " +
+        "likely typos (one edit from a word the solution or the dictionary uses) -> find_spelling_issues; the " +
+        ".editorconfig naming policy, list or rename the violations -> naming_rules; and the warm loop that re-runs the " +
+        "packs when the solution changes, with cached findings to poll -> background_analysis / analysis_findings.\n" +
         "- Test workflow: run ONE test or class without hand-building --filter, with a TRX result and the failures " +
         "recorded -> run_test; re-run exactly those failures -> rerun_failed; which test methods reference this symbol " +
         "-> tests_covering_symbol; scaffold an xUnit class for a type (one [Fact] per public method, compiler-gated) -> " +
@@ -297,6 +303,10 @@ static async Task RunServerAsync(string[] args)
             // the ones the change introduced.
             services.AddSingleton<Snitch.Languages.CSharp.Inspections.IInspectionBaselineService,
                                   Snitch.Languages.CSharp.Inspections.InspectionBaselineService>();
+            // The warm inspection loop needs the real IInspectCodeService, which lives in this host:
+            // it re-runs the packs when the solution changes and caches the findings for analysis_findings.
+            services.AddSingleton<Snitch.Languages.CSharp.Inspections.IBackgroundAnalysisService,
+                                  Snitch.Languages.CSharp.Inspections.BackgroundAnalysisService>();
 
             // Administering the inspections: severity in .editorconfig and compiler-gated suppressions.
             services.AddSingleton<Snitch.Languages.CSharp.Inspections.IInspectionConfigurationService,

@@ -62,6 +62,12 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Analysis.IGeneratedSourcesService, Languages.CSharp.Analysis.GeneratedSourcesService>();
         services.AddSingleton<Languages.CSharp.Analysis.IExternalUsagesService, Languages.CSharp.Analysis.ExternalUsagesService>();
         services.AddSingleton<Languages.CSharp.Analysis.IFrameworkEntryPointsService, Languages.CSharp.Analysis.FrameworkEntryPointsService>();
+        // Inspection administration: rules authored in the repository, the .DotSettings a team shares, the
+        // spelling dictionary it carries, and the .editorconfig naming policy.
+        services.AddSingleton<Languages.CSharp.Inspections.ICustomInspectionService, Languages.CSharp.Inspections.CustomInspectionService>();
+        services.AddSingleton<Languages.CSharp.Inspections.IDotSettingsService, Languages.CSharp.Inspections.DotSettingsService>();
+        services.AddSingleton<Languages.CSharp.Inspections.ISpellingService, Languages.CSharp.Inspections.SpellingService>();
+        services.AddSingleton<Languages.CSharp.Inspections.INamingRulesService, Languages.CSharp.Inspections.NamingRulesService>();
         services.AddSingleton<Execution.IBuildProjectService, Execution.BuildProjectService>();
         services.AddSingleton<Execution.IRunProjectService, Execution.RunProjectService>();
         services.AddSingleton<Execution.IRunCommandService, Execution.RunCommandService>();

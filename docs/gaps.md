@@ -16,11 +16,9 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-10-31 (sixth revision: six context actions close the literal/statement/guard rows —
-`interpolated_to_concat`, `digit_separators`, `remove_argument_name`, `check_dictionary_key`,
-`check_enum_defined`, `invert_loop`, 20 → 26 action ids — `translate_python_file` / `translate_cpp_file`
-make the two opt-in metacode readers reachable, `run_mutation_tests` runs Stryker.NET, and `run_http_file`
-executes a request file: 318 → 322). The
+Last updated: 2026-10-31 (seventh revision: section 3 closes — `custom_inspections` (rules declared in the
+repository), `read_dot_settings`, `find_spelling_issues`, `naming_rules` and the warm loop
+`background_analysis` / `analysis_findings`, 327 → 333). The
 style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection figure is the documented
 ~800 from five packs.
 
@@ -32,7 +30,7 @@ style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection
 |---|---|:---:|---|
 | [Language and platform scope](#1-language-and-platform-scope) | ❌ | High if your solution uses them | XAML and EF Core are covered now; a JS/SQL/F# codebase still gets almost nothing beyond text search |
 | [Debugger](#2-debugger) | ✅ | — | Implemented: 16 `debug_*` tools over netcoredbg (DAP). The engine is here; the window is the client's ([section 11](#11-ui-bound-features--not-applicable-by-design)) |
-| [Inspection administration](#3-inspection-administration-and-background-analysis) | ⚠️ | Medium | Severity in `.editorconfig` and compiler-gated suppressions exist; `.DotSettings`, custom inspections and a background daemon do not |
+| [Inspection administration](#3-inspection-administration-and-background-analysis) | ✅ | — | Severity, suppression, custom rules, `.DotSettings` reading, naming rules, spelling and a warm analysis loop exist; only the proprietary ReSharper id set is absent |
 | [Test workflow](#4-test-workflow) | ⚠️ | Medium | One test, re-run the failures, which tests reach a symbol, a scaffold class, branch coverage and mutation testing exist; debugging a test and continuous testing do not |
 | [Decompiled code as a workspace](#5-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
 | [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 26 action ids now (guards incl. dictionary/enum/index, wrap, braces, loops incl. invert, if→switch, both interpolation directions, digit separators, argument name); the long tail is still the long tail |
@@ -265,25 +263,27 @@ Still missing, and the reasons:
 ## 3. Inspection administration and background analysis
 
 Findings are strong (`inspect_code` exposes ~800 ids from five packs, `apply_code_fix` runs the
-analyzer's own fix, `inspection_baseline` gives a CI gate). Administration is the gap:
+analyzer's own fix, `inspection_baseline` gives a CI gate), and the administration around them is now
+covered as well:
 
 | Capability | State |
 |---|---|
 | Severity per rule, per scope (solution/project/folder/file) | ✅ `configure_inspection` writes `dotnet_diagnostic.<id>.severity` at solution, project or single-file scope |
 | Suppress a finding (`SuppressMessage`, `#pragma`, `.editorconfig` severity) | ✅ `suppress_finding` (pragma around the member or the attribute), compiler-gated; `configure_inspection` for the severity |
-| `.DotSettings` layers, shared team settings | ❌ ReSharper-specific format, not read |
-| Custom inspections authored in the product | ❌ you can point `run_code_analysis` at analyzers the project already references, but there is no inspection SDK or registration |
+| `.DotSettings` layers, shared team settings | ⚠️ `read_dot_settings` reads `.DotSettings`/`.DotSettings.user` (severities, disabled ids, custom dictionary words). The severities are ReSharper inspection ids and are reported, not applied to Roslyn diagnostics — there is no id map between the two catalogs |
+| Custom inspections authored in the product | ✅ `custom_inspections`: rules declared in `.visualMCP/inspections.json` (banned symbols/namespaces/attributes, identifier patterns, string-literal and comment patterns) with id, severity and message; they have no code fix |
 | ReSharper's proprietary set (~2500 ids) | ⚠️ overlap only with the ~800 pack ids; the rest are absent |
-| Solution-wide background analysis / daemon | ❌ every call analyses on demand; there is no warm daemon, no squiggles between calls, no incremental solution-wide pass |
+| Solution-wide background analysis / daemon | ✅ `background_analysis` starts a warm loop that re-runs the packs when the loaded solution changes; `analysis_findings` serves the cached findings between calls (by file, project, severity or id) |
 | Formatting settings management, `.editorconfig` generation | ✅ `configure_formatting` authors `csharp_*`/`dotnet_*`/`indent_*`/`end_of_line`/`charset`/`file_header_template`; severities with `configure_inspection` |
-| Naming rules (`IDE1006`) application | ❌ naming requires a rename; it is not a rewrite |
-| Spelling inspection | ❌ |
+| Naming rules (`IDE1006`) application | ✅ `naming_rules` reads `dotnet_naming_rule`/`symbols`/`style` from the `.editorconfig` chain, lists the violations with the expected name, and with `apply=true` renames them through `apply_rename` (recorded and revertible). Locals and parameters are listed only |
+| Spelling inspection | ✅ `find_spelling_issues`: flags words one edit away from a word the solution or `.visualMCP/spelling.dic` + the `.DotSettings` words already use — no bundled English dictionary, so the evidence is the repository's own vocabulary |
 | Quick-fix menu / preview UI | 💀 the client shows the diff; the server returns it |
 
-The practical consequence: a team can run the inspections, gate a change with `inspection_baseline`, and
-now tune one rule and suppress one finding where the compiler reads it. What remains is the
-ReSharper-shaped administration: `.DotSettings`, custom inspections, and a daemon that analyses while
-nobody asks.
+The practical consequence: a team can run the inspections, gate a change with `inspection_baseline`,
+tune one rule and suppress one finding where the compiler reads it, add rules without building an
+analyzer, apply the naming policy, and keep a warm analysis running while it edits. What remains of the
+ReSharper-shaped administration is `.DotSettings` *application* (the ids are ReSharper's) and the
+proprietary inspection catalogue itself.
 
 ---
 

@@ -53,7 +53,7 @@ rewriter:
 | **Rewritten** | 97 of 126 | `simplify_code` applies the rewrite, under the compiler gate and (for the rules that claim equivalence) the operation-level check. |
 | **Delegated** | 3 | `IDE0005`, `IDE0032`, `IDE0290`: `simplify_code` accepts the id and answers with the dedicated engine — `optimize_usings`, `property_to_auto`, `convert_to_primary_constructor`. |
 | **Not applicable to C#** | 5 | `IDE0081`/`IDE0084`/`IDE0140` are Visual Basic's (`simplify_vb_code` owns them); `IDE1007` is a compiler diagnostic; `IDE0370` was split by Microsoft into `IDE0240`/`IDE0241`, both rewritten here. |
-| **Not a rewrite** | 21 | Refactorings (`IDE0050` anonymous type→tuple, `IDE0210`/`IDE0211` top-level statements, `IDE0303`–`IDE0305` collection expressions for builders, `IDE0330` `System.Threading.Lock`, `IDE0410` labeled jumps), changes of contract (`IDE0064`), a rename policy (`IDE1006`, which needs `apply_rename`), layout owned elsewhere (`IDE0065`, `IDE0360`), a suppression audit (`IDE0076`/`IDE0077`), semantic decisions (`IDE0110`, `IDE1005`, `IDE0221`, `IDE0350`), and a Copilot suggestion (`IDE3000`). Each one is named, with its category, in `simplify_code`'s own answer for that id. |
+| **Not a rewrite** | 21 | Refactorings (`IDE0050` anonymous type→tuple, `IDE0210`/`IDE0211` top-level statements, `IDE0303`–`IDE0305` collection expressions for builders, `IDE0330` `System.Threading.Lock`, `IDE0410` labeled jumps), changes of contract (`IDE0064`), a rename policy (`IDE1006`, applied by `naming_rules` rather than as a syntax rewrite), layout owned elsewhere (`IDE0065`, `IDE0360`), a suppression audit (`IDE0076`/`IDE0077`), semantic decisions (`IDE0110`, `IDE1005`, `IDE0221`, `IDE0350`), and a Copilot suggestion (`IDE3000`). Each one is named, with its category, in `simplify_code`'s own answer for that id. |
 
 **Team preferences are option-driven, not assumed.** `csharp_style_var_*` (`IDE0007`/`IDE0008`),
 `dotnet_style_parentheses_in_*` (`IDE0048`) and the seven blank-line options (`IDE2000`–`IDE2006`)
@@ -174,10 +174,9 @@ Full inventory, with the exact workaround for each gap: [docs/gaps.md](../../../
 
 Beyond languages, the same page records what is absent from the .NET workflow itself: the debugger is
 engine-level only (16 `debug_*` tools; edit-and-continue, hot reload and debugging a unit test are
-missing), **no live/postfix/file templates**, inspection severity and suppression are written per rule
-but there is **no background analysis daemon** (`inspection_baseline` is the CI substitute), **no test
-debugging and no continuous testing** (single-test runs, re-running the failures, test scaffolding and
-`run_mutation_tests` exist), and decompiled code is now a **navigable Roslyn workspace** (`assembly_workspace`)
+missing), **no live/postfix/file templates**, **no test debugging and no continuous testing** (single-test
+runs, re-running the failures, test scaffolding and `run_mutation_tests` exist), and decompiled code is
+now a **navigable Roslyn workspace** (`assembly_workspace`)
 with no IL view, no rename and no debugging inside it.
 
 ## Scope of the product

@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **327 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **333 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -96,6 +96,12 @@ Conventions:
 | `configure_inspection` | ✎ Set `dotnet_diagnostic.<id>.severity` (none/silent/suggestion/warning/error/default) in the right `.editorconfig`: solution, project or one file. Idempotent; reports the previous value |
 | `configure_formatting` | ✎ Set any other `.editorconfig` option (`csharp_*`, `dotnet_*`, `indent_*`, `end_of_line`, `charset`, `file_header_template`, …) at the same scopes, same upsert |
 | `suppress_finding` | ✎ preview Silence one finding where it takes effect: a `#pragma` around the member or a `SuppressMessage` attribute on it; compiler-gated |
+| `custom_inspections` | Inspections declared in `.visualMCP/inspections.json` (banned symbols/namespaces/attributes, identifier/string/comment patterns) with id, severity, message; `validate` checks the file |
+| `read_dot_settings` | Read the ReSharper `.DotSettings`/`.DotSettings.user` layers: inspection severities, disabled ids, custom dictionary words |
+| `find_spelling_issues` | Words one edit away from a word the solution or `.visualMCP/spelling.dic` + the `.DotSettings` words already use |
+| `naming_rules` | ✎ preview Apply `dotnet_naming_rule` from `.editorconfig`: list the violations with the expected name, or rename them (`apply=true`) |
+| `background_analysis` | ✎ start/stop/refresh a warm loop that re-runs the inspection packs when the solution changes |
+| `analysis_findings` | The cached findings of the last warm run, by severity, inspection or file — cheap enough to poll |
 | `complexity_report` | McCabe cyclomatic, Sonar cognitive, Halstead and maintainability index — with the lines that own the score |
 | `git_churn_hotspots` | Where a refactoring pays first: git history (how often a file changes) joined with Roslyn complexity (its worst method), scored as commits × worst cyclomatic; read-only, bounded window |
 | `get_complexity_hotspots` | The most complex methods in the solution, ranked |
