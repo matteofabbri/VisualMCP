@@ -599,7 +599,7 @@ comparison with an IDE is honest.
 
 ## 12. Beyond ReSharper: SonarQube, CodeScene and the profiling IDEs
 
-The [capability map](../CAPABILITY_MAP.md#gap-prioritari-vs-sonarqubecodescene) tracks these separately;
+The [capability map](../CAPABILITY_MAP.md#priority-gaps-vs-sonarqubecodescene) tracks these separately;
 they are repeated here because they are also "what is missing" for a .NET team:
 
 | Gap | What it would need |

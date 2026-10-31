@@ -1,104 +1,103 @@
-# Analisi delle pagine Razor
+# Razor page analysis
 
-VisualMCP legge le pagine Razor come **markup**, non come codice C#: i file `.cshtml` e `.razor` non
-sono documenti del progetto Roslyn (sono `Content`, e per Razor SDK vengono compilati da un altro
-toolchain), quindi non compaiono in `solution.Projects[*].Documents`. Il motore li enumera da disco a
-partire dalle cartelle dei progetti e li scandisce con un parser Razor/HTML dedicato, senza aggiungere
-pacchetti: nessun `Microsoft.AspNetCore.Razor.Language`, nessun `dotnet` esterno.
+VisualMCP reads Razor pages as **markup**, not as C# code: `.cshtml` and `.razor` files are not documents of
+the Roslyn project (they are `Content`, and for the Razor SDK another toolchain compiles them), so they do
+not appear in `solution.Projects[*].Documents`. The engine enumerates them from disk starting at the project
+folders and scans them with a dedicated Razor/HTML parser, without adding packages: no
+`Microsoft.AspNetCore.Razor.Language`, no external `dotnet`.
 
-Tre tool di analisi, tutti read-only:
+Three analysis tools, all read-only:
 
-| Tool | Cosa risponde |
+| Tool | What it answers |
 |---|---|
-| `razor_pages` | Quali pagine esistono e come sono collegate: `page`/`view`/`layout`/`partial`/componente Blazor, `@page` route, `@model`, layout, sezioni, `@inject`, handler `OnGet`/`OnPost`, code-behind, conteggi di markup |
-| `analyze_razor_pages` | Cosa non va nel markup: HTML rotto, accessibilità, uso improprio di Razor, manutenibilità — regole `RZ2xxx` |
-| `find_razor_vulnerabilities` | Cosa è sfruttabile: XSS, CSRF, segreti, URL insicuri, CSP — regole `RZ1xxx`, ognuna con un CWE |
+| `razor_pages` | Which pages exist and how they are wired: `page`/`view`/`layout`/`partial`/Blazor component, `@page` route, `@model`, layout, sections, `@inject`, `OnGet`/`OnPost` handlers, code-behind, markup counts |
+| `analyze_razor_pages` | What is wrong in the markup: broken HTML, accessibility, Razor misuse, maintainability — `RZ2xxx` rules |
+| `find_razor_vulnerabilities` | What is exploitable: XSS, CSRF, secrets, unsafe URLs, CSP — `RZ1xxx` rules, each with a CWE |
 
-Il **lato scrittura** è `razor_edit` (`RazorEditService.cs`, nella stessa cartella): applica una modifica
-verificata per volta (attributo, direttiva o intervallo di righe), ri-scandisce il file prima di
-scrivere e riporta quali finding ha risolto o introdotto, usando le stesse regole di questa pagina.
-Questo documento copre l'analisi; i dettagli delle operazioni sono nella descrizione del tool.
+The **write side** is `razor_edit` (`RazorEditService.cs`, in the same folder): it applies one verified
+change at a time (attribute, directive or line range), re-scans the file before writing and reports which
+findings it resolved or introduced, using the same rules as this page. This document covers the analysis;
+the details of the operations are in the tool description.
 
-`projectName` filtra un progetto della soluzione. `path` accetta una cartella o un singolo file, e in
-quel caso **non serve una soluzione caricata**: è la via per analizzare un repo che VisualMCP non ha
-aperto.
+`projectName` filters to one project of the solution. `path` accepts a folder or a single file, and in that
+case **no loaded solution is needed**: it is the way to analyse a repo VisualMCP has not opened.
 
-## Architettura
+## Architecture
 
-Tutto vive in `SNITCH/Languages/Razor/` e viene registrato da `AddSnitch`:
+Everything lives in `SNITCH/Languages/Razor/` and is registered by `AddSnitch`:
 
-| File | Ruolo |
+| File | Role |
 |---|---|
-| `RazorModel.cs` | Il modello: direttive, espressioni, code block, albero degli elementi HTML (con padre/figli), posizioni 1-based |
-| `RazorScanner.cs` | Lo scanner: separa markup e C#, conosce `@* *@`, `@{ }`, `@( )`, `@await`, `@code`/`@functions`, `@section`, `@if`/`@foreach`/…, tag HTML con attributi, `<script>`/`<style>` raw |
-| `RazorRuleCatalog.cs` | Id, categoria, titolo, severità, CWE e remediation di ogni regola — i finding prendono la metadata da qui |
-| `RazorRules.cs` | Le regole: una passata per documento, finding con `file`, `line`, `column`, `snippet` |
-| `RazorAnalysis.cs` | Scoperta dei file (cartelle dei progetti, esclusioni `bin`/`obj`/…), classificazione, ordinamento e forma JSON dei finding |
-| `RazorPagesService.cs` / `AnalyzeRazorPagesService.cs` / `FindRazorVulnerabilitiesService.cs` | I tre entry point |
-| `RazorEditService.cs` | Il lato scrittura (`razor_edit`): splice verificati, ri-scan prima della scrittura, edit registrati in `edit_history` |
+| `RazorModel.cs` | The model: directives, expressions, code blocks, the HTML element tree (with parent/children), 1-based positions |
+| `RazorScanner.cs` | The scanner: separates markup from C#, knows `@* *@`, `@{ }`, `@( )`, `@await`, `@code`/`@functions`, `@section`, `@if`/`@foreach`/…, HTML tags with attributes, raw `<script>`/`<style>` |
+| `RazorRuleCatalog.cs` | Id, category, title, severity, CWE and remediation of every rule — the findings take their metadata from here |
+| `RazorRules.cs` | The rules: one pass per document, findings with `file`, `line`, `column`, `snippet` |
+| `RazorAnalysis.cs` | File discovery (project folders, `bin`/`obj`/… exclusions), classification, ordering and the JSON shape of the findings |
+| `RazorPagesService.cs` / `AnalyzeRazorPagesService.cs` / `FindRazorVulnerabilitiesService.cs` | The three entry points |
+| `RazorEditService.cs` | The write side (`razor_edit`): verified splices, re-scan before writing, edits recorded in `edit_history` |
 
-Passaggio dei dati: `RazorAnalysis.CollectAsync` → `RazorScanner.Scan` → `RazorRules.Run` → filtro del
-servizio. Lo scanner **non** scende dentro `@{ … }` e `@code { … }` (sono C# puro): i problemi di
-markup lì dentro non vengono visti, ed è una scelta dichiarata. Il corpo di `@if`, `@foreach`,
-`@section` e `@using (...)` invece è markup e viene analizzato, comprese le variabili di ciclo, così
-`@item.Name` dentro un `<script>` viene riconosciuto come dato del modello.
+Data flow: `RazorAnalysis.CollectAsync` → `RazorScanner.Scan` → `RazorRules.Run` → service filter. The
+scanner does **not** descend into `@{ … }` and `@code { … }` (that is pure C#): markup problems inside them
+are not seen, and that is a declared choice. The body of `@if`, `@foreach`, `@section` and `@using (...)`
+is markup instead and is analysed, loop variables included, so `@item.Name` inside a `<script>` is
+recognised as model data.
 
-## Regole di sicurezza (`RZ1xxx`)
+## Security rules (`RZ1xxx`)
 
-| Id | Severità | CWE | Cosa rileva |
+| Id | Severity | CWE | What it detects |
 |---|---|---|---|
-| `RZ1001` | High | 79 | `@Html.Raw(...)` / `new HtmlString(...)` con un valore non codificato (anche dentro un attributo) |
-| `RZ1002` | High | 79 | `@Model…`, `@ViewBag…` o una variabile di `@foreach` scritti dentro `<script>` |
-| `RZ1003` | High | 79 | Dato del modello dentro un handler inline (`onclick="…@ Model…"`) |
-| `RZ1004` | High | 79 | URI `javascript:`, `vbscript:` o `data:text/html` in `href`/`src`/`action` |
-| `RZ1005` | Medium | 352 | Form POST senza token: niente `@Html.AntiForgeryToken()`, niente tag helper (`asp-*`), oppure `asp-antiforgery="false"` / `[IgnoreAntiforgeryToken]` |
-| `RZ1006` | Medium | 598 | Input `type="password"` in un form GET (password in URL e log) |
-| `RZ1007` | Low | 1022 | `target="_blank"` senza `rel="noopener noreferrer"` |
-| `RZ1008` | High | 798 | Credenziale letterale nel markup (`type="password" value="…"`, `data-api-key="…"`, assegnazione in un code block) |
-| `RZ1009` | Medium | 319 | Risorsa caricata via `http://` (mixed content); `w3.org` e gli schemi XML sono esclusi |
-| `RZ1010` | Medium | 79 | `src` di un `<iframe>` costruito da dati |
-| `RZ1011` | Low | 693 | `<script>`/`<style>` inline, attributo `style` o handler inline: bloccati da una CSP stretta |
+| `RZ1001` | High | 79 | `@Html.Raw(...)` / `new HtmlString(...)` with an unencoded value (inside an attribute too) |
+| `RZ1002` | High | 79 | `@Model…`, `@ViewBag…` or an `@foreach` variable written inside `<script>` |
+| `RZ1003` | High | 79 | Model data inside an inline handler (`onclick="…@Model…"`) |
+| `RZ1004` | High | 79 | `javascript:`, `vbscript:` or `data:text/html` URI in `href`/`src`/`action` |
+| `RZ1005` | Medium | 352 | POST form without a token: no `@Html.AntiForgeryToken()`, no tag helper (`asp-*`), or `asp-antiforgery="false"` / `[IgnoreAntiforgeryToken]` |
+| `RZ1006` | Medium | 598 | `type="password"` input in a GET form (password in URL and logs) |
+| `RZ1007` | Low | 1022 | `target="_blank"` without `rel="noopener noreferrer"` |
+| `RZ1008` | High | 798 | Literal credential in the markup (`type="password" value="…"`, `data-api-key="…"`, assignment in a code block) |
+| `RZ1009` | Medium | 319 | Resource loaded over `http://` (mixed content); `w3.org` and XML schemas are excluded |
+| `RZ1010` | Medium | 79 | `src` of an `<iframe>` built from data |
+| `RZ1011` | Low | 693 | Inline `<script>`/`<style>`, `style` attribute or inline handler: blocked by a strict CSP |
 
-`RZ1001` non scatta su un letterale né su un valore già passato a `Encode`/`Sanitize`/`HtmlEncoder`/
-`JavaScriptEncoder`/`Json.Serialize`. `RZ1002` non scatta su `@Json.Serialize`, `@Html.Encode`,
-`@Url.Action` e simili.
+`RZ1001` does not fire on a literal, nor on a value already passed to `Encode`/`Sanitize`/`HtmlEncoder`/
+`JavaScriptEncoder`/`Json.Serialize`. `RZ1002` does not fire on `@Json.Serialize`, `@Html.Encode`,
+`@Url.Action` and the like.
 
-## Regole di markup, accessibilità e manutenibilità (`RZ2xxx`)
+## Markup, accessibility and maintainability rules (`RZ2xxx`)
 
-| Id | Categoria | Severità | Cosa rileva |
+| Id | Category | Severity | What it detects |
 |---|---|---|---|
-| `RZ2001` | Markup | Medium | Elemento mai chiuso (i tag con fine opzionale, es. `<li>`, `<p>`, sono esclusi) |
-| `RZ2002` | Markup | Medium | Chiusura orfana o non corrispondente |
-| `RZ2003` | Markup | Medium | `id` duplicato nello stesso file |
-| `RZ2004` | Accessibility | Low | `<img>` senza `alt` |
-| `RZ2005` | Accessibility | Low | `<label>` senza `for` e senza controllo annidato |
-| `RZ2006` | Markup | Low | `<button>` in un form senza `type` (default: submit) |
-| `RZ2007` | Markup | Medium | Controllo di un form senza `name`/`asp-for`: non viene inviato |
-| `RZ2008` | Accessibility | Low | Manca `<meta name="viewport">` |
-| `RZ2009` | Accessibility | Low | `<html>` senza `lang` |
-| `RZ2010` | Maintainability | Low | `ViewBag`/`ViewData` (non tipizzati) |
-| `RZ2011` | Maintainability | Low | Helper legacy `Html.Partial`/`RenderPartial`/`Action`/`RenderAction`/`BeginForm` |
-| `RZ2012` | Maintainability | Low | Code block `@{ }`/`@code`/`@functions` oltre 25 righe |
-| `RZ2013` | Markup | Medium | Form annidato |
-| `RZ2014` | Markup | Low | Attributo duplicato sullo stesso elemento |
-| `RZ2015` | Razor | High | Sintassi Razor non bilanciata (blocco, espressione, commento, stringa, tag) |
-| `RZ2016` | Markup | Low | Form senza `action` e senza `asp-*` in una view MVC |
-| `RZ2017` | Markup | Low | Elemento o attributo obsoleto (`center`, `font`, `marquee`, `align`, …) |
+| `RZ2001` | Markup | Medium | Element never closed (tags with optional end, e.g. `<li>`, `<p>`, are excluded) |
+| `RZ2002` | Markup | Medium | Orphaned or mismatched closing tag |
+| `RZ2003` | Markup | Medium | Duplicate `id` in the same file |
+| `RZ2004` | Accessibility | Low | `<img>` without `alt` |
+| `RZ2005` | Accessibility | Low | `<label>` without `for` and without a nested control |
+| `RZ2006` | Markup | Low | `<button>` in a form without `type` (default: submit) |
+| `RZ2007` | Markup | Medium | Form control without `name`/`asp-for`: it is not submitted |
+| `RZ2008` | Accessibility | Low | Missing `<meta name="viewport">` |
+| `RZ2009` | Accessibility | Low | `<html>` without `lang` |
+| `RZ2010` | Maintainability | Low | `ViewBag`/`ViewData` (untyped) |
+| `RZ2011` | Maintainability | Low | Legacy helpers `Html.Partial`/`RenderPartial`/`Action`/`RenderAction`/`BeginForm` |
+| `RZ2012` | Maintainability | Low | `@{ }`/`@code`/`@functions` code block over 25 lines |
+| `RZ2013` | Markup | Medium | Nested form |
+| `RZ2014` | Markup | Low | Duplicate attribute on the same element |
+| `RZ2015` | Razor | High | Unbalanced Razor syntax (block, expression, comment, string, tag) |
+| `RZ2016` | Markup | Low | Form without `action` and without `asp-*` in an MVC view |
+| `RZ2017` | Markup | Low | Obsolete element or attribute (`center`, `font`, `marquee`, `align`, …) |
 
-Le regole `RZ2006`, `RZ2007`, `RZ1005` si applicano solo ai `.cshtml`: in Blazor (`<EditForm>`,
-`@bind`) non avrebbero senso e sono escluse per non produrre rumore.
+The rules `RZ2006`, `RZ2007`, `RZ1005` apply to `.cshtml` only: in Blazor (`<EditForm>`, `@bind`) they
+would make no sense, so they are excluded to avoid noise.
 
-## Filtri e output
+## Filters and output
 
-`analyze_razor_pages` accetta `category` (`Markup`, `Accessibility`, `Maintainability`, `Razor`),
-`rule` (es. `RZ2004`), `minSeverity` (default `Low`) e `maxFindings` (default 200). Restituisce i
-conteggi per severità/categoria/regola **sul totale filtrato**, più i finding restituiti — quindi
-`truncated: true` non nasconde la dimensione del problema.
+`analyze_razor_pages` accepts `category` (`Markup`, `Accessibility`, `Maintainability`, `Razor`), `rule`
+(e.g. `RZ2004`), `minSeverity` (default `Low`) and `maxFindings` (default 200). It returns the counts by
+severity/category/rule **over the filtered total**, plus the returned findings — so `truncated: true` does
+not hide the size of the problem.
 
-`find_razor_vulnerabilities` accetta `minSeverity` e `cwe` (`79` o `CWE-79`) e restituisce
-`bySeverity`, `byCwe`, `byRule` e i finding.
+`find_razor_vulnerabilities` accepts `minSeverity` and `cwe` (`79` or `CWE-79`) and returns `bySeverity`,
+`byCwe`, `byRule` and the findings.
 
-Ogni finding ha la stessa forma nei due tool:
+Every finding has the same shape in both tools:
 
 ```json
 {
@@ -111,22 +110,21 @@ Ogni finding ha la stessa forma nei due tool:
 }
 ```
 
-## Limiti
+## Limits
 
-- È un'analisi **euristica**: nessun data flow. Un valore che arriva da un partial, da un view model o
-  da JavaScript non viene tracciato; un risultato pulito non è una prova di sicurezza.
-- Il markup dentro `@{ … }`/`@code { … }` non viene disceso (è C#).
-- `id` duplicati e token anti-forgery sono verificati **per file**: se il token è in un partial
-  renderizzato dentro il form, `RZ1005` può segnalarlo comunque.
-- I valori dinamici (`method="@Model.Method"`) non vengono indovinati: le regole che ne dipendono
-  tacciono invece di indovinare.
-- I file oltre 2 MB e le cartelle non leggibili vengono riportati in `skipped`/`unreadable`, non
-  analizzati.
+- It is a **heuristic** analysis: no data flow. A value coming from a partial, a view model or JavaScript is
+  not tracked; a clean result is not a proof of security.
+- Markup inside `@{ … }`/`@code { … }` is not descended into (it is C#).
+- Duplicate `id`s and anti-forgery tokens are checked **per file**: if the token sits in a partial rendered
+  inside the form, `RZ1005` may still report it.
+- Dynamic values (`method="@Model.Method"`) are not guessed: the rules that depend on them stay silent
+  instead of guessing.
+- Files over 2 MB and unreadable folders are reported in `skipped`/`unreadable`, not analysed.
 
-## Aggiungere una regola
+## Adding a rule
 
-1. Aggiungere la voce in `RazorRuleCatalog.Rules` (id `RZxxxx`, categoria, severità, CWE se è di
-   sicurezza, remediation) — i finding non possono esistere senza metadata.
-2. Aggiungere il controllo a `RazorRules.Run`, con `Add(findings, document, "RZxxxx", message, line, column)`.
-3. Aggiungere in `RazorTests` un caso che scatta e uno che **non** deve scattare.
-4. Aggiornare la tabella in questo file.
+1. Add the entry to `RazorRuleCatalog.Rules` (id `RZxxxx`, category, severity, CWE if it is a security rule,
+   remediation) — findings cannot exist without metadata.
+2. Add the check to `RazorRules.Run`, with `Add(findings, document, "RZxxxx", message, line, column)`.
+3. Add a case to `RazorTests` that fires and one that must **not** fire.
+4. Update the table in this file.

@@ -1,86 +1,84 @@
-# Snitch.Metacode — un solo pseudocodice per alberi di lingue diverse
+# Snitch.Metacode — one pseudocode for trees in different languages
 
-`SNITCH/Libraries/Snitch.Metacode` trasforma un albero sintattico in **un unico modello** e lo stampa
-come pseudocodice canonico. La pipeline del prodotto legge **C#** e **Visual Basic** (Roslyn) e **Razor**
-(`.cshtml`/`.razor`), più i due formati della libreria stessa: il testo canonico e lo snapshot di
-Ghidra. Un tipo decompilato con ILSpy e un binario nativo entrano dalla stessa porta.
+`SNITCH/Libraries/Snitch.Metacode` turns a syntax tree into **a single model** and prints it as canonical
+pseudocode. The product pipeline reads **C#** and **Visual Basic** (Roslyn) and **Razor**
+(`.cshtml`/`.razor`), plus the library's own two formats: the canonical text and the Ghidra snapshot. A type
+decompiled with ILSpy and a native binary come in through the same door.
 
-Il modello è neutro per costruzione, e due lettori **opt-in** lo dimostrano: Python (dump JSON del
-modulo `ast`) e C++ (`clang -ast-dump=json`). Non stanno in `MetacodeTranslator.Default` perché quel
-traduttore legge un sorgente, non un dump: i tool `translate_python_file` / `translate_cpp_file`
-producono il dump e costruiscono un traduttore con il lettore che lo capisce. Lo stesso algoritmo
-scritto in C#, Python e C++ esce comunque con lo stesso
-corpo, riga per riga — è il test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`,
-eseguito con quei lettori.
+The model is neutral by construction, and two **opt-in** readers prove it: Python (JSON dump of the `ast`
+module) and C++ (`clang -ast-dump=json`). They are not in `MetacodeTranslator.Default` because that
+translator reads a source, not a dump: the `translate_python_file` / `translate_cpp_file` tools produce the
+dump and build a translator with the reader that understands it. The same algorithm written in C#, Python
+and C++ still comes out with the same body, line for line — that is the test
+`The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`, run with those readers.
 
-La libreria non usa il modello semantico: legge la sintassi. Un file C# costa un parse, non una
-compilazione, e non serve alcuna soluzione caricata. L'unica eccezione è l'[indice dei
-simboli](#lindice-dei-simboli): "chi usa questo membro, e come" non si risponde leggendo la sintassi, e
-l'indice è una capacità a sé che vive qui accanto al traduttore.
+The library does not use the semantic model: it reads syntax. A C# file costs a parse, not a compilation,
+and no loaded solution is needed. The one exception is the [symbol index](#the-symbol-index): "who uses this
+member, and how" cannot be answered by reading syntax, and the index is a capability of its own that lives
+here next to the translator.
 
-## L'architettura in una riga
+## The architecture in one line
 
 ```
-albero (Roslyn | testo pseudocodice | snapshot Ghidra)
-    -> frontend          (uno per linguaggio, produce solo nodi del modello)
-    -> IMetacodePass     (normalizzazione: differenze di lingua eliminate qui)
-    -> MetacodeDocument  (il modello unico, con origine e diagnostici)
-    -> PseudocodeRenderer (testo canonico)  <->  PseudocodeFrontend (lo rilegge)
+tree (Roslyn | pseudocode text | Ghidra snapshot)
+    -> frontend          (one per language, produces only model nodes)
+    -> IMetacodePass     (normalization: language differences removed here)
+    -> MetacodeDocument  (the single model, with origin and diagnostics)
+    -> PseudocodeRenderer (canonical text)  <->  PseudocodeFrontend (reads it back)
 ```
 
-I lettori opt-in (`PythonFrontend`, `CppFrontend`) entrano esattamente nello stesso punto: sono
-`ILanguageFrontend` come gli altri, semplicemente fuori dalla lista predefinita.
+The opt-in readers (`PythonFrontend`, `CppFrontend`) enter at exactly the same point: they are
+`ILanguageFrontend` like the others, simply outside the default list.
 
-Un binario entra dalla stessa porta: ILSpy produce C# e Ghidra produce C, ma il modello che ne esce è
-quello di sempre (vedi [Decompilazione](#decompilazione-da-un-binario-a-metacode)).
+A binary enters through the same door: ILSpy produces C# and Ghidra produces C, but the model that comes out
+is the usual one (see [Decompilation](#decompilation-from-a-binary-to-metacode)).
 
-Ogni strato parla solo con quello dopo. Aggiungere una lingua significa aggiungere un
-`ILanguageFrontend` alla lista di `MetacodeTranslator.Frontends`: passate, renderer e parser non si
-toccano.
+Every layer talks only to the next one. Adding a language means adding an `ILanguageFrontend` to
+`MetacodeTranslator.Frontends`: passes, renderer and parser are not touched.
 
-## Il modello
+## The model
 
-Il vocabolario è volutamente più piccolo di qualunque linguaggio (un costrutto che non ci sta viene
-*desugared* o dichiarato opaco, non inventato):
+The vocabulary is deliberately smaller than any language (a construct that does not fit is *desugared* or
+declared opaque, not invented):
 
-| Gruppo | Tipi |
+| Group | Types |
 |---|---|
-| Contenitori | `MetacodeDocument`, `MetacodeModule`, `MetacodeTypeDeclaration`, `MetacodeFunction` |
-| Membri | `MetacodeField`, `MetacodeProperty`/`MetacodeAccessor`, `MetacodeEnumMember`, `MetacodeEvent`, `MetacodeTypeAlias`, `MetacodeParameter` |
-| Istruzioni | `MetacodeBlock`, `MetacodeLocalVariable`, `MetacodeAssignment`, `MetacodeIf`, `MetacodeWhile`, `MetacodeDoWhile`, `MetacodeFor`, `MetacodeForEach`, `MetacodeSwitch`, `MetacodeTry`, `MetacodeUsing`, `MetacodeLock`, `MetacodeYield`, `MetacodeImport`, `MetacodeReturn`, `MetacodeThrow`, `MetacodeBreak`/`Continue`/`Goto`/`Label`, `MetacodeLocalFunction`, `MetacodeComment` |
-| Espressioni | `MetacodeLiteral`, `MetacodeIdentifier`, `MetacodeMemberAccess`, `MetacodeInvocation`, `MetacodeBinary`, `MetacodeUnary`, `MetacodeConditional`, `MetacodeIndex`, `MetacodeObjectCreation`, `MetacodeCast`, `MetacodeTypeCheck`, `MetacodeCollection`, `MetacodeDictionary`, `MetacodeComprehension`, `MetacodeLambda`, `MetacodeAwait`, `MetacodeRange`, `MetacodeSwitchExpression`, `MetacodeInterpolatedString` |
-| Onestà | `MetacodeOpaqueStatement`, `MetacodeOpaqueExpression`, `MetacodeOpaqueDeclaration`, `MetacodeDiagnostic` |
+| Containers | `MetacodeDocument`, `MetacodeModule`, `MetacodeTypeDeclaration`, `MetacodeFunction` |
+| Members | `MetacodeField`, `MetacodeProperty`/`MetacodeAccessor`, `MetacodeEnumMember`, `MetacodeEvent`, `MetacodeTypeAlias`, `MetacodeParameter` |
+| Statements | `MetacodeBlock`, `MetacodeLocalVariable`, `MetacodeAssignment`, `MetacodeIf`, `MetacodeWhile`, `MetacodeDoWhile`, `MetacodeFor`, `MetacodeForEach`, `MetacodeSwitch`, `MetacodeTry`, `MetacodeUsing`, `MetacodeLock`, `MetacodeYield`, `MetacodeImport`, `MetacodeReturn`, `MetacodeThrow`, `MetacodeBreak`/`Continue`/`Goto`/`Label`, `MetacodeLocalFunction`, `MetacodeComment` |
+| Expressions | `MetacodeLiteral`, `MetacodeIdentifier`, `MetacodeMemberAccess`, `MetacodeInvocation`, `MetacodeBinary`, `MetacodeUnary`, `MetacodeConditional`, `MetacodeIndex`, `MetacodeObjectCreation`, `MetacodeCast`, `MetacodeTypeCheck`, `MetacodeCollection`, `MetacodeDictionary`, `MetacodeComprehension`, `MetacodeLambda`, `MetacodeAwait`, `MetacodeRange`, `MetacodeSwitchExpression`, `MetacodeInterpolatedString` |
+| Honesty | `MetacodeOpaqueStatement`, `MetacodeOpaqueExpression`, `MetacodeOpaqueDeclaration`, `MetacodeDiagnostic` |
 
-Ogni nodo porta `Origin` (linguaggio, file, riga, colonna): il pseudocodice resta tracciabile fino
-alla riga originale.
+Every node carries `Origin` (language, file, line, column): the pseudocode stays traceable down to the
+original line.
 
-**Un costrutto non supportato non sparisce mai.** Diventa un nodo `RAW[cs] … // motivo` e un
-diagnostico `MC0002`–`MC0004`: la traduzione incompleta si vede, invece di sembrare completa.
+**An unsupported construct never disappears.** It becomes a `RAW[cs] … // reason` node and a `MC0002`–`MC0004`
+diagnostic: an incomplete translation is visible, instead of looking complete.
 
-### I costrutti che non sono più opachi
+### The constructs that are no longer opaque
 
-Il vocabolario è cresciuto dove una lingua vera lo chiedeva, e ogni aggiunta porta il suo test
+The vocabulary grew where a real language asked for it, and every addition brings its test
 (`MetacodeDepthTests`):
 
-| Costrutto | Nodo | Da dove |
+| Construct | Node | Where from |
 |---|---|---|
-| `lock (gate) { … }` | `MetacodeLock` | C#. Non è un `USING`: protegge l'assenza di altri thread, non una risorsa |
-| `yield return x` / `yield break` | `MetacodeYield` (valore `null` = break) | C# |
-| `event` | `MetacodeEvent` | C#; solo la firma, gli accessor sono la convenzione della lingua |
-| `foreach (var (k, v) in xs)` | `MetacodeForEach` con `VariableName = "(k, v)"` | C# |
-| `await foreach` | `MetacodeForEach.IsAwait` | C#; senza il flag era una perdita silenziosa |
+| `lock (gate) { … }` | `MetacodeLock` | C#. It is not a `USING`: it protects against the absence of other threads, not a resource |
+| `yield return x` / `yield break` | `MetacodeYield` (value `null` = break) | C# |
+| `event` | `MetacodeEvent` | C#; signature only, the accessors are the language's convention |
+| `foreach (var (k, v) in xs)` | `MetacodeForEach` with `VariableName = "(k, v)"` | C# |
+| `await foreach` | `MetacodeForEach.IsAwait` | C#; without the flag it was a silent loss |
 | `import os` / `from typing import List` | `MetacodeImport` (+ `MetacodeImportName`) | Python |
-| `@decoratore` | `MetacodeFunction.Decorators` / `MetacodeTypeDeclaration.Decorators` | Python; il testo del decoratore, in ordine di sorgente |
+| `@decorator` | `MetacodeFunction.Decorators` / `MetacodeTypeDeclaration.Decorators` | Python; the decorator text, in source order |
 | `[x for x in xs if p]`, `{…}`, `{k: v …}`, `(… )` | `MetacodeComprehension` (+ `MetacodeComprehensionClause`) | Python |
-| parametri di template | `MetacodeTypeParameter` su funzione e tipo | C++ (`FunctionTemplateDecl`, `ClassTemplateDecl`) |
-| `for (int x : xs)` | `MetacodeForEach` | C++ (`CXXForRangeStmt`, letto per ruolo, non per posizione) |
-| lambda | `MetacodeLambda` | C++ (`LambdaExpr`, firma dal `operator()` della closure) |
-| `using Count = int;` / `typedef` | `MetacodeTypeAlias` | C++ (gli alias impliciti del compilatore sono saltati) |
+| template parameters | `MetacodeTypeParameter` on function and type | C++ (`FunctionTemplateDecl`, `ClassTemplateDecl`) |
+| `for (int x : xs)` | `MetacodeForEach` | C++ (`CXXForRangeStmt`, read by role, not by position) |
+| lambda | `MetacodeLambda` | C++ (`LambdaExpr`, signature from the closure's `operator()`) |
+| `using Count = int;` / `typedef` | `MetacodeTypeAlias` | C++ (the compiler's implicit aliases are skipped) |
 
-I tipi di parametro di un template sono gli stessi `MetacodeTypeParameter` che il parser del
-pseudocodice già rileggeva in `<T>`: non serviva un nodo nuovo, serviva riempirlo.
+A template's parameter types are the same `MetacodeTypeParameter` the pseudocode parser already read back
+in `<T>`: no new node was needed, it needed filling in.
 
-## Esempio: lo stesso corpo in tre lingue
+## Example: the same body in three languages
 
 ```csharp
 int Sum(int n)
@@ -108,7 +106,7 @@ int sum(int n) {
 }
 ```
 
-Tutti e tre diventano:
+All three become:
 
 ```
 METHOD Sum(n : int) : int        (C#)
@@ -126,61 +124,61 @@ FUNCTION sum(n : int) : int      (C++)
   RETURN total
 ```
 
-Il `for` conta ed è diverso dal `while` solo perché `NormalizeControlFlowPass` lo riscrive — e non lo
-riscrive se nel corpo c'è un `continue`, perché l'incremento verrebbe saltato. Python
-`for i in range(n)` diventa lo **stesso** nodo `MetacodeFor` del `for` C#, quindi il risultato è
-identico senza casi speciali nel renderer.
+The `for` loop counts and differs from `while` only because `NormalizeControlFlowPass` rewrites it — and it
+does not rewrite it when the body contains a `continue`, because the increment would be skipped. Python's
+`for i in range(n)` becomes the **same** `MetacodeFor` node as the C# `for`, so the result is identical with
+no special cases in the renderer.
 
-## Usarla
+## Using it
 
 ```csharp
 using Snitch.Metacode;
 
-// Da un albero Roslyn già in memoria (nessuna compilazione).
+// From a Roslyn tree already in memory (no compilation).
 MetacodeDocument document = MetacodeTranslator.Default.Translate(
     MetacodeSource.FromSyntaxTree(tree));
 
-// Da sorgente C#.
+// From C# source.
 string pseudocode = MetacodeTranslator.Default.Render(
     MetacodeSource.FromCSharp(source, "Sample.cs"));
 
-// Da un dump JSON di CPython: il lettore non è nella pipeline predefinita, quindi si nomina.
+// From a CPython JSON dump: the reader is not in the default pipeline, so it is named.
 var python = new MetacodeTranslator(new ILanguageFrontend[] { new PythonFrontend() })
     .Render(MetacodeSource.FromPythonAst(json, "sample.py"));
 
-// Da clang -ast-dump=json, stesso discorso.
+// From clang -ast-dump=json, same story.
 var cpp = new MetacodeTranslator(new ILanguageFrontend[] { new CppFrontend() })
     .Render(MetacodeSource.FromCppAst(json, "sample.cpp"));
 
-// Da una pagina Razor o un componente Blazor.
+// From a Razor page or a Blazor component.
 var razor = MetacodeTranslator.Default.Render(
     MetacodeSource.FromRazor(File.ReadAllText("Index.cshtml"), "Index.cshtml"));
 
-// Da pseudocodice già scritto (o prodotto da un altro tool).
+// From pseudocode already written (or produced by another tool).
 var parsed = MetacodeSource.FromPseudocode(text);
 ```
 
-Opzioni (tutte con un default sensato):
+Options (all with a sensible default):
 
 ```csharp
 var options = MetacodeOptions.Default with
 {
     NormalizeControlFlow = true,   // for -> while
-    FlattenNestedBlocks = true,    // blocco dentro blocco -> blocco
-    IncludeComments = true,        // commenti visti dal frontend
+    FlattenNestedBlocks = true,    // block inside block -> block
+    IncludeComments = true,        // comments seen by the frontend
     Passes = new IMetacodePass[] { new MyPass() },
 };
 ```
 
-## I lettori opt-in: Python e C++
+## The opt-in readers: Python and C++
 
-Questi due lettori non stanno in `MetacodeTranslator.Default`, che resta la pipeline dei sorgenti che il
-traduttore legge direttamente: `metacode_translate` non offre le lingue (`language` vale `cs`, `razor`,
-`ghidra` o `pseudo`) e `MetacodeSource.FromFile` non le deduce dall'estensione — un `.json` non dice se
-contiene un `ast` di CPython, un dump di clang o altro. Il dump lo producono i due tool dedicati, che
-poi costruiscono il traduttore con il lettore giusto: `translate_python_file` esegue il dumper qui sotto,
-`translate_cpp_file` esegue `clang -ast-dump=json`; entrambi accettano anche un dump già pronto
-(`dumpJson`). Il dumper Python, se lo si vuole lanciare a mano — un file, nessuna dipendenza:
+These two readers are not in `MetacodeTranslator.Default`, which remains the pipeline of the sources the
+translator reads directly: `metacode_translate` does not offer the languages (`language` is `cs`, `razor`,
+`ghidra` or `pseudo`) and `MetacodeSource.FromFile` does not infer them from the extension — a `.json` does
+not say whether it holds a CPython `ast`, a clang dump or something else. The dump is produced by the two
+dedicated tools, which then build the translator with the right reader: `translate_python_file` runs the
+dumper below, `translate_cpp_file` runs `clang -ast-dump=json`; both also accept a ready-made dump
+(`dumpJson`). The Python dumper, if you want to run it by hand — one file, no dependencies:
 
 ```python
 import ast, json, sys
@@ -208,41 +206,40 @@ C++:
 clang++ -Xclang -ast-dump=json -fsyntax-only sample.cpp > sample.json
 ```
 
-`MetacodeSource.FromFile` sceglie il lettore dall'estensione (`.cs`, `.cshtml`/`.razor`,
-`.mc`/`.pseudo`) e per un `.json` riconosce solo uno snapshot di Ghidra (`imageBase` + `functions`).
-Un dump Python o clang si passa da `FromPythonAst`/`FromCppAst` a un `MetacodeTranslator` costruito
-con `PythonFrontend`/`CppFrontend`.
+`MetacodeSource.FromFile` chooses the reader by extension (`.cs`, `.cshtml`/`.razor`, `.mc`/`.pseudo`) and
+for a `.json` recognises only a Ghidra snapshot (`imageBase` + `functions`). A Python or clang dump is passed
+through `FromPythonAst`/`FromCppAst` to a `MetacodeTranslator` built with `PythonFrontend`/`CppFrontend`.
 
-## Il testo canonico
+## The canonical text
 
-Le parole chiave sono maiuscole e una istruzione sta su una riga:
+Keywords are uppercase and one statement sits on one line:
 
 ```
-MODULE nome
-NAMESPACE nome
-CLASS | STRUCT | INTERFACE | ENUM | RECORD | UNION | TRAIT [<parametri>] [EXTENDS …]
-FUNCTION | METHOD | CONSTRUCTOR | DESTRUCTOR | OPERATOR | LOCAL FUNCTION [<parametri>]
-PROPERTY, GET/SET (AUTO oppure blocco), FIELD, CONST, EVENT, ALIAS
-@decoratore                 (una riga per decoratore, sopra la dichiarazione)
-DECLARE x : tipo = valore, CONST x : tipo = valore
+MODULE name
+NAMESPACE name
+CLASS | STRUCT | INTERFACE | ENUM | RECORD | UNION | TRAIT [<parameters>] [EXTENDS …]
+FUNCTION | METHOD | CONSTRUCTOR | DESTRUCTOR | OPERATOR | LOCAL FUNCTION [<parameters>]
+PROPERTY, GET/SET (AUTO or block), FIELD, CONST, EVENT, ALIAS
+@decorator                  (one line per decorator, above the declaration)
+DECLARE x : type = value, CONST x : type = value
 IF … THEN / ELSE IF … THEN / ELSE / END IF
 WHILE … DO / END WHILE       REPEAT / UNTIL …
-FOR init; condizione; incremento DO / END FOR
-FOREACH x [: tipo] IN espressione DO / END FOREACH
-AWAIT FOREACH x [: tipo] IN espressione DO / END FOREACH
+FOR init; condition; increment DO / END FOR
+FOREACH x [: type] IN expression DO / END FOREACH
+AWAIT FOREACH x [: type] IN expression DO / END FOREACH
 SWITCH / CASE a, b / DEFAULT / END SWITCH
-TRY / CATCH [(Tipo nome)] [WHEN condizione] / ELSE / FINALLY / END TRY
-USING x : tipo = expr DO / END USING
-LOCK espressione DO / END LOCK
-YIELD RETURN espressione, YIELD BREAK
-IMPORT a, b AS c            FROM modulo IMPORT a, b AS c
-RETURN expr, THROW expr, BREAK, CONTINUE, GOTO label, LABEL nome
-RAW[cs] testo // motivo
-// commento
+TRY / CATCH [(Type name)] [WHEN condition] / ELSE / FINALLY / END TRY
+USING x : type = expr DO / END USING
+LOCK expression DO / END LOCK
+YIELD RETURN expression, YIELD BREAK
+IMPORT a, b AS c            FROM module IMPORT a, b AS c
+RETURN expr, THROW expr, BREAK, CONTINUE, GOTO label, LABEL name
+RAW[cs] text // reason
+// comment
 ```
 
-Le comprensioni stanno dentro le parentesi del contenitore che costruiscono, con le clausole in
-ordine di sorgente — è l'ordine che dà senso a una comprensione annidata:
+Comprehensions sit inside the parentheses of the container they build, with the clauses in source order —
+that is the order that gives meaning to a nested comprehension:
 
 ```
 [x * 2 FOR x IN xs IF x > 0]
@@ -251,128 +248,122 @@ ordine di sorgente — è l'ordine che dà senso a una comprensione annidata:
 (n FOR n IN xs)
 ```
 
-Operatori, dal più debole: `? :`, `??`, `OR`, `AND`, `|`, `^`, `&`, `== != IN NOT IN`,
-`< <= > >= IS IS NOT AS`, `<< >>`, `+ -`, `* / % DIV`, `**`, prefissi `NOT - + ~ AWAIT NEW CAST`,
-postfissi `. ?. () []`.
+Operators, from weakest: `? :`, `??`, `OR`, `AND`, `|`, `^`, `&`, `== != IN NOT IN`, `< <= > >= IS IS NOT AS`,
+`<< >>`, `+ -`, `* / % DIV`, `**`, prefixes `NOT - + ~ AWAIT NEW CAST`, postfixes `. ?. () []`.
 
-`PseudocodeFrontend` rilegge questo testo; il test `The_rendered_pseudocode_reads_back_to_the_same_text`
-verifica che il giro completo non cambi un carattere, e `MetacodeDepthTests` lo verifica per ogni
-costrutto aggiunto — compresa la lambda con corpo a blocco, che il renderer stampa su più righe e il
-parser ricompone: quando una riga lascia una parentesi o una graffa aperta, le righe successive
-appartengono alla stessa istruzione, e il corpo fra graffe viene riletto dal lettore di istruzioni
-(passato al parser delle espressioni) invece che dalla grammatica delle espressioni, dove non
-avrebbe posto. È la porta per qualunque linguaggio per cui non esiste un frontend: basta produrre
-questo testo.
+`PseudocodeFrontend` reads this text back; the test `The_rendered_pseudocode_reads_back_to_the_same_text`
+verifies that the round trip does not change a single character, and `MetacodeDepthTests` verifies it for
+every added construct — including the block-bodied lambda, which the renderer prints over several lines and
+the parser reassembles: when a line leaves a parenthesis or a brace open, the following lines belong to the
+same statement, and the body between braces is read back by the statement reader (passed to the expression
+parser) instead of by the expression grammar, where it would have no place. It is the door for any language
+that has no frontend: just produce this text.
 
-## Aggiungere un linguaggio
+## Adding a language
 
-1. Un `ILanguageFrontend` con `CanHandle` e `Translate` (vedi `CSharpFrontend` come riferimento: è
-   il più corto perché Roslyn fa il parsing).
-2. Mappare ogni costrutto su un nodo del modello; ciò che non ha nodo diventa
-   `MetacodeOpaque*` + `MetacodeDiagnostic`, con il testo originale.
-3. Aggiungerlo a `MetacodeTranslator.Default` **solo se il traduttore può leggere il sorgente
-   direttamente**: è la regola per cui C#, Visual Basic e Razor sono lì e Python/C++ no. Un lettore che
-   dipende da un dump prodotto altrove si passa al costruttore (opt-in), com'è per `PythonFrontend` e
-   `CppFrontend`; se il prodotto sa produrre quel dump (come `translate_python_file` / `translate_cpp_file`),
-   il tool costruisce il traduttore con il lettore giusto e resta opt-in.
-4. Aggiungere una fixture al test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`:
-   è la definizione operativa di "stessa architettura".
+1. An `ILanguageFrontend` with `CanHandle` and `Translate` (see `CSharpFrontend` as the reference: it is the
+   shortest because Roslyn does the parsing).
+2. Map every construct onto a model node; what has no node becomes `MetacodeOpaque*` + `MetacodeDiagnostic`,
+   with the original text.
+3. Add it to `MetacodeTranslator.Default` **only if the translator can read the source directly**: that is
+   the rule that puts C#, Visual Basic and Razor there and Python/C++ not. A reader that depends on a dump
+   produced elsewhere goes through the constructor (opt-in), as `PythonFrontend` and `CppFrontend` do; if the
+   product knows how to produce that dump (like `translate_python_file` / `translate_cpp_file`), the tool
+   builds the translator with the right reader and it stays opt-in.
+4. Add a fixture to the test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`: it is the
+   operational definition of "same architecture".
 
-## Limiti noti (dichiarati, non silenziosi)
+## Known limits (declared, not silent)
 
-- **C++** (lettore opt-in): `goto` resta opaco, così come `using`/`using namespace`, `friend`,
-  `static_assert`, le specializzazioni parziali di un template, `delete`, `sizeof` e le espressioni che
-  il modello non ha (`StmtExpr`, `noexcept`, …): tutti `RAW[cpp]` con un diagnostico. Le catture di una
-  lambda non sono modellate: il corpo sì, lo stato catturato no. Il preprocessore non esiste nel dump,
-  e un `#include` non lascia traccia se non nelle dichiarazioni che porta.
-- **Python** (lettore opt-in): `match`, `assert`, `global`/`nonlocal`, `del`, `yield` e gli argomenti
-  sparsi (`*xs`, `**kw`) restano opachi; i decoratori sono letti come testo, non come chiamate.
-  `from . import x` tiene i punti nel nome del modulo.
-- **C#**: `fixed`, `unsafe`, `checked`, i `delegate`, le conversioni definite dall'utente e
-  `goto case`/`goto default` sono opachi; i pattern complessi di `switch`
-  (`case int n when n > 0`) restano testo dentro `CASE`.
+- **C++** (opt-in reader): `goto` stays opaque, as do `using`/`using namespace`, `friend`, `static_assert`,
+  partial template specializations, `delete`, `sizeof` and the expressions the model does not have
+  (`StmtExpr`, `noexcept`, …): all `RAW[cpp]` with a diagnostic. A lambda's captures are not modelled: the
+  body is, the captured state is not. The preprocessor does not exist in the dump, and an `#include` leaves
+  no trace other than the declarations it brings.
+- **Python** (opt-in reader): `match`, `assert`, `global`/`nonlocal`, `del`, `yield` and the unpacked
+  arguments (`*xs`, `**kw`) stay opaque; decorators are read as text, not as calls. `from . import x` keeps
+  the dots in the module name.
+- **C#**: `fixed`, `unsafe`, `checked`, `delegate`s, user-defined conversions and `goto case`/`goto default`
+  are opaque; complex `switch` patterns (`case int n when n > 0`) stay as text inside `CASE`.
 - **Visual Basic**: `With … End With`, `ReDim`, `Erase`, `On Error` (GoTo/Resume Next), `RaiseEvent`,
-  `AddHandler`/`RemoveHandler`, `Exit Try` e l'operatore `Like` sono `RAW[vb]` con un diagnostico;
-  `MyClass` si abbassa a `this` con un `LossyLowering` (sopprime il dispatch virtuale). La direzione di
-  un `For` con `Step` non costante è assunta positiva, e il diagnostico lo dice.
-- **Razor**: `@switch`, `@try`/`catch`/`finally` e `@do`/`while` restano **un solo** `RAW[razor]` con un
-  diagnostico — le loro `case`/`catch`/`while` non sono blocchi `@`, quindi lo scanner non le vede come
-  rami; un corpo di `@if`/`@foreach` senza graffe è markup, non un blocco. Il markup fra due costrutti è
-  `RAW[razor]` (un segmento per riga, con i ritorni a capo come `\n`) e le direttive sono
-  `MetacodeOpaqueDeclaration`: una pagina non è un algoritmo, e fingere che lo sia sarebbe peggio che
-  dirlo.
-- **Parser del pseudocodice**: una lambda con corpo a blocco è riletta, e le righe che seguono una
-  parentesi o una graffa aperta appartengono alla stessa istruzione. Due cose restano fuori: una riga
-  `RAW[…]` con parentesi sbilanciate non viene ricomposta (la riga `RAW` è sempre una riga sola), e un
-  commento con parentesi sbilanciate dentro il corpo di una lambda non viene visto come commento
-  durante la ricomposizione.
-- **Commenti**: il C# li cattura dal trivia; il dump Python e quello clang non li contengono.
-- **Decompilazione .NET**: il C# di ILSpy contiene costrutti che il frontend C# non modella — attributi
-  (scartati: non sono nel modello) e `x with { … }` (che resta `RAW[cs]` con un diagnostico). I tipi
-  generati dal compilatore sono esclusi dalla selezione.
-- **Ghidra**: l'operatore virgola del C resta `RAW[cpp]`, i puntatori a più livelli si riducono a uno,
-  le convenzioni di chiamata e i commenti del decompilatore si perdono, e il testo canonico non porta
-  l'origine della singola istruzione (la funzione sì).
+  `AddHandler`/`RemoveHandler`, `Exit Try` and the `Like` operator are `RAW[vb]` with a diagnostic; `MyClass`
+  lowers to `this` with a `LossyLowering` (it suppresses virtual dispatch). The direction of a `For` with a
+  non-constant `Step` is assumed positive, and the diagnostic says so.
+- **Razor**: `@switch`, `@try`/`catch`/`finally` and `@do`/`while` stay **a single** `RAW[razor]` with a
+  diagnostic — their `case`/`catch`/`while` are not `@` blocks, so the scanner does not see them as
+  branches; an `@if`/`@foreach` body without braces is markup, not a block. The markup between two
+  constructs is `RAW[razor]` (one segment per line, with the newlines as `\n`) and the directives are
+  `MetacodeOpaqueDeclaration`: a page is not an algorithm, and pretending it is would be worse than saying
+  so.
+- **Pseudocode parser**: a block-bodied lambda is read back, and the lines following an open parenthesis or
+  brace belong to the same statement. Two things stay out: a `RAW[…]` line with unbalanced parentheses is
+  not reassembled (a `RAW` line is always a single line), and a comment with unbalanced parentheses inside a
+  lambda body is not seen as a comment during reassembly.
+- **Comments**: C# captures them from trivia; the Python and clang dumps do not contain them.
+- **.NET decompilation**: ILSpy's C# contains constructs the C# frontend does not model — attributes
+  (dropped: they are not in the model) and `x with { … }` (which stays `RAW[cs]` with a diagnostic).
+  Compiler-generated types are excluded from the selection.
+- **Ghidra**: C's comma operator stays `RAW[cpp]`, multi-level pointers collapse to one, calling conventions
+  and the decompiler's comments are lost, and the canonical text does not carry the origin of the single
+  statement (the function does).
 
-## Decompilazione: da un binario a metacode
+## Decompilation: from a binary to metacode
 
-La decompilazione è entrata nella libreria come **un altro modo di produrre un `MetacodeDocument`**, non
-come una capacità separata: il C# che ILSpy ricostruisce viene letto dal `CSharpFrontend` che già
-esisteva, quindi un tipo decompilato ha la stessa forma di un tipo letto da sorgente — namespace, tipi,
-membri, corpi, `Origin` su ogni nodo. `Snitch` non può referenziare `Snitch.Metacode` (è il contrario),
-per cui l'implementazione vive qui; il namespace pubblico `Snitch.Languages.CSharp.Decompilation` non è
-cambiato, così i chiamanti esistenti compilano senza modifiche.
+Decompilation entered the library as **another way of producing a `MetacodeDocument`**, not as a separate
+capability: the C# ILSpy reconstructs is read by the `CSharpFrontend` that already existed, so a decompiled
+type has the same shape as a type read from source — namespace, types, members, bodies, `Origin` on every
+node. `Snitch` cannot reference `Snitch.Metacode` (it is the other way round), so the implementation lives
+here; the public namespace `Snitch.Languages.CSharp.Decompilation` is unchanged, so existing callers compile
+without changes.
 
 ```
-assembly .dll ──ILSpy──▶ C# ──CSharpFrontend──▶ MetacodeDocument ──renderer──▶ pseudocodice
-binario nativo ──Ghidra headless──▶ C decompilato ──normalizzazione──▶ testo canonico ──PseudocodeFrontend──▶ MetacodeDocument
+assembly .dll ──ILSpy──▶ C# ──CSharpFrontend──▶ MetacodeDocument ──renderer──▶ pseudocode
+native binary ──Ghidra headless──▶ decompiled C ──normalization──▶ canonical text ──PseudocodeFrontend──▶ MetacodeDocument
 ```
 
-### Due contratti, una implementazione
+### Two contracts, one implementation
 
-`DecompileService` implementa entrambe le metà, e `AddSnitchMetacode()` registra l'una accanto all'altra:
+`DecompileService` implements both halves, and `AddSnitchMetacode()` registers one next to the other:
 
-| Contratto | Cosa restituisce |
+| Contract | What it returns |
 |---|---|
-| `IDecompileService` | il testo C# di prima, con le tre chiamate di sempre (`DecompileType`, `DecompileAssembly`, `DecompileTypes`) |
-| `IMetacodeDecompileService` | `MetacodeDecompilation`: tipi decompilati con il loro pseudocodice, il `MetacodeDocument` unito, i diagnostici, i tipi nascosti e gli errori |
+| `IDecompileService` | the same C# text as before, with the usual three calls (`DecompileType`, `DecompileAssembly`, `DecompileTypes`) |
+| `IMetacodeDecompileService` | `MetacodeDecompilation`: decompiled types with their pseudocode, the merged `MetacodeDocument`, the diagnostics, the hidden types and the errors |
 
 ```csharp
 using Snitch.Languages.CSharp.Decompilation;
 using Microsoft.Extensions.DependencyInjection;
 
-services.AddSnitchMetacode();   // dopo AddSnitch()
+services.AddSnitchMetacode();   // after AddSnitch()
 
 var result = service.DecompileTypeToMetacode(assemblyPath, "Newtonsoft.Json.JsonConvert");
-result.Pseudocode;              // il tipo in pseudocodice canonico
-result.Document;                // lo stesso albero, con l'origine di ogni nodo
-result.Types[0].Members;        // quanti membri ha visto il modello
+result.Pseudocode;              // the type in canonical pseudocode
+result.Document;                // the same tree, with the origin of every node
+result.Types[0].Members;        // how many members the model saw
 ```
 
-Ogni tipo è decompilato **da solo** e tradotto da solo: un tipo che il modello non sa leggere costa
-quel tipo e non l'assembly. I tipi generati dal compilatore (`<>c`, `<PrivateImplementationDetails>`) non
-entrano nella selezione; un tipo che ILSpy non riesce a stampare finisce in `Hidden`, uno che fallisce
-in `Errors` — mai un'eccezione al chiamante.
+Every type is decompiled **on its own** and translated on its own: a type the model cannot read costs that
+type and not the assembly. Compiler-generated types (`<>c`, `<PrivateImplementationDetails>`) do not enter
+the selection; a type ILSpy cannot print ends up in `Hidden`, one that fails in `Errors` — never an
+exception to the caller.
 
-**L'origine di un nodo decompilato** punta alla riga del C# che ILSpy ha prodotto, etichettata
-`<assembly>:<tipo>.cs`: è la traccia che esiste davvero, perché il sorgente originale non c'è. Se serve
-anche il file `.cs` su disco, `IDecompileService.DecompileTypes` continua a scriverlo.
+**The origin of a decompiled node** points at the line of the C# ILSpy produced, labelled
+`<assembly>:<type>.cs`: it is the trace that actually exists, because the original source does not. If the
+`.cs` file on disk is also wanted, `IDecompileService.DecompileTypes` still writes it.
 
-## Ghidra: un binario nativo, lo stesso modello
+## Ghidra: a native binary, the same model
 
-Ghidra headless decompila un eseguibile in C; quel C viene **normalizzato nel testo canonico** e riletto
-dal `PseudocodeFrontend`. È la scelta di "normalizzare prima", e non è un ripiego:
+Ghidra headless decompiles an executable to C; that C is **normalized into the canonical text** and read
+back by `PseudocodeFrontend`. It is the "normalize first" choice, and it is not a fallback:
 
-- il `CppFrontend` legge il JSON di `clang -ast-dump`, non del testo C, e il C di Ghidra non è un
-  translation unit che un compilatore accetterebbe (`undefined8`, `FUN_140001008`, `LAB_…` sono nomi di
-  Ghidra);
-- normalizzare invece riusa il lettore documentato per "qualunque linguaggio per cui non esiste un
-  frontend" (`PseudocodeFrontend`), quindi resta **un solo formato e un solo lettore**;
-- il normalizzatore è un vero lettore di C, non una sostituzione di testo: un cast resta un `CAST`, una
-  dereferenziazione resta una dereferenziazione, `p->f` diventa `p.f` — non un `p->f` diventato per caso
-  un'altra cosa.
+- `CppFrontend` reads the JSON of `clang -ast-dump`, not C text, and Ghidra's C is not a translation unit a
+  compiler would accept (`undefined8`, `FUN_140001008`, `LAB_…` are Ghidra names);
+- normalizing instead reuses the documented reader for "any language that has no frontend"
+  (`PseudocodeFrontend`), so **one format and one reader** remain;
+- the normalizer is a real C reader, not a text substitution: a cast stays a `CAST`, a dereference stays a
+  dereference, `p->f` becomes `p.f` — not a `p->f` that accidentally became something else.
 
-### Il servizio
+### The service
 
 ```csharp
 using Snitch.Metacode.Decompilation;
@@ -380,160 +371,159 @@ using Snitch.Metacode.Decompilation;
 IGhidraService ghidra = provider.GetRequiredService<IGhidraService>();
 var analysis = await ghidra.AnalyzeAsync(@"C:\Windows\System32\version.dll");
 
-analysis.Functions;   // quante funzioni ha recuperato
-analysis.Error;       // il motivo esatto se non è partita (mai un'eccezione)
-analysis.LogPath;     // il log completo del processo
-analysis.ToMetacode();// le funzioni come MetacodeDocument
+analysis.Functions;   // how many functions it recovered
+analysis.Error;       // the exact reason if it did not start (never an exception)
+analysis.LogPath;     // the full log of the process
+analysis.ToMetacode();// the functions as a MetacodeDocument
 ```
 
-- **Dove sta Ghidra**: `GhidraOptions.HeadlessPath`, poi `GhidraHome`, poi `GHIDRA_INSTALL_DIR`/
-  `GHIDRA_HOME`, infine la cartella dell'installer (`%LOCALAPPDATA%\VisualMCP\tools\ghidra_*`, o
-  `GhidraOptions.ToolsDirectory`). Il servizio non presume che sia nel `PATH`.
-- **Progetto temporaneo**: uno per analisi, sotto `GhidraOptions.OutputDirectory` (default
-  `%TEMP%\vmcp-ghidra\<sha256 del binario>`). Ghidra lo cancella a fine corsa (`-deleteProject`) e il
-  servizio toglie la cartella rimasta; con `KeepProject = true` l'opzione **non** viene passata e il
-  progetto resta, insieme allo script `ExportNativeGraph.java` che il servizio scrive lì: non dipende da
-  un file esterno.
-- **Timeout**: `TimeoutSeconds` è un tetto per l'intera corsa; allo scadere il processo **e il suo albero**
-  vengono uccisi e il risultato dice che è andato in timeout, con il log.
-- **JDK**: `JAVA_HOME_OVERRIDE` viene impostata per il processo figlio quando `GhidraOptions.JavaHome` è
-  noto, oppure — come faceva la pipeline nativa precedente — dopo un primo tentativo fallito con un
-  errore che nomina Java: in quel caso il servizio cerca un JDK (`JAVA_HOME` e le cartelle standard) e
-  riprova una volta sola. Su questa macchina `JAVA_HOME` punta a un JDK 17 e Ghidra 12.2 parte
-  comunque: il percorso di override esiste per le macchine in cui non parte.
+- **Where Ghidra lives**: `GhidraOptions.HeadlessPath`, then `GhidraHome`, then `GHIDRA_INSTALL_DIR`/
+  `GHIDRA_HOME`, finally the installer folder (`%LOCALAPPDATA%\VisualMCP\tools\ghidra_*`, or
+  `GhidraOptions.ToolsDirectory`). The service does not assume it is on the `PATH`.
+- **Temporary project**: one per analysis, under `GhidraOptions.OutputDirectory` (default
+  `%TEMP%\vmcp-ghidra\<sha256 of the binary>`). Ghidra deletes it at the end of the run (`-deleteProject`)
+  and the service removes the leftover folder; with `KeepProject = true` the option is **not** passed and the
+  project stays, together with the `ExportNativeGraph.java` script the service writes there: it does not
+  depend on an external file.
+- **Timeout**: `TimeoutSeconds` is a cap for the whole run; when it expires the process **and its tree** are
+  killed and the result says it timed out, with the log.
+- **JDK**: `JAVA_HOME_OVERRIDE` is set for the child process when `GhidraOptions.JavaHome` is known, or — as
+  the previous native pipeline did — after a first attempt that failed with an error naming Java: in that
+  case the service looks for a JDK (`JAVA_HOME` and the standard folders) and retries once. On this machine
+  `JAVA_HOME` points at a JDK 17 and Ghidra 12.2 starts anyway: the override path exists for the machines
+  where it does not.
 
-### Installazione: Ghidra se non c'è
+### Installation: Ghidra when it is missing
 
-`GhidraOptions.AutoInstall` (default `true`) fa sì che `AnalyzeAsync` non si limiti a cercare Ghidra:
-se non lo trova, `GhidraInstaller` scarica l'ultima release dal feed GitHub del progetto
-(`ghidra_<versione>_PUBLIC_<data>.zip`, l'unico archivio che Ghidra pubblica — è indipendente dalla
-piattaforma) e la estrae sotto la cartella strumenti dell'utente. `HostSystem` è l'unica risposta alla
-domanda "che piattaforma è questa": decide il nome del launcher (`analyzeHeadless.bat` su Windows,
-`analyzeHeadless` altrove) e, su Linux/macOS, ripristina il bit di esecuzione che uno zip estratto su
-Windows non conserva (`RestoreUnixModes`). `GhidraHome`/`GHIDRA_INSTALL_DIR` vincono sempre e non
-scaricano niente; `AutoInstall = false` è la scelta di chi gestisce Ghidra da sé.
+`GhidraOptions.AutoInstall` (default `true`) means `AnalyzeAsync` does not merely look for Ghidra: if it does
+not find it, `GhidraInstaller` downloads the latest release from the project's GitHub feed
+(`ghidra_<version>_PUBLIC_<date>.zip`, the only archive Ghidra publishes — it is platform-independent) and
+extracts it under the user's tools folder. `HostSystem` is the only answer to "which platform is this": it
+decides the launcher name (`analyzeHeadless.bat` on Windows, `analyzeHeadless` elsewhere) and, on
+Linux/macOS, restores the execute bit that a zip extracted on Windows does not preserve
+(`RestoreUnixModes`). `GhidraHome`/`GHIDRA_INSTALL_DIR` always win and download nothing; `AutoInstall = false`
+is the choice of whoever manages Ghidra themselves.
 
-`GhidraInstallation` restituisce `HeadlessPath`, `Home`, `Version`, `Source` (`explicit`, `ghidraHome`,
-`environment`, `tools`) e l'errore con l'istruzione manuale quando il download non è possibile. Il
-fallimento non è un'eccezione: `analyze_native_binary` e `metacoding` lo riportano con il log.
+`GhidraInstallation` returns `HeadlessPath`, `Home`, `Version`, `Source` (`explicit`, `ghidraHome`,
+`environment`, `tools`) and the error with the manual instruction when the download is not possible. A
+failure is not an exception: `analyze_native_binary` and `metacoding` report it with the log.
 
-### Dove finisce il risultato
+### Where the result goes
 
-Un binario che non è un assembly gestito non ha C# da decompilare: `ManagedAssemblyDetector` legge
-l'header PE (directory COM descriptor) e `metacoding action=decompile` lo instrada a Ghidra invece di
-fallire dentro ILSpy. `analyze_native_binary` fa la stessa cosa per la sola lettura.
+A binary that is not a managed assembly has no C# to decompile: `ManagedAssemblyDetector` reads the PE header
+(COM descriptor directory) and `metacoding action=decompile` routes it to Ghidra instead of failing inside
+ILSpy. `analyze_native_binary` does the same for the read-only path.
 
-Il risultato viene **persistito due volte**, e la seconda è quella che conta per l'AST: le funzioni
-recuperate diventano **un documento metacode** sotto `native://<file>` — le funzioni come dichiarazioni,
-l'AST completo nodo per nodo, la complessità, tutto nelle stesse tabelle (`mc_document`/`mc_tree`/
-`mc_node`) del codice della soluzione, con `source_path` = il binario e `decompiled` = 1 — e restano
-anche nelle tabelle native dedicate:
+The result is **persisted twice**, and the second is the one that matters for the AST: the recovered
+functions become **a metacode document** under `native://<file>` — the functions as declarations, the full
+node-by-node AST, the complexity, all in the same tables (`mc_document`/`mc_tree`/`mc_node`) as the
+solution's code, with `source_path` = the binary and `decompiled` = 1 — and they also remain in the dedicated
+native tables:
 
-| Tabella | Cosa contiene |
+| Table | What it holds |
 |---|---|
-| `native_artifact` | un binario analizzato: `sha256` (l'identità), file, percorso, `image`, linguaggio del processore, entry point, image base, numero di funzioni, dimensione, versione di Ghidra, launcher, data |
-| `native_function` | una riga per funzione recuperata: nome, indirizzo di ingresso, prototipo, dimensione, **C decompilato** di Ghidra, **pseudocodice canonico** del modello, cyclomatic/cognitive/max nesting/statement/branch |
-| `native_call` | un arco per chiamata vista da Ghidra: `caller` e `callee` per indirizzo di ingresso |
+| `native_artifact` | one analysed binary: `sha256` (its identity), file, path, `image`, processor language, entry point, image base, function count, size, Ghidra version, launcher, date |
+| `native_function` | one row per recovered function: name, entry address, prototype, size, Ghidra's **decompiled C**, the model's **canonical pseudocode**, cyclomatic/cognitive/max nesting/statement/branch |
+| `native_call` | one edge per call seen by Ghidra: `caller` and `callee` by entry address |
 
-La chiave è lo SHA-256 del file: lo stesso binario (anche copiato altrove) non viene decompilato due
-volte, e `force=true` sostituisce le righe invece di aggiungerne una seconda copia. Il modello viene
-tradotto una volta sola: ogni funzione prende la sua voce in `native_function`, con lo stesso
-pseudocodice e la stessa complessità che avrebbe un albero della soluzione. La scrittura è transazionale
-e degrada senza far fallire l'analisi se il database non è disponibile.
+The key is the file's SHA-256: the same binary (even copied elsewhere) is not decompiled twice, and
+`force=true` replaces the rows instead of adding a second copy. The model is translated once: every function
+gets its entry in `native_function`, with the same pseudocode and the same complexity a tree of the solution
+would have. The write is transactional and degrades without failing the analysis when the database is not
+available.
 
-### La cartella del binario: leggere e decompilare i vicini
+### The binary's folder: reading and decompiling its neighbours
 
-Un binario non vive da solo: accanto ha la sua documentazione, i suoi `.config`, e gli altri binari dello
-stesso programma. Dopo una decompilazione (`metacoding action=decompile`, `siblings` acceso per default)
-la **stessa cartella** viene percorsa e quello che c'è dentro entra nello stesso AST:
+A binary does not live alone: next to it are its documentation, its `.config` files, and the other binaries
+of the same program. After a decompilation (`metacoding action=decompile`, `siblings` on by default) the
+**same folder** is walked and what is inside enters the same AST:
 
-- i file **di testo** vengono letti come in una build (timestamp, poi hash): un `.md`, un `.json` o un
-  `.cs` diventano un documento, con il frontend se la lingua ne ha uno e un nodo `File` se no;
-- gli altri **assembly gestiti** vengono decompilati con ILSpy (uno per uno, con la stessa chiave MVID:
-  quelli già in archivio vengono saltati);
-- i binari **nativi** vengono passati a Ghidra, ma al massimo due per scansione: una corsa di Ghidra
-  costa decine di secondi e una cartella di eseguibili non deve trasformare una chiamata in un'attesa.
-  Gli altri sono elencati come saltati, con l'istruzione di decomprimerli da soli.
+- **text** files are read as in a build (timestamp, then hash): a `.md`, a `.json` or a `.cs` becomes a
+  document, with the frontend if the language has one and a `File` node if not;
+- the other **managed assemblies** are decompiled with ILSpy (one by one, with the same MVID key: those
+  already in the store are skipped);
+- **native** binaries are handed to Ghidra, but at most two per sweep: one Ghidra run costs tens of seconds
+  and a folder of executables must not turn a call into a wait. The others are listed as skipped, with the
+  instruction to decompress them on their own.
 
-Il tetto è `maxSiblings` (default 25 file esaminati): oltre, la scansione si ferma e lo dice. I file più
-grandi di 64 MB sono saltati, i binari già decompilati (SHA-256 in `native_artifact`) non vengono
-rianalizzati, e ogni file passato dallo stesso controllo di freschezza della build — quindi una seconda
-chiamata sulla stessa cartella non riscrive niente. Il risultato riporta un `sweep` con i conteggi
-(testi letti, assembly decompilati, binari nativi, saltati, falliti) e i motivi dei saltati.
+The cap is `maxSiblings` (default 25 files examined): beyond it, the sweep stops and says so. Files larger
+than 64 MB are skipped, already-decompiled binaries (SHA-256 in `native_artifact`) are not re-analysed, and
+every file goes through the same freshness check as a build — so a second call on the same folder rewrites
+nothing. The result reports a `sweep` with the counts (texts read, assemblies decompiled, native binaries,
+skipped, failed) and the reasons for the skipped ones.
 
-### La normalizzazione, costrutto per costrutto
+### Normalization, construct by construct
 
-| C di Ghidra | Pseudocodice | Nota |
+| Ghidra's C | Pseudocode | Note |
 |---|---|---|
-| `void FUN_x(longlong a, byte * b)` | `FUNCTION FUN_x(a : longlong, b : byte*) : void` | la convenzione di chiamata (`__fastcall`) non è nel modello e viene scartata |
-| `undefined8 x;` | `DECLARE x : undefined8` | `type name [32]` tiene la dimensione nel nome del tipo |
-| `*p = 0;` | `(*p) = 0` | una scrittura attraverso un puntatore è un'assegnazione, non una dichiarazione |
-| `(uint)*p << 0x18` | `CAST(uint, *p) << 0x18` | il cast resta un cast, l'esadecimale resta un numero |
+| `void FUN_x(longlong a, byte * b)` | `FUNCTION FUN_x(a : longlong, b : byte*) : void` | the calling convention (`__fastcall`) is not in the model and is dropped |
+| `undefined8 x;` | `DECLARE x : undefined8` | `type name [32]` keeps the size in the type name |
+| `*p = 0;` | `(*p) = 0` | a write through a pointer is an assignment, not a declaration |
+| `(uint)*p << 0x18` | `CAST(uint, *p) << 0x18` | the cast stays a cast, the hex stays a number |
 | `p->f` | `p.f` | |
-| `&DAT_…`, `*puVar7` | `&DAT_…`, `*puVar7` | due operatori unari nuovi del modello, `AddressOf` e `Dereference` |
-| `L"testo"`, `L'\0'` | `"testo"`, `'\0'` | il prefisso wide è la codifica, non il valore |
-| `if/else`, `while`, `do…while`, `for`, `switch` con `case`/`default`, `goto`/label | `IF/ELSE`, `WHILE`, `REPEAT…UNTIL`, `FOR`, `SWITCH`, `GOTO`/`LABEL` | la `for` poi diventa `WHILE` con la passata di normalizzazione, come per ogni altra lingua |
-| `/* WARNING: … */` | — | i commenti di Ghidra parlano del decompilatore, non del programma |
+| `&DAT_…`, `*puVar7` | `&DAT_…`, `*puVar7` | two new unary operators of the model, `AddressOf` and `Dereference` |
+| `L"text"`, `L'\0'` | `"text"`, `'\0'` | the wide prefix is the encoding, not the value |
+| `if/else`, `while`, `do…while`, `for`, `switch` with `case`/`default`, `goto`/label | `IF/ELSE`, `WHILE`, `REPEAT…UNTIL`, `FOR`, `SWITCH`, `GOTO`/`LABEL` | the `for` then becomes `WHILE` through the normalization pass, as in every other language |
+| `/* WARNING: … */` | — | Ghidra's comments talk about the decompiler, not the program |
 
-**Quello che non entra** è dichiarato, non indovinato: un'espressione con la virgola di C
-(`while (p = f(p), *p)`) non ha un nodo — è una sequenza, e il modello non ha espressioni sequenza — e
-diventa `RAW[cpp] …` con un diagnostico `MC0008` che dice perché. Un tipo con più livelli di puntatore
-(`char **`) si riduce al livello che `MetacodeTypeRef.IsPointer` sa rappresentare.
+**What does not fit** is declared, not guessed: a C comma expression (`while (p = f(p), *p)`) has no node —
+it is a sequence, and the model has no sequence expressions — and it becomes `RAW[cpp] …` with an `MC0008`
+diagnostic that says why. A type with more than one pointer level (`char **`) collapses to the level
+`MetacodeTypeRef.IsPointer` can represent.
 
-**L'origine di una funzione nativa** è ciò che serve per ritrovarla: il documento è il binario, la riga è
-la posizione nel snapshot, lo `Snippet` è la firma di Ghidra. Il testo canonico invece non porta origini
-(il lettore del pseudocodice non le segue), ed è per questo che la funzione — non la singola istruzione —
-è l'unità tracciabile di un albero nativo.
+**The origin of a native function** is what is needed to find it again: the document is the binary, the line
+is the position in the snapshot, the `Snippet` is Ghidra's signature. The canonical text, by contrast, does
+not carry origins (the pseudocode reader does not follow them), which is why the function — not the single
+statement — is the traceable unit of a native tree.
 
-### Come si prova
+### How it is tested
 
-Ghidra non si invoca nei test: è lento e dipende dalla macchina. `DecompilationMetacodeTests` registra
-un **snapshot vero** (due funzioni di `C:\Windows\System32\version.dll`, catturate con una corsa headless
-il 29 ottobre 2026) e verifica su quello il parser del formato, il metacode prodotto, l'origine, il giro
-completo renderer↔parser e il caso `RAW` dell'operatore virgola. `NativeCodeStoreTests` (7 casi) usa lo
-stesso snapshot per le tabelle: le righe di `native_artifact`/`native_function`/`native_call`, la chiave
-SHA-256, il riuso e la sostituzione forzata, la ricerca per nome o indirizzo, il routing di un file non
-gestito attraverso `metacoding`, l'installer che riconosce una copia esistente e la scelta dell'asset
-dal feed delle release. La verifica "Ghidra parte davvero" si fa a mano, una volta, e il suo esito va nel
-report di chi la esegue.
+Ghidra is not invoked in the tests: it is slow and machine-dependent. `DecompilationMetacodeTests` registers a
+**real snapshot** (two functions of `C:\Windows\System32\version.dll`, captured with a headless run on
+29 October 2026) and verifies on it the format parser, the produced metacode, the origin, the full
+renderer↔parser round trip and the `RAW` case of the comma operator. `NativeCodeStoreTests` (7 cases) uses
+the same snapshot for the tables: the `native_artifact`/`native_function`/`native_call` rows, the SHA-256
+key, reuse and forced replacement, lookup by name or address, routing of a non-managed file through
+`metacoding`, the installer recognising an existing copy and the asset choice from the release feed. The
+"Ghidra really starts" verification is done by hand, once, and its outcome goes into the report of whoever
+runs it.
 
-## Il modello è cresciuto ancora un po'
+## The model grew a little more
 
-| Costrutto | Nodo | Da dove |
+| Construct | Node | Where from |
 |---|---|---|
-| `*p`, `&x` | `MetacodeUnary` con `Dereference` / `AddressOf` | C, C++ e qualunque cosa decompili Ghidra; stampati come in C e riletti dal parser |
-| `x with { A = y }` | `MetacodeWithExpression`, stampato `WITH { … }` | aggiornamento di un record/valore; l'emitter riscrive `with` |
-| `new { A = x, y }` | `MetacodeAnonymousObject`, stampato `ANON { … }` | oggetto senza tipo dichiarato; lo shorthand conserva il nome dell'espressione |
-| `x is not ("a" or "b")`, `x is { }`, `case > 0:` | `MetacodePatternMatch` / `MetacodePatternText`, stampati `MATCHES (…)` e `PATTERN (…)` | il pattern resta testo (la stessa scelta di `MetacodeSwitchArm`), l'operando è un nodo vero |
-| `[.. xs, 1]` | `MetacodeSpread`, stampato `SPREAD xs` | spread di una collection expression |
+| `*p`, `&x` | `MetacodeUnary` with `Dereference` / `AddressOf` | C, C++ and whatever Ghidra decompiles; printed as in C and read back by the parser |
+| `x with { A = y }` | `MetacodeWithExpression`, printed `WITH { … }` | record/value update; the emitter rewrites `with` |
+| `new { A = x, y }` | `MetacodeAnonymousObject`, printed `ANON { … }` | object without a declared type; the shorthand keeps the expression name |
+| `x is not ("a" or "b")`, `x is { }`, `case > 0:` | `MetacodePatternMatch` / `MetacodePatternText`, printed `MATCHES (…)` and `PATTERN (…)` | the pattern stays text (the same choice as `MetacodeSwitchArm`), the operand is a real node |
+| `[.. xs, 1]` | `MetacodeSpread`, printed `SPREAD xs` | spread of a collection expression |
 
-Il lettore del testo canonico ha chiuso, in questa passata, quattro buchi che il C decompilato ha
-rivelato: gli esadecimali (`0x100` non si spezza più in `0x` e `100`), i letterali carattere (`'\0'`),
-la testata di un `FOR` con `<` (che non apre più una parentesi angolare, quindi `FOR i = 0; i < n; i += 1 DO`
-si rilegge), e una riga `RAW[…]` riletta come **warning** invece che come errore — `RAW` è testo canonico
-valido, non un fallimento del parser.
+In this pass the canonical-text reader closed four holes that the decompiled C revealed: hex literals
+(`0x100` no longer splits into `0x` and `100`), character literals (`'\0'`), a `FOR` header containing `<`
+(which no longer opens an angle bracket, so `FOR i = 0; i < n; i += 1 DO` reads back), and a `RAW[…]` line
+read back as a **warning** instead of an error — `RAW` is valid canonical text, not a parser failure.
 
-Con i cinque nodi sopra, il modello traduce **tutto il codice della libreria stessa**: i 48 file di
-`SNITCH/Libraries/Snitch.Metacode` passano da 560 diagnostici a zero. `MetacodeLibraryCoverageTests`
-è il guardiano: traduce ogni file e fallisce se un costrutto nuovo resta senza nodo, così il modello
-non torna indietro. `MetacodeExpressionTests` copre i cinque costrutti uno per uno (testo canonico,
-giro renderer↔parser, emissione C# rileggibile), e il caso "with, anonymous objects, patterns and
-spreads" è nella teoria di `MetacodeGenerationTests` che verifica il giro completo emitter→C#→modello.
+With the five nodes above, the model translates **all of the library's own code**: the 48 files of
+`SNITCH/Libraries/Snitch.Metacode` go from 560 diagnostics to zero. `MetacodeLibraryCoverageTests` is the
+guardian: it translates every file and fails if a new construct is left without a node, so the model cannot
+regress. `MetacodeExpressionTests` covers the five constructs one by one (canonical text, renderer↔parser
+round trip, re-readable C# emission), and the "with, anonymous objects, patterns and spreads" case is in the
+theory of `MetacodeGenerationTests` that verifies the full emitter→C#→model round trip.
 
-## Razor: una pagina è una classe che renderizza
+## Razor: a page is a class that renders
 
-Un `.cshtml`/`.razor` non è un albero di dichiarazioni: è markup con dentro C#. Il `RazorFrontend` lo
-modella per quello che è — una classe con una pagina da disegnare:
+A `.cshtml`/`.razor` is not a tree of declarations: it is markup with C# inside. `RazorFrontend` models it
+for what it is — a class with a page to draw:
 
-- `@model` diventa la proprietà `Model`, ogni `@inject` una proprietà con lo stesso nome (o il nome del
-  tipo); le altre direttive (`@page`, `@using`, `@layout`, `@attribute`, i tag helper) sono
-  `MetacodeOpaqueDeclaration` con il loro testo, perché configurano la pagina, non la dichiarano.
-- i membri di `@code`/`@functions` passano dal `CSharpFrontend`: la classe li contiene già, quindi il
-  frontend li legge per davvero (metodi, proprietà, campi) con l'**origine sulla riga della pagina**.
-- il corpo del markup è il corpo di un metodo `Render`: `@if`/`else if`/`else`, `@foreach`, `@for`,
-  `@while`, `@lock` e `@using (…)` sono i nodi di controllo del modello (l'intestazione è C#, quindi la
-  abbassa il frontend C# su una forma vuota, e il corpo è il markup), e l'HTML fra un costrutto e
-  l'altro resta un `RAW[razor]`.
+- `@model` becomes the `Model` property, every `@inject` a property with the same name (or the type name);
+  the other directives (`@page`, `@using`, `@layout`, `@attribute`, the tag helpers) are
+  `MetacodeOpaqueDeclaration` with their text, because they configure the page, they do not declare it.
+- the members of `@code`/`@functions` go through `CSharpFrontend`: the class already contains them, so the
+  frontend reads them for real (methods, properties, fields) with the **origin on the page's line**.
+- the markup body is the body of a `Render` method: `@if`/`else if`/`else`, `@foreach`, `@for`, `@while`,
+  `@lock` and `@using (…)` are the model's control nodes (the header is C#, so the C# frontend lowers it
+  onto an empty shape, and the body is the markup), and the HTML between one construct and another stays a
+  `RAW[razor]`.
 
 ```razor
 @model ProductListViewModel
@@ -558,316 +548,314 @@ MODULE Index
 END MODULE
 ```
 
-L'`else` è la ragione per cui il frontend rilegge il testo invece di fidarsi della lista dei blocchi: in
-Razor `else`/`else if` non hanno la `@`, quindi lo scanner non li riporta, e la catena va ricostruita dai
-brace. Per lo stesso motivo `@switch`, `@try` e `@do` restano opachi: le loro `case`/`catch`/`while` sono
-markup, non rami che il modello possa rappresentare senza inventare.
+`else` is the reason the frontend re-reads the text instead of trusting the list of blocks: in Razor
+`else`/`else if` have no `@`, so the scanner does not report them, and the chain has to be rebuilt from the
+braces. For the same reason `@switch`, `@try` and `@do` stay opaque: their `case`/`catch`/`while` are markup,
+not branches the model could represent without inventing.
 
-## Visual Basic: un modulo è una classe
+## Visual Basic: a module is a class
 
-`VisualBasicFrontend` legge un `.vb` con il livello sintattico di Roslyn, come il C#: un parse, nessuna
-compilazione. Un `Module` diventa una `CLASS` con il modificatore `STATIC`; `Structure`, `Interface` ed
-`Enum` hanno i loro kind; `Inherits` e `Implements` confluiscono nella lista `EXTENDS`. Una proprietà con
-accessori espliciti diventa una `PROPERTY` con i due accessor, una automatica due accessor vuoti (`AUTO`).
+`VisualBasicFrontend` reads a `.vb` with Roslyn's syntax layer, like C#: one parse, no compilation. A
+`Module` becomes a `CLASS` with the `STATIC` modifier; `Structure`, `Interface` and `Enum` have their own
+kinds; `Inherits` and `Implements` merge into the `EXTENDS` list. A property with explicit accessors becomes a
+`PROPERTY` with the two accessors, an automatic one two empty accessors (`AUTO`).
 
-Le tre forme condizionali restano distinte e diventano ciò che dicono: `If(c, a, b)` un
-`MetacodeConditional`, `If(a, b)` un `??`, `If … Then` un `IF`. `For i = 0 To n` scende a `MetacodeFor`
-con il confronto nella direzione dello `Step` quando è una costante, `Select Case` diventa `SWITCH` con
-`To` e `Is >` come pattern testuali, `Do … Loop Until` un `REPEAT … UNTIL`, e `d!Name` un indice su
-stringa. Un `Dim x = 1` non porta tipo, come il `var` del C#: il modello li stampa allo stesso modo.
+The three conditional forms stay distinct and become what they say: `If(c, a, b)` a `MetacodeConditional`,
+`If(a, b)` a `??`, `If … Then` an `IF`. `For i = 0 To n` lowers to `MetacodeFor` with the comparison in the
+direction of the `Step` when it is a constant, `Select Case` becomes `SWITCH` with `To` and `Is >` as textual
+patterns, `Do … Loop Until` a `REPEAT … UNTIL`, and `d!Name` an index on a string. A `Dim x = 1` carries no
+type, like C#'s `var`: the model prints them the same way.
 
-Ciò che il modello non ha resta `RAW[vb]` con un diagnostico: `With … End With` (un ricevitore implicito
-non si abbassa senza duplicarne la valutazione), `ReDim`, `Erase`, `On Error`, `RaiseEvent`,
-`AddHandler`/`RemoveHandler`, `Exit Try` e `Like`. L'elenco completo è nei limiti noti.
+What the model does not have stays `RAW[vb]` with a diagnostic: `With … End With` (an implicit receiver
+cannot be lowered without duplicating its evaluation), `ReDim`, `Erase`, `On Error`, `RaiseEvent`,
+`AddHandler`/`RemoveHandler`, `Exit Try` and `Like`. The full list is in the known limits.
 
-## L'indice dei simboli
+## The symbol index
 
-`Symbols/` risponde, dal database invece che dalla soluzione, alle domande che in Visual Studio sono *Go To
-Definition*, *Find All References* e *Call Hierarchy*, e in ILSpy sono l'*Analyzer*: **dove è dichiarato un
-membro, con quale firma, dove viene usato, come viene usato, chi lo usa e cosa usa**. Il costo di rispondere
-la prima volta si paga una volta sola: poi sono query SQLite indicizzate, e un file che non è cambiato non
-viene riaperto.
+`Symbols/` answers, from the database instead of from the solution, the questions that in Visual Studio are
+*Go To Definition*, *Find All References* and *Call Hierarchy*, and in ILSpy are the *Analyzer*: **where a
+member is declared, with which signature, where it is used, how it is used, who uses it and what it uses**.
+The cost of answering the first time is paid once: afterwards they are indexed SQLite queries, and a file
+that has not changed is not reopened.
 
 ```
-documento C# ──Roslyn (sintassi + modello semantico)──► SymbolIndexBuilder
-                                                        │  dichiarazioni (firma, span, contenitore)
-                                                        │  usi (come, dentro quale membro)
-                                                        │  relazioni che la sintassi non scrive (override, implement)
-                                                        │  alberi metacode, uno per dichiarazione
-                                                        ▼
+C# document ──Roslyn (syntax + semantic model)──► SymbolIndexBuilder
+                                                   │  declarations (signature, span, container)
+                                                   │  uses (how, inside which member)
+                                                   │  relations the syntax does not write (override, implement)
+                                                   │  metacode trees, one per declaration
+                                                   ▼
                         .visualMCP/visualmcp.db  (si_symbol, si_usage, si_metacode, si_document)
-                                                        ▼
+                                                       ▼
                 SymbolIndexService ──► reference_index(action=find|describe|refs|callers|metacode|…)
 ```
 
-### Cosa registra una dichiarazione
+### What a declaration records
 
-La riga porta la **firma come la scrive il sorgente** (`public static int Add(int a, int b)`), il tipo di
-simbolo, accessibilità, modificatori (`static`, `abstract`, `virtual`, `override`, `async`, `const`,
-`readonly`, `required`, `extension`…), il namespace, il **contenitore** (tipo o namespace), il `summary` XML
-quando il progetto lo analizza, e lo span completo — riga, colonna, inizio, fine — così un chiamante può
-leggere il corpo invece di cercarlo.
+The row carries the **signature as the source writes it** (`public static int Add(int a, int b)`), the symbol
+kind, accessibility, modifiers (`static`, `abstract`, `virtual`, `override`, `async`, `const`, `readonly`,
+`required`, `extension`…), the namespace, the **container** (type or namespace), the XML `summary` when the
+project analyses it, and the full span — line, column, start, end — so a caller can read the body instead of
+searching for it.
 
-La **chiave** di un simbolo è `Kind:` + la sua firma completamente qualificata (`Method:global::Ns.C.Add(int)`).
-Due dichiarazioni condividono una chiave solo se sono lo stesso simbolo: una classe parziale ha una chiave e
-più righe, due overload hanno chiavi diverse. I generici costruiti e le extension method ridotte collassano
-sulla definizione, così `List<int>` e `List<string>` sono una voce e `x.Ext()` cade sulla dichiarazione
-`Ext(this X, …)`.
+A symbol's **key** is `Kind:` + its fully qualified signature (`Method:global::Ns.C.Add(int)`). Two
+declarations share a key only if they are the same symbol: a partial class has one key and several rows, two
+overloads have different keys. Constructed generics and reduced extension methods collapse onto the
+definition, so `List<int>` and `List<string>` are one entry and `x.Ext()` falls back on the `Ext(this X, …)`
+declaration.
 
-> `SymbolDisplayFormat.FullyQualifiedFormat` **non basta** in questa versione di Roslyn: omette le opzioni dei
-> membri, quindi ogni metodo si formatta col solo nome e due overload finirebbero sulla stessa chiave. Il
-> formato usato è costruito a mano in `SymbolKeys` e include contenitore, parametri e `ref`/`out`.
+> `SymbolDisplayFormat.FullyQualifiedFormat` is **not enough** in this version of Roslyn: it omits the
+> member's options, so every method formats with the bare name and two overloads would end up on the same
+> key. The format used is built by hand in `SymbolKeys` and includes container, parameters and `ref`/`out`.
 
-### Come viene usato: il vocabolario
+### How it is used: the vocabulary
 
-Il "come" non lo dà Roslyn: va letto dalla sintassi attorno al nome, dal nodo più vicino verso l'alto, e il
-simbolo decide solo dove serve (un'interfaccia si *implementa*, una classe base si *estende*). I valori sono
-stabili — sono salvati nel database e restituiti dai tool — e un valore si aggiunge, non si rinomina:
+The "how" is not given by Roslyn: it has to be read from the syntax around the name, from the nearest node
+upwards, and the symbol decides only where needed (an interface is *implemented*, a base class is *extended*).
+The values are stable — they are saved in the database and returned by the tools — and a value is added, never
+renamed:
 
-| Gruppo | Valori |
+| Group | Values |
 |---|---|
-| Membri | `call`, `method-group`, `instantiate`, `read`, `write`, `read-write`, `initializer-write`, `subscribe`, `unsubscribe`, `ref-argument`, `out-argument`, `in-argument`, `lock` |
-| Tipi | `inherit`, `implement`, `type-argument`, `parameter-type`, `return-type`, `field-type`, `property-type`, `local-type`, `event-type`, `attribute`, `constraint`, `catch`, `cast`, `as`, `pattern`, `typeof`, `default`, `sizeof`, `array`, `nameof`, `deconstruction`, `using`, `type` |
-| Relazioni | `override`, `implement` — le uniche due righe che il sorgente non scrive (sotto) |
+| Members | `call`, `method-group`, `instantiate`, `read`, `write`, `read-write`, `initializer-write`, `subscribe`, `unsubscribe`, `ref-argument`, `out-argument`, `in-argument`, `lock` |
+| Types | `inherit`, `implement`, `type-argument`, `parameter-type`, `return-type`, `field-type`, `property-type`, `local-type`, `event-type`, `attribute`, `constraint`, `catch`, `cast`, `as`, `pattern`, `typeof`, `default`, `sizeof`, `array`, `nameof`, `deconstruction`, `using`, `type` |
+| Relations | `override`, `implement` — the only two rows the source does not write (below) |
 
-`x.y.Z` è **un solo slot**: il nome e ogni accesso di membro sopra di lui rispondono alla stessa domanda
-("è una chiamata, una scrittura, una lettura?"), quindi `x.M()` è `call` mentre `x.M` da solo è
-`method-group`, `x.P = 1` è `write` e `x.P += 1` è `read-write`.
+`x.y.Z` is **a single slot**: the name and every member access above it answer the same question ("is it a
+call, a write, a read?"), so `x.M()` is `call` while `x.M` alone is `method-group`, `x.P = 1` is `write` and
+`x.P += 1` is `read-write`.
 
-### Le relazioni che la sintassi non dice
+### The relations the syntax does not state
 
-`override` non nomina il membro base, e un'implementazione di interfaccia implicita è solo una firma che
-combacia. Entrambe vengono ricostruite (`FindImplementationForInterfaceMember`, `OverriddenMethod`) e
-registrate **come uso del membro base, alla posizione del membro che lo sovrascrive o lo implementa**:
-il contenitore della riga è il membro derivato. Da lì:
+`override` does not name the base member, and an implicit interface implementation is just a matching
+signature. Both are reconstructed (`FindImplementationForInterfaceMember`, `OverriddenMethod`) and recorded
+**as a use of the base member, at the position of the member that overrides or implements it**: the row's
+container is the derived member. From there:
 
-- `implementedBy` di `IFoo.M` sono i membri che la implementano (l'override in una classe derivata compreso,
-  perché si risale la catena degli override);
-- `implementedBy` di `IFoo` sono i tipi che la implementano — registrata una volta sul tipo, così non dipende
-  da quale file dichiara il membro.
+- `implementedBy` of `IFoo.M` are the members that implement it (the override in a derived class included,
+  because the override chain is walked);
+- `implementedBy` of `IFoo` are the types that implement it — recorded once on the type, so it does not depend
+  on which file declares the member.
 
-### Lo stesso albero, in metacode
+### The same tree, in metacode
 
-L'indice non si limita a leggere il sorgente: **lo abbassa anche in metacode**. Mentre il documento è in mano
-(`MetacodeSource.FromSyntaxTree`), il traduttore produce il `MetacodeDocument`, e ogni dichiarazione del
-modello viene accoppiata al simbolo che l'indice conosce — l'origine del nodo (riga e colonna, 1-based) è la
-stessa posizione della dichiarazione Roslyn, con il nome sotto lo stesso contenitore come riserva per i nodi
-che una passata ha spostato. Così `action=metacode` restituisce il **pseudocodice canonico di ciò che hai
-trovato**, letto dal database:
+The index does not merely read the source: it also **lowers it into metacode**. While the document is in hand
+(`MetacodeSource.FromSyntaxTree`), the translator produces the `MetacodeDocument`, and every declaration of
+the model is paired with the symbol the index knows — the node's origin (line and column, 1-based) is the
+same position as the Roslyn declaration, with the name under the same container as a fallback for the nodes
+a pass has moved. So `action=metacode` returns the **canonical pseudocode of what you found**, read from the
+database:
 
 ```
-reference_index(action=metacode, symbol="Counter")        → CLASS Counter … END CLASS   (con i membri)
+reference_index(action=metacode, symbol="Counter")        → CLASS Counter … END CLASS   (with its members)
 reference_index(action=metacode, symbol="Counter.Add")    → PUBLIC METHOD Add(delta : int) … END METHOD
-reference_index(action=metacode, path="…/Counter.cs")     → tutte le foreste del file, in ordine
+reference_index(action=metacode, path="…/Counter.cs")     → all the forests of the file, in order
 ```
 
-Un tipo porta dentro i suoi membri, e ogni membro ha anche la **sua** riga: chiedere un metodo non significa
-rigenerare il tipo. Il testo è quello del renderer — quindi la normalizzazione delle passate è inclusa, e il
-`for` è già un `WHILE` — ed è lo stesso che si rilegge con `PseudocodeFrontend`. È gzip nel database (un tipo
-ripete i suoi membri) e viene riscritto con il documento quando cambia l'hash.
+A type carries its members inside, and every member also has **its own** row: asking for a method does not
+mean regenerating the type. The text is the renderer's — so the passes' normalization is included, and the
+`for` is already a `WHILE` — and it is the same text that `PseudocodeFrontend` reads back. It is gzipped in
+the database (a type repeats its members) and rewritten with the document when the hash changes.
 
-`PseudocodeRenderer` ha per questo due overload pubblici — `Render(MetacodeDeclaration)` e
-`Render(IReadOnlyList<MetacodeDeclaration>)` — che stampano una dichiarazione o una lista con le regole del
-documento intero.
+For this, `PseudocodeRenderer` has two public overloads — `Render(MetacodeDeclaration)` and
+`Render(IReadOnlyList<MetacodeDeclaration>)` — that print one declaration or a list with the whole document's
+rules.
 
-### Usarlo
+### Using it
 
 ```csharp
 using Snitch.Metacode.Symbols;
 using Snitch.Storage;
 using Snitch.Workspace;
 
-var index = new SymbolIndexService(workspace, store);   // o ISymbolIndexService dal container
+var index = new SymbolIndexService(workspace, store);   // or ISymbolIndexService from the container
 
-await index.BuildAsync();                    // incrementale: hash di contenuto per documento
-index.Find("Twice", partial: true);          // dichiarazioni, con quanti posti le usano
-index.Describe("Counter");                   // firma, documentazione, span, usi per tipo, chiamanti
-index.References("_value", kind: "write");   // ogni scrittura, con il membro che la contiene
-index.Callers("Twice");                      // chi la usa, raggruppato per chiamante
-index.Callees("Use");                        // cosa usa quel membro (declared=false ⇒ fuori soluzione)
-index.Hierarchy("IShape");                   // basi, interfacce, derivati, implementatori, override
-index.Outline(symbol: "Counter");            // i membri del tipo, in ordine di sorgente
-index.Outline(path: "…/Counter.cs");         // le dichiarazioni del file
-index.Metacode(symbol: "Counter.Add");       // l'albero metacode di quella dichiarazione
-index.Metacode(path: "…/Counter.cs");        // gli alberi del file, in ordine di sorgente
-index.Unused();                              // dichiarazioni non pubbliche che nessuno usa
+await index.BuildAsync();                    // incremental: content hash per document
+index.Find("Twice", partial: true);          // declarations, with how many places use them
+index.Describe("Counter");                   // signature, documentation, span, uses by kind, callers
+index.References("_value", kind: "write");   // every write, with the member that contains it
+index.Callers("Twice");                      // who uses it, grouped by caller
+index.Callees("Use");                        // what that member uses (declared=false ⇒ outside the solution)
+index.Hierarchy("IShape");                   // bases, interfaces, derived, implementers, overrides
+index.Outline(symbol: "Counter");            // the type's members, in source order
+index.Outline(path: "…/Counter.cs");         // the file's declarations
+index.Metacode(symbol: "Counter.Add");       // the metacode tree of that declaration
+index.Metacode(path: "…/Counter.cs");        // the file's trees, in source order
+index.Unused();                              // non-public declarations nobody uses
 ```
 
-Un documento ha un frontend per lingua (`ISymbolIndexFrontend`: quali nodi dichiarano, quali nomi usano un
-simbolo, come si legge un uso, che firma si stampa); il builder, lo store e il servizio sono neutri. Il C# è
-l'unica implementazione, quindi `build` conta i documenti di altre lingue come `unsupported` invece di
-saltarli in silenzio.
+A document has one frontend per language (`ISymbolIndexFrontend`: which nodes declare, which names use a
+symbol, how a use is read, which signature is printed); the builder, the store and the service are neutral.
+C# is the only implementation, so `build` counts documents of other languages as `unsupported` instead of
+skipping them silently.
 
-Limiti dichiarati: locali, parametri e type parameter non sono indicizzati (la domanda è "chi usa questo
-*membro*"); un gruppo di metodi con più overload e senza invocazione non si lega a un simbolo e viene
-saltato; l'indice è uno **snapshot**, va ricostruito dopo le modifiche (le query non leggono i file, tranne
-la riga di codice mostrata come `snippet`).
+Declared limits: locals, parameters and type parameters are not indexed (the question is "who uses this
+*member*"); a method group with several overloads and no invocation does not bind to a symbol and is skipped;
+the index is a **snapshot**, it must be rebuilt after changes (the queries do not read the files, except the
+line of code shown as `snippet`).
 
-## Il metacode della soluzione, persistito
+## The solution's metacode, persisted
 
-`reference_index build` produce gli alberi come effetto collaterale dell'indice dei simboli. Ma il
-metacode della soluzione è un artefatto a sé, e ha un ciclo di vita proprio:
+`reference_index build` produces the trees as a side effect of the symbol index. But the solution's metacode is
+an artifact of its own, with its own lifecycle:
 
-- **alla prima apertura della soluzione** viene generato per **ogni file della soluzione** (il task in
-  background di `Program.cs`, dopo `OpenEnvironmentAsync`): i documenti Roslyn di tutti i progetti, in
-  qualunque lingua il workspace sappia caricare, più **ogni file di testo sotto la cartella della
-  soluzione** letto da disco — le pagine `.cshtml`/`.razor` sono content item e il workspace non le tiene
-  come documenti, e un `README`, un `.csproj` o un `.json` non sono codice ma fanno parte della soluzione.
-  La selezione per i documenti è per lingua, non per estensione `.cs`: decide il frontend; per i file è il
-  contenuto (un NUL nei primi 8 KB dice "binario", e oltre 1 MB non è codice).
-- **quando un file viene salvato** viene aggiornato in modo incrementale: un giro ogni 2 secondi legge
-  prima il timestamp, e solo se è cambiato il contenuto, quindi traduce **solo quel documento**. Vale
-  anche per un salvataggio fatto in un altro editor, perché il testo viene letto dal file su disco, non
-  dallo snapshot del workspace;
-- **quando si compila** `build_project` fa un refresh esplicito dopo la build (sempre best-effort: un
-  errore dell'indice non trasforma un build riuscito in un tool fallito).
+- **when the solution is first opened** it is generated for **every file of the solution** (the background
+  task in `Program.cs`, after `OpenEnvironmentAsync`): the Roslyn documents of all projects, in whatever
+  language the workspace can load, plus **every text file under the solution folder** read from disk — the
+  `.cshtml`/`.razor` pages are content items and the workspace does not keep them as documents, and a
+  `README`, a `.csproj` or a `.json` are not code but are part of the solution. The selection for documents is
+  by language, not by `.cs` extension: the frontend decides; for files it is the content (a NUL in the first
+  8 KB says "binary", and over 1 MB is not code).
+- **when a file is saved** it is updated incrementally: one round every 2 seconds reads the timestamp first,
+  and only if it changed the content, so it translates **only that document**. It also applies to a save made
+  in another editor, because the text is read from the file on disk, not from the workspace snapshot;
+- **when the solution is built** `build_project` does an explicit refresh after the build (always best-effort:
+  an index error does not turn a successful build into a failed tool).
 
-Il risultato vive in `.visualMCP/visualmcp.db`, e ogni sorgente ci sta **due volte**: da un lato come la
-scrive la sua lingua, dall'altro come la legge il modello.
+The result lives in `.visualMCP/visualmcp.db`, and every source is there **twice**: on one side as its
+language writes it, on the other as the model reads it.
 
-| Tabella | Chiave | Cosa tiene |
+| Table | Key | What it holds |
 |---|---|---|
-| `source_document` | `path` | il file **nella sua lingua nativa**: testo, tag di lingua (`cs`, `vb`, `razor`, `md`, `csproj`…), hash del contenuto, timestamp, caratteri e righe. C'è per **ogni** file della soluzione |
-| `mc_document` | `path` | hash del contenuto, timestamp, progetto, lingua, numero di dichiarazioni, nodi dell'AST, diagnostici — e la provenienza: `source_path` e il flag `decompiled` |
-| `mc_tree` | `declaration_key` + `path` + riga + nome | pseudocodice canonico della dichiarazione (gzip) e i fatti strutturali: cyclomatic, cognitive, nesting massimo, istruzioni, rami, espressioni — con `source_path` e `decompiled` |
-| `mc_node` | `path` + `declaration_key` + `node_id` | **l'AST completo** di ogni dichiarazione: una riga per nodo, con `parent_id`, `slot` (la proprietà del padre che lo contiene), `ordinal`, `depth`, riga/colonna, il payload del nodo in JSON — e `source_path`/`decompiled` |
+| `source_document` | `path` | the file **in its native language**: text, language tag (`cs`, `vb`, `razor`, `md`, `csproj`…), content hash, timestamp, characters and lines. It exists for **every** file of the solution |
+| `mc_document` | `path` | content hash, timestamp, project, language, declaration count, AST nodes, diagnostics — and the provenance: `source_path` and the `decompiled` flag |
+| `mc_tree` | `declaration_key` + `path` + line + name | the declaration's canonical pseudocode (gzip) and the structural facts: cyclomatic, cognitive, max nesting, statements, branches, expressions — with `source_path` and `decompiled` |
+| `mc_node` | `path` + `declaration_key` + `node_id` | **the complete AST** of every declaration: one row per node, with `parent_id`, `slot` (the parent property that holds it), `ordinal`, `depth`, line/column, the node's payload in JSON — and `source_path`/`decompiled` |
 
-**La provenienza è una colonna, non una convenzione.** `source_path` è il file da cui il contenuto
-proviene — per un documento letto da disco è il file stesso, per il codice decompilato è il **binario** —
-e `decompiled` dice quale dei due è (0 = letto, 1 = decompilato). Le tre tabelle dell'AST portano
-entrambe le colonne su **ogni** riga, non solo sul documento: una query su `mc_node` sa sempre da dove
-viene un nodo e se è codice decompilato, senza dover interpretare il prefisso `assembly://` o risalire al
-documento. Le righe scritte prima che le colonne esistessero le ricevono al primo `Ensure`: lo schema
-aggiunge in place le colonne che il modello dichiara e il file non ha (`ALTER TABLE … ADD COLUMN`, con il
-valore zero come default), senza ricreare né perdere nulla.
+**Provenance is a column, not a convention.** `source_path` is the file the content comes from — for a
+document read from disk it is the file itself, for decompiled code it is the **binary** — and `decompiled`
+says which of the two it is (0 = read, 1 = decompiled). The three AST tables carry both columns on **every**
+row, not only on the document: a query on `mc_node` always knows where a node comes from and whether it is
+decompiled code, without having to interpret the `assembly://` prefix or walk back to the document. Rows
+written before the columns existed receive them on the first `Ensure`: the schema adds in place the columns
+the model declares and the file does not have (`ALTER TABLE … ADD COLUMN`, with zero as the default), without
+recreating or losing anything.
 
-`mc_node` è l'albero, `mc_tree.text` è la sua resa: lo pseudocodice canonico serve a leggere, confrontare e
-rigenerare, `mc_node` tiene **ogni** nodo del modello — lo stesso vocabolario di `MetacodeNode` (`If`,
-`Block`, `Invocation`, `Binary`, …) — con i legami di parentela, quindi una domanda strutturale ("dove
-sono i `Try` più profondi di 4", "quali nodi non hanno un'origine") è una query SQL e non un parse.
-Le righe sono in pre-ordine: `node_id` cresce sempre dopo il padre, e `ORDER BY node_id` ricostruisce
-l'albero senza altro input. Il walk è guidato dal costruttore primario di ogni record, non da uno
-`switch` sui tipi: un nodo nuovo del modello entra nell'AST il giorno che esiste, senza una lista da
-aggiornare. `metacode_index action=ast` lo restituisce annidato, con `parent_id`/`slot`/`ordinal` su ogni
-nodo e il payload già interpretato; un tipo annida i suoi membri, esattamente come il suo testo.
+`mc_node` is the tree, `mc_tree.text` is its rendering: the canonical pseudocode is for reading, comparing and
+regenerating, `mc_node` holds **every** node of the model — the same vocabulary as `MetacodeNode` (`If`,
+`Block`, `Invocation`, `Binary`, …) — with the parent relationships, so a structural question ("where are the
+`Try`s deeper than 4", "which nodes have no origin") is a SQL query and not a parse. The rows are in
+pre-order: `node_id` always grows after its parent, and `ORDER BY node_id` reconstructs the tree with no other
+input. The walk is driven by each record's primary constructor, not by a `switch` on the types: a new model
+node enters the AST the day it exists, with no list to update. `metacode_index action=ast` returns it nested,
+with `parent_id`/`slot`/`ordinal` on every node and the payload already interpreted; a type nests its members,
+exactly like its text.
 
-Il lato nativo è il testo, non un albero serializzato: un `SyntaxTree` di Roslyn non si serializza, e
-rileggerlo dal testo costa un parse. Quello che il database conserva è quindi la sorgente esatta (più il
-suo hash), da cui il modello di Roslyn si ricostruisce identico — ed è quello che permette al workspace di
-usare tutte le feature di Roslyn sul documento, mentre il metacode resta la vista neutra dello stesso file.
+The native side is the text, not a serialized tree: a Roslyn `SyntaxTree` is not serializable, and reading it
+back from text costs a parse. What the database keeps is therefore the exact source (plus its hash), from
+which the Roslyn model is reconstructed identically — and that is what lets the workspace use all of Roslyn's
+features on the document, while the metacode remains the neutral view of the same file.
 
-Un file che nessun frontend sa leggere — un `README.md`, un `.csproj`, un `.json` — **non sparisce**:
-`source_document` tiene il testo, e l'AST ha **un nodo `File`** (kind `file`, payload con `path`, `name`,
-`language`, `lines`, `chars`) che dice cos'è. Così l'AST contiene tutto quello che la soluzione contiene,
-invece di contenere solo ciò che è codice; `metacode_index action=status` li conta in `files` e il report
-della build in `unsupported`. Una lingua che nessun frontend legge (per esempio F#, Java o Rust) segue la
-stessa strada. Visual Basic era in questa lista: dal frontend VB la passata successiva traduce i `.vb`
-già letti (l'hash è quello giusto) senza toccare `source_document`.
+A file no frontend can read — a `README.md`, a `.csproj`, a `.json` — **does not disappear**: `source_document`
+keeps the text, and the AST has **a `File` node** (kind `file`, payload with `path`, `name`, `language`,
+`lines`, `chars`) that says what it is. So the AST contains everything the solution contains, instead of
+containing only what is code; `metacode_index action=status` counts them in `files` and the build report in
+`unsupported`. A language no frontend reads (for example F#, Java or Rust) follows the same path. Visual Basic
+was on this list: since the VB frontend, the next pass translates the `.vb` files already read (the hash is
+the right one) without touching `source_document`.
 
-Il lato semantico "nativo" — dichiarazioni, usi, relazione di override e di implementazione — è l'indice
-dei simboli nelle tabelle `si_*`, scritto dalla stessa apertura della soluzione e poi su richiesta di
-`reference_index action=build` (costa una compilazione, il metacode no).
+The "native" semantic side — declarations, uses, the override and implementation relation — is the symbol index
+in the `si_*` tables, written by the same solution open and then on request of `reference_index action=build`
+(it costs a compilation, the metacode does not).
 
-La chiave è sintetica ma stabile — namespace, tipi contenitori, nome e arietà
-(`method:Demo.Counter.Sum(1)`, `indexer:Demo.Store.this[1]`, ``type:Demo.Store`1``) — quindi una ricerca
-non richiede il modello semantico. Un tipo porta dentro i suoi membri e ogni membro ha anche la sua riga,
-come nell'indice dei simboli. I fatti sono **colonne**, non prosa: un report è una query SQL.
+The key is synthetic but stable — namespace, containing types, name and arity
+(`method:Demo.Counter.Sum(1)`, `indexer:Demo.Store.this[1]`, ``type:Demo.Store`1``) — so a lookup does not
+require the semantic model. A type carries its members inside and every member also has its own row, as in the
+symbol index. The facts are **columns**, not prose: a report is a SQL query.
 
-### La complessità ciclomatica dal modello
+### Cyclomatic complexity from the model
 
-`MetacodeComplexityAnalyzer` (`Analysis/`) calcola McCabe e la cognitive di Sonar sulle
-`MetacodeStatement`/`MetacodeExpression`, con le stesse regole dell'analizzatore C# del repository:
-un punto per `if`, ciclo, `catch`, ternario, `&&`/`||`, `??`, ramo di `switch`, `goto` e auto-chiamata
-ricorsiva; l'`else if` costa un punto senza penalità di nesting, un `else` semplice zero percorsi e un
-punto cognitivo. Le lambda e le funzioni locali sono unità a sé, come le vede il compilatore.
+`MetacodeComplexityAnalyzer` (`Analysis/`) computes McCabe and Sonar's cognitive complexity over
+`MetacodeStatement`/`MetacodeExpression`, with the same rules as the repository's C# analyzer: one point for
+`if`, loop, `catch`, ternary, `&&`/`||`, `??`, `switch` branch, `goto` and recursive self-call; `else if`
+costs one point with no nesting penalty, a plain `else` zero paths and one cognitive point. Lambdas and local
+functions are units of their own, as the compiler sees them.
 
-Il test `The_metacode_complexity_matches_the_CSharp_analyzer` confronta i due numeri, metodo per metodo,
-su sei sorgenti che coprono i costrutti decisionali — con il modello semantico passato all'analizzatore
-C#, perché la ricorsione la vede solo lì. È la prova che la metrica sul modello non è una seconda
-implementazione approssimativa: è la stessa metrica, applicabile a qualunque lingua che entri nel modello.
+The test `The_metacode_complexity_matches_the_CSharp_analyzer` compares the two numbers, method by method, on
+six sources covering the decision constructs — with the semantic model passed to the C# analyzer, because
+recursion is only visible there. It is the proof that the metric on the model is not a second, approximate
+implementation: it is the same metric, applicable to any language that enters the model.
 
-`complexity_report` resta la vista C# completa (Halstead, maintainability index, contributi per riga);
-`metacode_index action=complexity` è la vista persistita e neutra, letta dal database.
+`complexity_report` remains the full C# view (Halstead, maintainability index, per-line contributions);
+`metacode_index action=complexity` is the persisted, neutral view, read from the database.
 
-### Generare codice: metacode → C#
+### Generating code: metacode → C#
 
-`CSharpEmitter` (`Generation/`) è l'inverso di `CSharpFrontend`: stesso giro dell'albero, stessa tabella
-di precedenza, sintassi di destinazione diversa. Il criterio di accettazione è un **punto fisso**:
-tradurre il sorgente, emettere C#, rileggere il C# emesso e ritradurlo deve produrre lo stesso
-pseudocodice canonico — è quello che fanno i dieci casi di `The_emitter_round_trips_a_file`.
+`CSharpEmitter` (`Generation/`) is the inverse of `CSharpFrontend`: same tree walk, same precedence table,
+different target syntax. The acceptance criterion is a **fixed point**: translating the source, emitting C#,
+reading the emitted C# back and translating it again must produce the same canonical pseudocode — that is what
+the ten cases of `The_emitter_round_trips_a_file` do.
 
-Ciò che il modello non può esprimere in C# viene abbassato alla forma più vicina che compila, con un
-commento nel codice e un diagnostico nell'output: `**` diventa `Math.Pow`, `in` diventa
-`Enumerable.Contains`, una set/dictionary literal diventa `HashSet<object>`/`Dictionary<object, object>`,
-una comprehension a un solo `for` diventa una catena LINQ, un modulo di funzioni libere diventa una
-`static partial class`. Una comprehension con più `for` non viene abbassata: emettere codice che non
-compila sarebbe peggio che dichiarare di non averlo fatto. Una dichiarazione C# che il modello non ha
-(un `delegate`, una conversione definita dall'utente) viene riscritta **verbatim**, perché è C# valido per
-costruzione; un costrutto di un'altra lingua diventa `// TODO(metacode): …`.
+What the model cannot express in C# is lowered to the closest form that compiles, with a comment in the code
+and a diagnostic in the output: `**` becomes `Math.Pow`, `in` becomes `Enumerable.Contains`, a set/dictionary
+literal becomes `HashSet<object>`/`Dictionary<object, object>`, a comprehension with a single `for` becomes a
+LINQ chain, a module of free functions becomes a `static partial class`. A comprehension with several `for`
+clauses is not lowered: emitting code that does not compile would be worse than declaring it was not done. A
+C# declaration the model does not have (a `delegate`, a user-defined conversion) is rewritten **verbatim**,
+because it is valid C# by construction; a construct from another language becomes `// TODO(metacode): …`.
 
-### Usarlo
+### Using it
 
 ```csharp
 using Snitch.Metacode.Indexing;
 
-var index = new MetacodeIndexService(workspace, store);   // o IMetacodeIndexService dal container
+var index = new MetacodeIndexService(workspace, store);   // or IMetacodeIndexService from the container
 
-await index.BuildAsync();                       // incrementale: timestamp, poi hash di contenuto
-await index.RefreshAsync();                     // il giro economico del loop in background
-index.Status();                                 // documenti, dichiarazioni, funzioni, tipi, range di complessità
-index.Trees(symbol: "Counter.Sum");             // l'albero memorizzato, con i suoi numeri
-index.Trees(path: "…/Counter.cs");              // tutte le dichiarazioni del file
-index.Complexity(minCyclomatic: 10);            // i richiudibili, dal peggiore
-index.Generate(symbol: "Counter.Sum");          // metacode memorizzato → C#
-index.Generate(text: pseudocodice, language: "pseudo");  // nuovo codice da pseudocodice → C#
+await index.BuildAsync();                       // incremental: timestamp, then content hash
+await index.RefreshAsync();                     // the cheap round of the background loop
+index.Status();                                 // documents, declarations, functions, types, complexity range
+index.Trees(symbol: "Counter.Sum");             // the stored tree, with its numbers
+index.Trees(path: "…/Counter.cs");              // all the declarations of the file
+index.Complexity(minCyclomatic: 10);            // the ones worth reducing, worst first
+index.Generate(symbol: "Counter.Sum");          // stored metacode → C#
+index.Generate(text: pseudocode, language: "pseudo");  // new code from pseudocode → C#
 ```
 
-I due tool MCP corrispondenti sono `metacode_index` (`status|build|complexity|trees`) e
-`metacode_generate` (metacode → C#, con i diagnostici delle due direzioni).
+The two corresponding MCP tools are `metacode_index` (`status|build|complexity|trees`) and
+`metacode_generate` (metacode → C#, with the diagnostics of both directions).
 
-Limiti dichiarati: solo C# (Razor e VB non hanno un emitter, e i documenti `.cshtml`/`.razor` non sono
-documenti Roslyn); le funzioni locali e le lambda non hanno una riga propria (la loro complessità è
-misurata come parte del metodo che le contiene); un tipo non ha una complessità propria — ce l'hanno i
-suoi membri.
+Declared limits: C# only (Razor and VB have no emitter, and `.cshtml`/`.razor` documents are not Roslyn
+documents); local functions and lambdas have no row of their own (their complexity is measured as part of the
+method that contains them); a type has no complexity of its own — its members do.
 
-## Dove sono i file
+## Where the files are
 
-| File | Ruolo |
+| File | Role |
 |---|---|
-| `MetacodeModel.cs`, `MetacodeStatements.cs`, `MetacodeExpressions.cs` | il modello |
-| `MetacodeDiagnostics.cs` | diagnostici, codici `MC0001`–`MC0008`, opzioni, `IMetacodePass` |
-| `MetacodeRewriter.cs` | la base delle passate (sostituzione con splice dei blocchi) |
-| `MetacodeSource.cs`, `ILanguageFrontend` | input e contratto del frontend |
-| `MetacodeTranslator.cs` | la facciata: frontend giusto, passate, documento |
+| `MetacodeModel.cs`, `MetacodeStatements.cs`, `MetacodeExpressions.cs` | the model |
+| `MetacodeDiagnostics.cs` | diagnostics, `MC0001`–`MC0008` codes, options, `IMetacodePass` |
+| `MetacodeRewriter.cs` | the base of the passes (replacement with block splice) |
+| `MetacodeSource.cs`, `ILanguageFrontend` | input and the frontend contract |
+| `MetacodeTranslator.cs` | the façade: right frontend, passes, document |
 | `Frontends/CSharpFrontend.cs`, `CSharpLowering.Expressions.cs` | Roslyn |
-| `Frontends/VisualBasicFrontend.cs`, `VisualBasicLowering.Expressions.cs` | Roslyn VB: moduli, tipi, membri, istruzioni ed espressioni di un `.vb` |
-| `Frontends/PythonFrontend.cs` | dump `ast` — lettore opt-in, non nella pipeline predefinita |
-| `Frontends/CppFrontend.cs` | dump `clang` — lettore opt-in, non nella pipeline predefinita |
-| `Frontends/RazorFrontend.cs` | pagine `.cshtml` e componenti `.razor`, sul modello dello scanner di `SNITCH/Languages/Razor` |
-| `Frontends/PseudocodeFrontend.cs`, `PseudocodeExpression.cs` | lettura del testo canonico |
+| `Frontends/VisualBasicFrontend.cs`, `VisualBasicLowering.Expressions.cs` | Roslyn VB: modules, types, members, statements and expressions of a `.vb` |
+| `Frontends/PythonFrontend.cs` | `ast` dump — opt-in reader, not in the default pipeline |
+| `Frontends/CppFrontend.cs` | `clang` dump — opt-in reader, not in the default pipeline |
+| `Frontends/RazorFrontend.cs` | `.cshtml` pages and `.razor` components, on the scanner model of `SNITCH/Languages/Razor` |
+| `Frontends/PseudocodeFrontend.cs`, `PseudocodeExpression.cs` | reading the canonical text |
 | `Passes/MetacodePasses.cs` | `NormalizeControlFlowPass`, `FlattenSingleStatementBlocksPass` |
-| `Rendering/PseudocodeRenderer.cs` | stampa |
-| `Decompilation/DecompileService.cs`, `IDecompileService.cs`, `MetacodeDecompilation.cs` | ILSpy → C# → modello (namespace pubblico invariato) |
-| `Decompilation/GhidraService.cs` | Ghidra headless: processo, timeout, progetto temporaneo, `JAVA_HOME_OVERRIDE`, script di export |
-| `Decompilation/GhidraInstaller.cs` | ricerca e installazione di Ghidra: feed delle release, estrazione, launcher per piattaforma (`HostSystem`), bit di esecuzione su Unix |
-| `Decompilation/NativeCodeStore.cs` | le tabelle native del database della soluzione: `native_artifact`, `native_function`, `native_call` |
-| `Decompilation/GhidraC.cs` | il lettore di C di Ghidra che emette testo canonico |
-| `Decompilation/GhidraFrontend.cs`, `GhidraSnapshot.cs` | snapshot → funzioni → modello, e il parser del formato |
-| `SnitchMetacodeServiceCollectionExtensions.cs` | `AddSnitchMetacode()`: traduttore, decompilatore (due contratti), Ghidra, indice dei simboli, indice del metacode |
-| `Analysis/MetacodeComplexityAnalyzer.cs` | cyclomatic (McCabe) e cognitive (Sonar) sulle `MetacodeStatement`/`MetacodeExpression` |
-| `Generation/CSharpEmitter.cs` | metacode → C#: l'inverso del frontend C#, con i diagnostici di ogni approssimazione |
-| `Indexing/MetacodeIndexModel.cs`, `MetacodeIndexStore.cs`, `MetacodeIndexService.cs` | il metacode della soluzione: tabelle `mc_document`/`mc_tree`, build/refresh incrementale, complessità, generazione |
-| `Symbols/SymbolIndexModel.cs` | chiavi dei simboli, righe di dichiarazione e di uso, alberi metacode, il vocabolario di `SymbolUsageKind` |
-| `Symbols/CSharpSymbolIndexFrontend.cs` | il livello C# dell'indice: nodi che dichiarano, nomi che usano, classificazione dell'uso, firma |
-| `Symbols/SymbolIndexBuilder.cs` | il giro sul documento: dichiarazioni, usi, relazioni `override`/`implement`, e l'albero metacode di ogni dichiarazione |
-| `Symbols/SymbolIndexStore.cs` | tabelle `si_symbol`, `si_usage`, `si_metacode`, `si_document` e le query indicizzate |
-| `Symbols/SymbolIndexService.cs` | le domande: `build`, `find`, `describe`, `refs`, `callers`, `callees`, `hierarchy`, `outline`, `metacode`, `unused` |
-| `src/VisualMCP.Tests/MetacodeTests.cs` | 11 test: forma esatta, equivalenza fra lingue, giro completo, diagnostici |
-| `src/VisualMCP.Tests/MetacodeDepthTests.cs` | 15 test: i costrutti aggiunti, uno per uno, più il giro completo di ogni documento |
-| `src/VisualMCP.Tests/DecompilationMetacodeTests.cs` | 14 test: ILSpy→metacode, Ghidra a partire da uno snapshot registrato, puntatori, cablaggio DI |
-| `src/VisualMCP.Tests/NativeCodeStoreTests.cs` | 7 test: tabelle native, chiave SHA-256, riuso/sostituzione, routing di un binario non gestito, installer e scelta dell'asset |
-| `src/VisualMCP.Tests/SymbolIndexTests.cs` | 11 test: firma e posizione, i tipi di uso, chiamanti/chiamati, gerarchia, outline, build incrementale |
-| `src/VisualMCP.Tests/MetacodeExpressionTests.cs` | 6 test: `with`, anonymous object, pattern match, case pattern, spread, emissione C# dei cinque nodi |
-| `src/VisualMCP.Tests/MetacodeLibraryCoverageTests.cs` | 1 test: ogni file di `Snitch.Metacode` si traduce senza diagnostici (il guardiano del modello) |
-| `src/VisualMCP.Tests/MetacodeGenerationTests.cs` | 24 test: round-trip a punto fisso su dodici sorgenti, complessità del modello contro l'analizzatore C#, approssimazioni dichiarate |
-| `src/VisualMCP.Tests/MetacodeIndexTests.cs` | 6 test: build/refresh incrementale, righe per dichiarazione, complessità dallo store, generazione dallo store e dallo pseudocodice |
+| `Rendering/PseudocodeRenderer.cs` | printing |
+| `Decompilation/DecompileService.cs`, `IDecompileService.cs`, `MetacodeDecompilation.cs` | ILSpy → C# → model (public namespace unchanged) |
+| `Decompilation/GhidraService.cs` | Ghidra headless: process, timeout, temporary project, `JAVA_HOME_OVERRIDE`, export script |
+| `Decompilation/GhidraInstaller.cs` | finding and installing Ghidra: release feed, extraction, per-platform launcher (`HostSystem`), execute bit on Unix |
+| `Decompilation/NativeCodeStore.cs` | the native tables of the solution database: `native_artifact`, `native_function`, `native_call` |
+| `Decompilation/GhidraC.cs` | the reader of Ghidra's C that emits canonical text |
+| `Decompilation/GhidraFrontend.cs`, `GhidraSnapshot.cs` | snapshot → functions → model, and the format parser |
+| `SnitchMetacodeServiceCollectionExtensions.cs` | `AddSnitchMetacode()`: translator, decompiler (two contracts), Ghidra, symbol index, metacode index |
+| `Analysis/MetacodeComplexityAnalyzer.cs` | cyclomatic (McCabe) and cognitive (Sonar) over `MetacodeStatement`/`MetacodeExpression` |
+| `Generation/CSharpEmitter.cs` | metacode → C#: the inverse of the C# frontend, with a diagnostic for every approximation |
+| `Indexing/MetacodeIndexModel.cs`, `MetacodeIndexStore.cs`, `MetacodeIndexService.cs` | the solution's metacode: `mc_document`/`mc_tree` tables, incremental build/refresh, complexity, generation |
+| `Symbols/SymbolIndexModel.cs` | symbol keys, declaration and usage rows, metacode trees, the `SymbolUsageKind` vocabulary |
+| `Symbols/CSharpSymbolIndexFrontend.cs` | the C# layer of the index: nodes that declare, names that use, use classification, signature |
+| `Symbols/SymbolIndexBuilder.cs` | the per-document walk: declarations, uses, `override`/`implement` relations, and the metacode tree of every declaration |
+| `Symbols/SymbolIndexStore.cs` | `si_symbol`, `si_usage`, `si_metacode`, `si_document` tables and the indexed queries |
+| `Symbols/SymbolIndexService.cs` | the questions: `build`, `find`, `describe`, `refs`, `callers`, `callees`, `hierarchy`, `outline`, `metacode`, `unused` |
+| `src/VisualMCP.Tests/MetacodeTests.cs` | 11 tests: exact shape, equivalence between languages, round trip, diagnostics |
+| `src/VisualMCP.Tests/MetacodeDepthTests.cs` | 15 tests: the added constructs, one by one, plus the round trip of every document |
+| `src/VisualMCP.Tests/DecompilationMetacodeTests.cs` | 14 tests: ILSpy→metacode, Ghidra from a registered snapshot, pointers, DI wiring |
+| `src/VisualMCP.Tests/NativeCodeStoreTests.cs` | 7 tests: native tables, SHA-256 key, reuse/replacement, routing of a non-managed binary, installer and asset choice |
+| `src/VisualMCP.Tests/SymbolIndexTests.cs` | 11 tests: signature and position, the use kinds, callers/callees, hierarchy, outline, incremental build |
+| `src/VisualMCP.Tests/MetacodeExpressionTests.cs` | 6 tests: `with`, anonymous object, pattern match, case pattern, spread, C# emission of the five nodes |
+| `src/VisualMCP.Tests/MetacodeLibraryCoverageTests.cs` | 1 test: every file of `Snitch.Metacode` translates without diagnostics (the model's guardian) |
+| `src/VisualMCP.Tests/MetacodeGenerationTests.cs` | 24 tests: fixed-point round trip on twelve sources, model complexity against the C# analyzer, declared approximations |
+| `src/VisualMCP.Tests/MetacodeIndexTests.cs` | 6 tests: incremental build/refresh, per-declaration rows, complexity from the store, generation from the store and from pseudocode |

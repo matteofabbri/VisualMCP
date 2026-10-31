@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -144,22 +145,26 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                INSERT INTO context (key, value, stamp, updated_at)
-                VALUES ($key, $value, $stamp, $updated)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    stamp = excluded.stamp,
-                    updated_at = excluded.updated_at;
-                """;
-            command.Parameters.AddWithValue("$key", key);
-            command.Parameters.AddWithValue("$value", value);
-            command.Parameters.AddWithValue("$stamp", (object?)stamp ?? DBNull.Value);
-            command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
-            command.ExecuteNonQuery();
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var fact = context.ContextFacts.FirstOrDefault(row => row.Key == key);
+            if (fact is null)
+                context.ContextFacts.Add(new ContextFactRow
+                {
+                    Key = key,
+                    Value = value,
+                    Stamp = stamp,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                });
+            else
+            {
+                fact.Value = value;
+                fact.Stamp = stamp;
+                fact.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+
+            context.SaveChanges();
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or DbUpdateException)
         {
             // Degrade silently: a cache write failing must never fail the tool call.
         }
@@ -173,14 +178,14 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT value, stamp, updated_at FROM context WHERE key = $key;";
-            command.Parameters.AddWithValue("$key", key);
-            using var reader = command.ExecuteReader();
-            if (!reader.Read()) return null;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var fact = context.ContextFacts
+                .AsNoTracking()
+                .Where(row => row.Key == key)
+                .Select(row => new { row.Value, row.Stamp, row.UpdatedAt })
+                .FirstOrDefault();
 
-            var updated = DateTimeOffset.TryParse(reader.GetString(2), out var parsed) ? parsed : DateTimeOffset.MinValue;
-            return new ContextEntry(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), updated);
+            return fact is null ? null : new ContextEntry(fact.Value, fact.Stamp, fact.UpdatedAt);
         }
         catch (SqliteException)
         {
@@ -195,10 +200,8 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM context WHERE key = $key;";
-            command.Parameters.AddWithValue("$key", key);
-            return command.ExecuteNonQuery() > 0;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.ContextFacts.Where(row => row.Key == key).ExecuteDelete() > 0;
         }
         catch (SqliteException)
         {
@@ -218,20 +221,19 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    INSERT INTO command_log (occurred_at, date, time, tool, arguments)
-                    VALUES ($at, $date, $time, $tool, $arguments);
-                    """;
-                command.Parameters.AddWithValue("$at", now.ToString("O"));
-                command.Parameters.AddWithValue("$date", now.ToString("yyyy-MM-dd"));
-                command.Parameters.AddWithValue("$time", now.ToString("HH:mm:ss"));
-                command.Parameters.AddWithValue("$tool", tool);
-                command.Parameters.AddWithValue("$arguments", (object?)arguments ?? DBNull.Value);
-                command.ExecuteNonQuery();
+                using var context = VisualMcpSchema.CreateContext(connection);
+                context.CommandLog.Add(new CommandLogRow
+                {
+                    OccurredAt = now,
+                    Date = now.ToString("yyyy-MM-dd"),
+                    Time = now.ToString("HH:mm:ss"),
+                    Tool = tool,
+                    Arguments = arguments,
+                });
+                context.SaveChanges();
             }
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or DbUpdateException)
         {
             // A log write must never fail the tool call it describes.
         }
@@ -249,26 +251,17 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = tool is null
-                    ? "SELECT id, occurred_at, tool, arguments FROM command_log ORDER BY id DESC LIMIT $limit;"
-                    : "SELECT id, occurred_at, tool, arguments FROM command_log WHERE tool = $tool ORDER BY id DESC LIMIT $limit;";
-                command.Parameters.AddWithValue("$limit", limit);
-                if (tool is not null) command.Parameters.AddWithValue("$tool", tool);
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var query = context.CommandLog.AsNoTracking().AsQueryable();
+                if (tool is not null) query = query.Where(entry => entry.Tool == tool);
 
-                var entries = new List<CommandLogEntry>();
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    var at = DateTimeOffset.TryParse(reader.GetString(1), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                    entries.Add(new CommandLogEntry(
-                        reader.GetInt64(0),
-                        at,
-                        reader.GetString(2),
-                        reader.IsDBNull(3) ? null : reader.GetString(3)));
-                }
-
-                return entries;
+                return query
+                    .OrderByDescending(entry => entry.Id)
+                    .Take(limit)
+                    .Select(entry => new { entry.Id, entry.OccurredAt, entry.Tool, entry.Arguments })
+                    .ToList()
+                    .Select(entry => new CommandLogEntry(entry.Id, entry.OccurredAt, entry.Tool, entry.Arguments))
+                    .ToList();
             }
         }
         catch (SqliteException)
@@ -286,9 +279,8 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = "SELECT COUNT(*) FROM command_log;";
-                return Convert.ToInt32(command.ExecuteScalar());
+                using var context = VisualMcpSchema.CreateContext(connection);
+                return context.CommandLog.Count();
             }
         }
         catch (SqliteException)
@@ -308,25 +300,23 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    INSERT INTO applied_edit
-                        (applied_at, tool, rules, file, before_hash, after_hash, before_chars, after_chars, before_text)
-                    VALUES ($at, $tool, $rules, $file, $before, $after, $beforeChars, $afterChars, $beforeText);
-                    """;
-                command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-                command.Parameters.AddWithValue("$tool", tool);
-                command.Parameters.AddWithValue("$rules", (object?)rules ?? DBNull.Value);
-                command.Parameters.AddWithValue("$file", file);
-                command.Parameters.AddWithValue("$before", ContentHash(beforeText));
-                command.Parameters.AddWithValue("$after", ContentHash(afterText));
-                command.Parameters.AddWithValue("$beforeChars", beforeText.Length);
-                command.Parameters.AddWithValue("$afterChars", afterText.Length);
-                command.Parameters.AddWithValue("$beforeText", Compress(beforeText));
-                command.ExecuteNonQuery();
+                using var context = VisualMcpSchema.CreateContext(connection);
+                context.AppliedEdits.Add(new AppliedEditRow
+                {
+                    AppliedAt = DateTimeOffset.UtcNow,
+                    Tool = tool,
+                    Rules = rules,
+                    File = file,
+                    BeforeHash = ContentHash(beforeText),
+                    AfterHash = ContentHash(afterText),
+                    BeforeChars = beforeText.Length,
+                    AfterChars = afterText.Length,
+                    BeforeText = Compress(beforeText),
+                });
+                context.SaveChanges();
             }
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or DbUpdateException)
         {
             // History is a convenience: losing a row must never fail the write it describes.
         }
@@ -344,36 +334,34 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = file is null
-                    ? """
-                      SELECT id, applied_at, tool, rules, file, before_hash, after_hash, before_chars, after_chars,
-                             before_text IS NOT NULL
-                      FROM applied_edit ORDER BY id DESC LIMIT $limit;
-                      """
-                    : """
-                      SELECT id, applied_at, tool, rules, file, before_hash, after_hash, before_chars, after_chars,
-                             before_text IS NOT NULL
-                      FROM applied_edit WHERE file = $file ORDER BY id DESC LIMIT $limit;
-                      """;
-                command.Parameters.AddWithValue("$limit", limit);
-                if (file is not null) command.Parameters.AddWithValue("$file", file);
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var query = context.AppliedEdits.AsNoTracking().AsQueryable();
+                if (file is not null) query = query.Where(edit => edit.File == file);
 
-                var entries = new List<AppliedEditEntry>();
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    var at = DateTimeOffset.TryParse(reader.GetString(1), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                    entries.Add(new AppliedEditEntry(
-                        reader.GetInt64(0), at, reader.GetString(2),
-                        reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4),
-                        reader.GetString(5), reader.GetString(6), reader.GetInt32(7), reader.GetInt32(8))
+                return query
+                    .OrderByDescending(edit => edit.Id)
+                    .Take(limit)
+                    .Select(edit => new
                     {
-                        Revertible = reader.GetInt64(9) != 0,
-                    });
-                }
-
-                return entries;
+                        edit.Id,
+                        edit.AppliedAt,
+                        edit.Tool,
+                        edit.Rules,
+                        edit.File,
+                        edit.BeforeHash,
+                        edit.AfterHash,
+                        edit.BeforeChars,
+                        edit.AfterChars,
+                        Revertible = edit.BeforeText != null,
+                    })
+                    .ToList()
+                    .Select(edit => new AppliedEditEntry(
+                        edit.Id, edit.AppliedAt, edit.Tool, edit.Rules, edit.File,
+                        edit.BeforeHash, edit.AfterHash, edit.BeforeChars, edit.AfterChars)
+                    {
+                        Revertible = edit.Revertible,
+                    })
+                    .ToList();
             }
         }
         catch (SqliteException)
@@ -391,9 +379,8 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = "SELECT COUNT(*) FROM applied_edit;";
-                return Convert.ToInt32(command.ExecuteScalar());
+                using var context = VisualMcpSchema.CreateContext(connection);
+                return context.AppliedEdits.Count();
             }
         }
         catch (SqliteException)
@@ -418,25 +405,32 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    SELECT id, applied_at, tool, rules, file, before_hash, after_hash, before_chars, after_chars,
-                           before_text IS NOT NULL
-                    FROM applied_edit WHERE id = $id;
-                    """;
-                command.Parameters.AddWithValue("$id", id);
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var edit = context.AppliedEdits
+                    .AsNoTracking()
+                    .Where(row => row.Id == id)
+                    .Select(row => new
+                    {
+                        row.Id,
+                        row.AppliedAt,
+                        row.Tool,
+                        row.Rules,
+                        row.File,
+                        row.BeforeHash,
+                        row.AfterHash,
+                        row.BeforeChars,
+                        row.AfterChars,
+                        Revertible = row.BeforeText != null,
+                    })
+                    .FirstOrDefault();
 
-                using var reader = command.ExecuteReader();
-                if (!reader.Read()) return null;
-
-                var at = DateTimeOffset.TryParse(reader.GetString(1), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                return new AppliedEditEntry(
-                    reader.GetInt64(0), at, reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4),
-                    reader.GetString(5), reader.GetString(6), reader.GetInt32(7), reader.GetInt32(8))
-                {
-                    Revertible = reader.GetInt64(9) != 0,
-                };
+                return edit is null
+                    ? null
+                    : new AppliedEditEntry(edit.Id, edit.AppliedAt, edit.Tool, edit.Rules, edit.File,
+                        edit.BeforeHash, edit.AfterHash, edit.BeforeChars, edit.AfterChars)
+                    {
+                        Revertible = edit.Revertible,
+                    };
             }
         }
         catch (SqliteException)
@@ -454,13 +448,14 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = "SELECT before_text FROM applied_edit WHERE id = $id;";
-                command.Parameters.AddWithValue("$id", id);
-                using var reader = command.ExecuteReader();
-                if (!reader.Read() || reader.IsDBNull(0)) return null;
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var text = context.AppliedEdits
+                    .AsNoTracking()
+                    .Where(row => row.Id == id)
+                    .Select(row => row.BeforeText)
+                    .FirstOrDefault();
 
-                return Decompress((byte[])reader[0]);
+                return text is null ? null : Decompress(text);
             }
         }
         catch (Exception ex) when (ex is SqliteException or InvalidDataException)

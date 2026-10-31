@@ -1,9 +1,10 @@
 # docs — documentation
 
-Two separate sets, on purpose. **`public/`** is the user guide: it explains the product to
-someone who installs it and never reads the engine. The files directly in this folder are
-engineering notes: they describe how the engine is built, what it covers and what it does not,
-and they are allowed to name internal types.
+Two sets, split by audience, not by visibility: this is an open-source project, so every page here
+is public documentation. **`public/`** is the user guide: it explains the product to someone who
+installs it and never reads the engine. The files directly in this folder are engineering notes:
+they describe how the engine is built, what it covers and what it does not, and they are allowed to
+name internal types.
 
 ## User guide — [`public/README.md`](public/README.md)
 
@@ -50,7 +51,7 @@ The rule-by-rule table for the style engine is [`../CAPABILITY_MAP.md`](../CAPAB
   take the number from `capability_report` when you write it, and say where it came from.
 - **`gaps.md` is the honest inventory.** A feature is not documented as present until it is in the
   tool catalogue and the engine applies it; anything else belongs in `gaps.md`.
-- **Public pages do not name internal types.** If a sentence needs `SnitchContext` or
-  `CompilationCache` to make sense, it belongs here, not in `public/`.
+- **User-guide pages do not name internal types.** If a sentence needs `SnitchContext` or
+  `CompilationCache` to make sense, it belongs in the engineering notes, not in `public/`.
 - **Links are relative and checked.** Both sets are read on GitHub, so a renamed page must be
   renamed in every index at once.

@@ -9,10 +9,11 @@ namespace Snitch.Storage.Schema;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The model is the schema's single source of truth. The stores keep their own tuned SQL for reads and
-/// writes — several of them need statements a query provider would only obscure — but none of them
-/// carries CREATE TABLE text any more. A database created by an older build keeps its tables:
-/// <see cref="VisualMcpSchema.Ensure"/> creates only what is missing.
+/// The model is the single source of truth for the schema and for queries: stores read and write
+/// through this context with LINQ. SQL text remains only where a query provider cannot express the
+/// statement — FTS5 <c>MATCH</c> on the virtual <c>ti_line</c> table, <c>PRAGMA</c> statements, and the
+/// DDL this model produces — and there it stays parameterized. A database created by an older build
+/// keeps its tables: <see cref="VisualMcpSchema.Ensure"/> creates only what is missing.
 /// </para>
 /// <para>
 /// Every column is spelled as the snake_case of its property, which is the convention the schema has

@@ -70,6 +70,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Compile-time only: BinaryLogReplayEventSource lives in Microsoft.Build, and at run time the
+         assembly is the SDK's (MSBuildLocator). Copying it to the output folder would make
+         MSBuildLocator refuse to register, which is why runtime assets are excluded. 17.7.2 is the
+         newest cached version whose assets target a .NET TFM this project can consume. -->
+    <PackageReference Include="Microsoft.Build" Version="17.7.2" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Build.Tasks.Core" Version="18.11.0" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
     <PackageReference Include="Microsoft.NET.StringTools" Version="18.11.0" ExcludeAssets="runtime" PrivateAssets="all" />

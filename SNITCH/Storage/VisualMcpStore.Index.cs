@@ -1,4 +1,7 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Snitch.Storage.Schema;
 
 namespace Snitch.Storage;
 
@@ -21,47 +24,29 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var transaction = connection.BeginTransaction();
+                using var context = VisualMcpSchema.CreateContext(connection);
+                using var transaction = context.Database.BeginTransaction();
 
-                using (var delete = connection.CreateCommand())
-                {
-                    delete.Transaction = transaction;
-                    delete.CommandText = "DELETE FROM package_fact WHERE project = $project;";
-                    delete.Parameters.AddWithValue("$project", project);
-                    delete.ExecuteNonQuery();
-                }
+                context.PackageFacts.Where(fact => fact.Project == project).ExecuteDelete();
 
-                using (var insert = connection.CreateCommand())
-                {
-                    insert.Transaction = transaction;
-                    insert.CommandText = """
-                        INSERT INTO package_fact (project, id, version, tfm, direct)
-                        VALUES ($project, $id, $version, $tfm, $direct)
-                        ON CONFLICT(project, id, tfm) DO UPDATE SET
-                            version = excluded.version,
-                            direct = excluded.direct;
-                        """;
-                    var projectParameter = insert.Parameters.Add("$project", SqliteType.Text);
-                    var id = insert.Parameters.Add("$id", SqliteType.Text);
-                    var version = insert.Parameters.Add("$version", SqliteType.Text);
-                    var tfm = insert.Parameters.Add("$tfm", SqliteType.Text);
-                    var direct = insert.Parameters.Add("$direct", SqliteType.Integer);
-
-                    foreach (var package in packages)
+                var rows = packages
+                    .GroupBy(package => (package.Id, package.Tfm))
+                    .Select(group => group.Last())
+                    .Select(package => new PackageFactRow
                     {
-                        projectParameter.Value = project;
-                        id.Value = package.Id;
-                        version.Value = package.Version;
-                        tfm.Value = package.Tfm;
-                        direct.Value = package.Direct ? 1 : 0;
-                        insert.ExecuteNonQuery();
-                    }
-                }
+                        Project = project,
+                        Id = package.Id,
+                        Version = package.Version,
+                        Tfm = package.Tfm,
+                        Direct = package.Direct,
+                    });
 
+                context.PackageFacts.AddRange(rows);
+                context.SaveChanges();
                 transaction.Commit();
             }
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or DbUpdateException)
         {
         }
     }
@@ -78,23 +63,18 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = project is null
-                    ? "SELECT project, id, version, tfm, direct FROM package_fact ORDER BY project, id LIMIT $limit;"
-                    : "SELECT project, id, version, tfm, direct FROM package_fact WHERE project = $project ORDER BY id LIMIT $limit;";
-                command.Parameters.AddWithValue("$limit", limit);
-                if (project is not null) command.Parameters.AddWithValue("$project", project);
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var query = context.PackageFacts.AsNoTracking().AsQueryable();
+                if (project is not null) query = query.Where(fact => fact.Project == project);
 
-                var packages = new List<PackageFact>();
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    packages.Add(new PackageFact(
-                        reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                        reader.GetInt64(4) != 0));
-                }
-
-                return packages;
+                return query
+                    .OrderBy(fact => fact.Project)
+                    .ThenBy(fact => fact.Id)
+                    .Take(limit)
+                    .Select(fact => new { fact.Project, fact.Id, fact.Version, fact.Tfm, fact.Direct })
+                    .ToList()
+                    .Select(fact => new PackageFact(fact.Project, fact.Id, fact.Version, fact.Tfm, fact.Direct))
+                    .ToList();
             }
         }
         catch (SqliteException)
@@ -103,7 +83,24 @@ public sealed partial class VisualMcpStore
         }
     }
 
-    public int PackageCount() => Count("SELECT COUNT(*) FROM package_fact;");
+    public int PackageCount()
+    {
+        var connection = Connection();
+        if (connection is null) return 0;
+
+        try
+        {
+            lock (_gate)
+            {
+                using var context = VisualMcpSchema.CreateContext(connection);
+                return context.PackageFacts.Count();
+            }
+        }
+        catch (SqliteException)
+        {
+            return 0;
+        }
+    }
 
     public void ReplacePackageDependencies(string project, IReadOnlyList<PackageDependency> dependencies)
     {
@@ -115,40 +112,36 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var transaction = connection.BeginTransaction();
+                using var context = VisualMcpSchema.CreateContext(connection);
+                using var transaction = context.Database.BeginTransaction();
 
-                using (var delete = connection.CreateCommand())
+                // package_dependency is a keyless entity: EF Core never inserts a keyless type, so the
+                // clear goes through the model and the edges are written with one prepared command,
+                // inside the same transaction.
+                context.Database.ExecuteSqlInterpolated($"DELETE FROM package_dependency WHERE project = {project}");
+
+                using var insert = connection.CreateCommand();
+                insert.Transaction = (SqliteTransaction)transaction.GetDbTransaction();
+                insert.CommandText = """
+                    INSERT INTO package_dependency (project, parent_id, parent_version, tfm, child_id, child_version)
+                    VALUES ($project, $parent, $parentVersion, $tfm, $child, $childVersion);
+                    """;
+                var projectParameter = insert.Parameters.Add("$project", SqliteType.Text);
+                var parent = insert.Parameters.Add("$parent", SqliteType.Text);
+                var parentVersion = insert.Parameters.Add("$parentVersion", SqliteType.Text);
+                var tfm = insert.Parameters.Add("$tfm", SqliteType.Text);
+                var child = insert.Parameters.Add("$child", SqliteType.Text);
+                var childVersion = insert.Parameters.Add("$childVersion", SqliteType.Text);
+
+                foreach (var dependency in dependencies)
                 {
-                    delete.Transaction = transaction;
-                    delete.CommandText = "DELETE FROM package_dependency WHERE project = $project;";
-                    delete.Parameters.AddWithValue("$project", project);
-                    delete.ExecuteNonQuery();
-                }
-
-                using (var insert = connection.CreateCommand())
-                {
-                    insert.Transaction = transaction;
-                    insert.CommandText = """
-                        INSERT INTO package_dependency (project, parent_id, parent_version, tfm, child_id, child_version)
-                        VALUES ($project, $parent, $parentVersion, $tfm, $child, $childVersion);
-                        """;
-                    var projectParameter = insert.Parameters.Add("$project", SqliteType.Text);
-                    var parent = insert.Parameters.Add("$parent", SqliteType.Text);
-                    var parentVersion = insert.Parameters.Add("$parentVersion", SqliteType.Text);
-                    var tfm = insert.Parameters.Add("$tfm", SqliteType.Text);
-                    var child = insert.Parameters.Add("$child", SqliteType.Text);
-                    var childVersion = insert.Parameters.Add("$childVersion", SqliteType.Text);
-
-                    foreach (var dependency in dependencies)
-                    {
-                        projectParameter.Value = project;
-                        parent.Value = dependency.ParentId;
-                        parentVersion.Value = dependency.ParentVersion;
-                        tfm.Value = dependency.Tfm;
-                        child.Value = dependency.ChildId;
-                        childVersion.Value = dependency.ChildVersion;
-                        insert.ExecuteNonQuery();
-                    }
+                    projectParameter.Value = project;
+                    parent.Value = dependency.ParentId;
+                    parentVersion.Value = dependency.ParentVersion;
+                    tfm.Value = dependency.Tfm;
+                    child.Value = dependency.ChildId;
+                    childVersion.Value = dependency.ChildVersion;
+                    insert.ExecuteNonQuery();
                 }
 
                 transaction.Commit();
@@ -171,30 +164,28 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                var conditions = new List<string>();
-                if (project is not null) conditions.Add("project = $project");
-                if (childId is not null) conditions.Add("child_id = $child");
-                var where = conditions.Count == 0 ? "1 = 1" : string.Join(" AND ", conditions);
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var query = context.PackageDependencies.AsNoTracking().AsQueryable();
+                if (project is not null) query = query.Where(edge => edge.Project == project);
+                if (childId is not null) query = query.Where(edge => edge.ChildId == childId);
 
-                command.CommandText = $"""
-                    SELECT project, parent_id, parent_version, tfm, child_id, child_version
-                    FROM package_dependency WHERE {where} ORDER BY project, parent_id LIMIT $limit;
-                    """;
-                command.Parameters.AddWithValue("$limit", limit);
-                if (project is not null) command.Parameters.AddWithValue("$project", project);
-                if (childId is not null) command.Parameters.AddWithValue("$child", childId);
-
-                var edges = new List<PackageDependency>();
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    edges.Add(new PackageDependency(
-                        reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                        reader.GetString(3), reader.GetString(4), reader.GetString(5)));
-                }
-
-                return edges;
+                return query
+                    .OrderBy(edge => edge.Project)
+                    .ThenBy(edge => edge.ParentId)
+                    .Take(limit)
+                    .Select(edge => new
+                    {
+                        edge.Project,
+                        edge.ParentId,
+                        edge.ParentVersion,
+                        edge.Tfm,
+                        edge.ChildId,
+                        edge.ChildVersion,
+                    })
+                    .ToList()
+                    .Select(edge => new PackageDependency(
+                        edge.Project, edge.ParentId, edge.ParentVersion, edge.Tfm, edge.ChildId, edge.ChildVersion))
+                    .ToList();
             }
         }
         catch (SqliteException)
@@ -214,27 +205,33 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    INSERT INTO decompiled_artifact (mvid, assembly, name, directory, types, created_at)
-                    VALUES ($mvid, $assembly, $name, $directory, $types, $at)
-                    ON CONFLICT(mvid) DO UPDATE SET
-                        assembly = excluded.assembly,
-                        name = excluded.name,
-                        directory = excluded.directory,
-                        types = excluded.types,
-                        created_at = excluded.created_at;
-                    """;
-                command.Parameters.AddWithValue("$mvid", artifact.Mvid);
-                command.Parameters.AddWithValue("$assembly", artifact.AssemblyPath);
-                command.Parameters.AddWithValue("$name", artifact.Name);
-                command.Parameters.AddWithValue("$directory", artifact.Directory);
-                command.Parameters.AddWithValue("$types", artifact.Types);
-                command.Parameters.AddWithValue("$at", artifact.CreatedAt.ToString("O"));
-                command.ExecuteNonQuery();
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var row = context.DecompiledArtifacts.FirstOrDefault(item => item.Mvid == artifact.Mvid);
+                if (row is null)
+                {
+                    context.DecompiledArtifacts.Add(new DecompiledArtifactRow
+                    {
+                        Mvid = artifact.Mvid,
+                        Assembly = artifact.AssemblyPath,
+                        Name = artifact.Name,
+                        Directory = artifact.Directory,
+                        Types = artifact.Types,
+                        CreatedAt = artifact.CreatedAt,
+                    });
+                }
+                else
+                {
+                    row.Assembly = artifact.AssemblyPath;
+                    row.Name = artifact.Name;
+                    row.Directory = artifact.Directory;
+                    row.Types = artifact.Types;
+                    row.CreatedAt = artifact.CreatedAt;
+                }
+
+                context.SaveChanges();
             }
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or DbUpdateException)
         {
         }
     }
@@ -249,20 +246,18 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    SELECT mvid, assembly, name, directory, types, created_at
-                    FROM decompiled_artifact WHERE mvid = $mvid;
-                    """;
-                command.Parameters.AddWithValue("$mvid", mvid);
+                using var context = VisualMcpSchema.CreateContext(connection);
+                var artifact = context.DecompiledArtifacts
+                    .AsNoTracking()
+                    .Where(row => row.Mvid == mvid)
+                    .Select(row => new { row.Mvid, row.Assembly, row.Name, row.Directory, row.Types, row.CreatedAt })
+                    .FirstOrDefault();
 
-                using var reader = command.ExecuteReader();
-                if (!reader.Read()) return null;
-
-                var at = DateTimeOffset.TryParse(reader.GetString(5), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                return new DecompiledArtifact(
-                    reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                    reader.GetString(3), reader.GetInt32(4), at);
+                return artifact is null
+                    ? null
+                    : new DecompiledArtifact(
+                        artifact.Mvid, artifact.Assembly, artifact.Name,
+                        artifact.Directory, artifact.Types, artifact.CreatedAt);
             }
         }
         catch (SqliteException)
@@ -283,50 +278,24 @@ public sealed partial class VisualMcpStore
         {
             lock (_gate)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    SELECT mvid, assembly, name, directory, types, created_at
-                    FROM decompiled_artifact ORDER BY created_at DESC LIMIT $limit;
-                    """;
-                command.Parameters.AddWithValue("$limit", limit);
+                using var context = VisualMcpSchema.CreateContext(connection);
 
-                var artifacts = new List<DecompiledArtifact>();
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    var at = DateTimeOffset.TryParse(reader.GetString(5), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                    artifacts.Add(new DecompiledArtifact(
-                        reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                        reader.GetString(3), reader.GetInt32(4), at));
-                }
-
-                return artifacts;
+                // SQLite cannot ORDER BY a DateTimeOffset through EF; artifacts are few, so the page is
+                // ordered after it is read.
+                return context.DecompiledArtifacts
+                    .AsNoTracking()
+                    .Select(row => new { row.Mvid, row.Assembly, row.Name, row.Directory, row.Types, row.CreatedAt })
+                    .ToList()
+                    .OrderByDescending(row => row.CreatedAt)
+                    .Take(limit)
+                    .Select(row => new DecompiledArtifact(
+                        row.Mvid, row.Assembly, row.Name, row.Directory, row.Types, row.CreatedAt))
+                    .ToList();
             }
         }
         catch (SqliteException)
         {
             return [];
-        }
-    }
-
-    // ── small helpers ───────────────────────────────────────────────────────
-    private int Count(string sql)
-    {
-        var connection = Connection();
-        if (connection is null) return 0;
-
-        try
-        {
-            lock (_gate)
-            {
-                using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                return Convert.ToInt32(command.ExecuteScalar());
-            }
-        }
-        catch (SqliteException)
-        {
-            return 0;
         }
     }
 }

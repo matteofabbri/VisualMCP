@@ -1,9 +1,13 @@
-using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Snitch.Storage.Schema;
+using SchemaDocumentRow = Snitch.Storage.Schema.MetacodeDocumentRow;
+using SchemaSourceRow = Snitch.Storage.Schema.SourceDocumentRow;
+using SchemaTreeRow = Snitch.Storage.Schema.MetacodeTreeRow;
 
 namespace Snitch.Metacode.Indexing;
 
@@ -33,14 +37,6 @@ namespace Snitch.Metacode.Indexing;
 /// </remarks>
 public sealed class MetacodeIndexStore : IDisposable
 {
-    private const string TreeColumns = """
-        declaration_key, path, kind, name, line, col, end_line, cyclomatic, cognitive,
-        max_nesting, statements, branches, expressions, text, source_path, decompiled
-        """;
-
-    /// <summary>What one path owns, children first, so a delete never leaves an orphan behind.</summary>
-    private static readonly string[] OwnedTables = ["mc_node", "mc_tree", "mc_document", "source_document"];
-
     /// <summary>
     /// The path prefix of a document that has no file: the metacode of a decompiled assembly. Those rows
     /// live in the same tables as the solution's own code (so one query sees both), and the prefix is what
@@ -127,23 +123,35 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT m.path, m.hash, m.mtime, CASE WHEN d.path IS NULL THEN 0 ELSE 1 END
-                FROM mc_document m LEFT JOIN source_document d ON d.path = m.path
-                UNION ALL
-                SELECT s.path, s.hash, s.mtime, 1
-                FROM source_document s
-                WHERE s.path NOT IN (SELECT path FROM mc_document);
-                """;
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                known[reader.GetString(0)] = new MetacodeDocumentState(reader.GetString(1), reader.GetInt64(2))
+            using var context = VisualMcpSchema.CreateContext(connection);
+
+            var documents = context.MetacodeDocuments
+                .AsNoTracking()
+                .Select(document => new
                 {
-                    HasSource = reader.GetInt64(3) != 0,
+                    document.Path,
+                    document.Hash,
+                    document.Mtime,
+                    HasSource = context.SourceDocuments.Any(source => source.Path == document.Path),
+                })
+                .ToList();
+
+            foreach (var document in documents)
+                known[document.Path] = new MetacodeDocumentState(document.Hash, document.Mtime)
+                {
+                    HasSource = document.HasSource,
                 };
-            }
+
+            // A document with no reader has only the native row, and it is still a document of the store.
+            var natives = context.SourceDocuments
+                .AsNoTracking()
+                .Where(source => !context.MetacodeDocuments.Any(document => document.Path == source.Path))
+                .Select(source => new { source.Path, source.Hash, source.Mtime })
+                .ToList();
+
+            foreach (var source in natives)
+                known[source.Path] = new MetacodeDocumentState(source.Hash, source.Mtime) { HasSource = true };
+
             return known;
         }
         catch (SqliteException)
@@ -165,77 +173,49 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var transaction = connection.BeginTransaction();
+            using var context = VisualMcpSchema.CreateContext(connection);
+            using var transaction = context.Database.BeginTransaction();
 
-            using (var delete = connection.CreateCommand())
-            {
-                delete.Transaction = transaction;
-                delete.CommandText = "DELETE FROM mc_node WHERE path = $path; DELETE FROM mc_tree WHERE path = $path;";
-                delete.Parameters.AddWithValue("$path", facts.Path);
-                delete.ExecuteNonQuery();
-            }
+            context.MetacodeNodes.Where(node => node.Path == facts.Path).ExecuteDelete();
+            context.MetacodeTrees.Where(tree => tree.Path == facts.Path).ExecuteDelete();
 
-            using (var insert = connection.CreateCommand())
-            {
-                insert.Transaction = transaction;
-                insert.CommandText = $"""
-                    INSERT OR REPLACE INTO mc_tree
-                        ({TreeColumns}, doc_hash)
-                    VALUES ($key, $path, $kind, $name, $line, $col, $end, $cc, $cog,
-                            $nesting, $statements, $branches, $expressions, $text, $source, $decompiled, $hash);
-                    """;
+            // Provenance is a property of the document, written into every row it owns: a query that
+            // only reads mc_tree still knows where the content came from and whether it was read.
+            var sourcePath = facts.SourcePath ?? facts.Path;
 
-                var key = insert.Parameters.Add("$key", SqliteType.Text);
-                var path = insert.Parameters.Add("$path", SqliteType.Text);
-                var kind = insert.Parameters.Add("$kind", SqliteType.Text);
-                var name = insert.Parameters.Add("$name", SqliteType.Text);
-                var line = insert.Parameters.Add("$line", SqliteType.Integer);
-                var col = insert.Parameters.Add("$col", SqliteType.Integer);
-                var end = insert.Parameters.Add("$end", SqliteType.Integer);
-                var cc = insert.Parameters.Add("$cc", SqliteType.Integer);
-                var cog = insert.Parameters.Add("$cog", SqliteType.Integer);
-                var nesting = insert.Parameters.Add("$nesting", SqliteType.Integer);
-                var statements = insert.Parameters.Add("$statements", SqliteType.Integer);
-                var branches = insert.Parameters.Add("$branches", SqliteType.Integer);
-                var expressions = insert.Parameters.Add("$expressions", SqliteType.Integer);
-                var text = insert.Parameters.Add("$text", SqliteType.Blob);
-                var source = insert.Parameters.Add("$source", SqliteType.Text);
-                var decompiled = insert.Parameters.Add("$decompiled", SqliteType.Integer);
-                var hash = insert.Parameters.Add("$hash", SqliteType.Text);
-
-                // Provenance is a property of the document, written into every row it owns: a query that
-                // only reads mc_tree still knows where the content came from and whether it was read.
-                var sourcePath = facts.SourcePath ?? facts.Path;
-
-                foreach (var row in facts.Rows)
+            context.MetacodeTrees.AddRange(facts.Rows
+                .GroupBy(row => (row.Key, row.Path, row.Line, row.Name))
+                .Select(group => group.Last())
+                .Select(row => new SchemaTreeRow
                 {
-                    key.Value = row.Key;
-                    path.Value = row.Path;
-                    kind.Value = row.Kind;
-                    name.Value = row.Name;
-                    line.Value = row.Line;
-                    col.Value = row.Column;
-                    end.Value = row.EndLine;
-                    cc.Value = row.Cyclomatic;
-                    cog.Value = row.Cognitive;
-                    nesting.Value = row.MaxNesting;
-                    statements.Value = row.Statements;
-                    branches.Value = row.Branches;
-                    expressions.Value = row.Expressions;
-                    text.Value = Compress(row.Text);
-                    source.Value = row.SourcePath.Length > 0 ? row.SourcePath : sourcePath;
-                    decompiled.Value = (row.Decompiled || facts.Decompiled) ? 1 : 0;
-                    hash.Value = facts.Hash;
-                    insert.ExecuteNonQuery();
-                }
-            }
+                    DeclarationKey = row.Key,
+                    Path = row.Path,
+                    Kind = row.Kind,
+                    Name = row.Name,
+                    Line = row.Line,
+                    Col = row.Column,
+                    EndLine = row.EndLine,
+                    Cyclomatic = row.Cyclomatic,
+                    Cognitive = row.Cognitive,
+                    MaxNesting = row.MaxNesting,
+                    Statements = row.Statements,
+                    Branches = row.Branches,
+                    Expressions = row.Expressions,
+                    Text = Compress(row.Text),
+                    DocHash = facts.Hash,
+                    SourcePath = row.SourcePath.Length > 0 ? row.SourcePath : sourcePath,
+                    Decompiled = row.Decompiled || facts.Decompiled,
+                }));
 
             // The complete AST, node by node: one row per node of every declaration, in pre-order, so
             // the tree is a query (`ORDER BY node_id`) instead of a rendering that has to be parsed.
+            // A solution's AST runs to hundreds of thousands of rows, so they are written with one
+            // prepared command inside the same transaction: tracking that many entities would cost more
+            // memory than the index itself.
             if (facts.Nodes.Count > 0)
             {
                 using var node = connection.CreateCommand();
-                node.Transaction = transaction;
+                node.Transaction = (SqliteTransaction)transaction.GetDbTransaction();
                 node.CommandText = """
                     INSERT OR REPLACE INTO mc_node
                         (path, declaration_key, node_id, parent_id, slot, ordinal, depth, kind,
@@ -260,8 +240,6 @@ public sealed class MetacodeIndexStore : IDisposable
                 var nodeSource = node.Parameters.Add("$source", SqliteType.Text);
                 var nodeDecompiled = node.Parameters.Add("$decompiled", SqliteType.Integer);
 
-                var sourcePath = facts.SourcePath ?? facts.Path;
-
                 foreach (var ast in facts.Nodes)
                 {
                     nodePath.Value = facts.Path;
@@ -283,37 +261,51 @@ public sealed class MetacodeIndexStore : IDisposable
                 }
             }
 
-            using (var stamp = connection.CreateCommand())
+            var declarations = facts.Rows
+                .GroupBy(row => (row.Key, row.Path, row.Line, row.Name))
+                .Count();
+            var nodes = facts.Nodes.Count > 0
+                ? facts.Nodes.Count
+                : facts.Rows.Sum(row => row.Statements + row.Expressions);
+
+            var document = context.MetacodeDocuments.FirstOrDefault(row => row.Path == facts.Path);
+            if (document is null)
             {
-                stamp.Transaction = transaction;
-                stamp.CommandText = """
-                    INSERT OR REPLACE INTO mc_document
-                        (path, project, hash, mtime, language, declarations, nodes, diagnostics, indexed_at,
-                         source_path, decompiled)
-                    VALUES ($path, $project, $hash, $mtime, $language, $declarations, $nodes, $diagnostics, $at,
-                            $source, $decompiled);
-                    """;
-                stamp.Parameters.AddWithValue("$path", facts.Path);
-                stamp.Parameters.AddWithValue("$project", facts.Project);
-                stamp.Parameters.AddWithValue("$hash", facts.Hash);
-                stamp.Parameters.AddWithValue("$mtime", facts.Mtime);
-                stamp.Parameters.AddWithValue("$language", facts.Language);
-                stamp.Parameters.AddWithValue("$declarations", facts.Rows.Count);
-                stamp.Parameters.AddWithValue("$nodes", facts.Nodes.Count > 0
-                    ? facts.Nodes.Count
-                    : facts.Rows.Sum(row => row.Statements + row.Expressions));
-                stamp.Parameters.AddWithValue("$diagnostics", facts.Diagnostics);
-                stamp.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-                stamp.Parameters.AddWithValue("$source", facts.SourcePath ?? facts.Path);
-                stamp.Parameters.AddWithValue("$decompiled", facts.Decompiled ? 1 : 0);
-                stamp.ExecuteNonQuery();
+                context.MetacodeDocuments.Add(new SchemaDocumentRow
+                {
+                    Path = facts.Path,
+                    Project = facts.Project,
+                    Hash = facts.Hash,
+                    Mtime = facts.Mtime,
+                    Language = facts.Language,
+                    Declarations = declarations,
+                    Nodes = nodes,
+                    Diagnostics = facts.Diagnostics,
+                    IndexedAt = DateTimeOffset.UtcNow,
+                    SourcePath = sourcePath,
+                    Decompiled = facts.Decompiled,
+                });
+            }
+            else
+            {
+                document.Project = facts.Project;
+                document.Hash = facts.Hash;
+                document.Mtime = facts.Mtime;
+                document.Language = facts.Language;
+                document.Declarations = declarations;
+                document.Nodes = nodes;
+                document.Diagnostics = facts.Diagnostics;
+                document.IndexedAt = DateTimeOffset.UtcNow;
+                document.SourcePath = sourcePath;
+                document.Decompiled = facts.Decompiled;
             }
 
             // The native half of the record: the file as its own language writes it, next to the tree
             // the model produced from it. One transaction, so the two never disagree about a file.
             if (facts.Source is not null)
-                WriteSource(connection, transaction, facts);
+                WriteSource(context, facts);
 
+            context.SaveChanges();
             transaction.Commit();
             return true;
         }
@@ -331,28 +323,36 @@ public sealed class MetacodeIndexStore : IDisposable
     /// The native half of one document. Called inside <see cref="ReplaceAsync"/>'s transaction, so the
     /// text and the trees it produced never disagree about a file.
     /// </summary>
-    private static void WriteSource(
-        SqliteConnection connection, SqliteTransaction transaction, MetacodeDocumentFacts facts)
+    private static void WriteSource(VisualMcpDbContext context, MetacodeDocumentFacts facts)
     {
         var source = facts.Source!;
 
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT OR REPLACE INTO source_document
-                (path, project, language, hash, mtime, chars, lines, text, indexed_at)
-            VALUES ($path, $project, $language, $hash, $mtime, $chars, $lines, $text, $at);
-            """;
-        command.Parameters.AddWithValue("$path", facts.Path);
-        command.Parameters.AddWithValue("$project", facts.Project);
-        command.Parameters.AddWithValue("$language", facts.Language);
-        command.Parameters.AddWithValue("$hash", facts.Hash);
-        command.Parameters.AddWithValue("$mtime", facts.Mtime);
-        command.Parameters.AddWithValue("$chars", source.Length);
-        command.Parameters.AddWithValue("$lines", LineCount(source));
-        command.Parameters.AddWithValue("$text", source);
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-        command.ExecuteNonQuery();
+        var document = context.SourceDocuments.FirstOrDefault(row => row.Path == facts.Path);
+        if (document is null)
+        {
+            context.SourceDocuments.Add(new SchemaSourceRow
+            {
+                Path = facts.Path,
+                Project = facts.Project,
+                Language = facts.Language,
+                Hash = facts.Hash,
+                Mtime = facts.Mtime,
+                Chars = source.Length,
+                Lines = LineCount(source),
+                Text = source,
+                IndexedAt = DateTimeOffset.UtcNow,
+            });
+            return;
+        }
+
+        document.Project = facts.Project;
+        document.Language = facts.Language;
+        document.Hash = facts.Hash;
+        document.Mtime = facts.Mtime;
+        document.Chars = source.Length;
+        document.Lines = LineCount(source);
+        document.Text = source;
+        document.IndexedAt = DateTimeOffset.UtcNow;
     }
 
     /// <summary>How many lines the text spans: a count of separators, not a split, because it is only a column.</summary>
@@ -378,14 +378,13 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            foreach (var table in new[] { "mc_document", "source_document" })
-            {
-                using var command = connection.CreateCommand();
-                command.CommandText = $"UPDATE {table} SET mtime = $mtime WHERE path = $path;";
-                command.Parameters.AddWithValue("$path", path);
-                command.Parameters.AddWithValue("$mtime", mtime);
-                command.ExecuteNonQuery();
-            }
+            using var context = VisualMcpSchema.CreateContext(connection);
+            context.MetacodeDocuments
+                .Where(document => document.Path == path)
+                .ExecuteUpdate(setters => setters.SetProperty(document => document.Mtime, mtime));
+            context.SourceDocuments
+                .Where(document => document.Path == path)
+                .ExecuteUpdate(setters => setters.SetProperty(document => document.Mtime, mtime));
         }
         catch (SqliteException)
         {
@@ -408,20 +407,9 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var transaction = connection.BeginTransaction();
-            var removed = 0;
-
-            foreach (var path in paths)
-            {
-                foreach (var table in OwnedTables)
-                {
-                    using var delete = connection.CreateCommand();
-                    delete.Transaction = transaction;
-                    delete.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-                    delete.Parameters.AddWithValue("$path", path);
-                    removed += delete.ExecuteNonQuery();
-                }
-            }
+            using var context = VisualMcpSchema.CreateContext(connection);
+            using var transaction = context.Database.BeginTransaction();
+            var removed = paths.Sum(path => DeletePath(context, path));
 
             transaction.Commit();
             return removed;
@@ -458,18 +446,10 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var transaction = connection.BeginTransaction();
+            using var context = VisualMcpSchema.CreateContext(connection);
+            using var transaction = context.Database.BeginTransaction();
             foreach (var path in stale)
-            {
-                foreach (var table in OwnedTables)
-                {
-                    using var delete = connection.CreateCommand();
-                    delete.Transaction = transaction;
-                    delete.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-                    delete.Parameters.AddWithValue("$path", path);
-                    delete.ExecuteNonQuery();
-                }
-            }
+                DeletePath(context, path);
 
             transaction.Commit();
             return stale.Count;
@@ -498,34 +478,25 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var stale = new List<string>();
-            using (var query = connection.CreateCommand())
-            {
-                // substr, not LIKE: an assembly name can contain '_' or '%', which LIKE would treat as wildcards.
-                query.CommandText = "SELECT path FROM mc_document WHERE substr(path, 1, length($prefix)) = $prefix;";
-                query.Parameters.AddWithValue("$prefix", prefix);
-                using var reader = query.ExecuteReader();
-                while (reader.Read())
-                {
-                    if (!keep.Contains(reader.GetString(0), StringComparer.OrdinalIgnoreCase))
-                        stale.Add(reader.GetString(0));
-                }
-            }
+            using var context = VisualMcpSchema.CreateContext(connection);
+
+            // StartsWith is the framework's prefix comparison; it escapes the wildcards a hand-written
+            // LIKE would have treated as patterns.
+            var candidates = context.MetacodeDocuments
+                .AsNoTracking()
+                .Where(document => document.Path.StartsWith(prefix))
+                .Select(document => document.Path)
+                .ToList();
+
+            var stale = candidates
+                .Where(path => !keep.Contains(path, StringComparer.OrdinalIgnoreCase))
+                .ToList();
 
             if (stale.Count == 0) return 0;
 
-            using var transaction = connection.BeginTransaction();
+            using var transaction = context.Database.BeginTransaction();
             foreach (var path in stale)
-            {
-                foreach (var table in OwnedTables)
-                {
-                    using var delete = connection.CreateCommand();
-                    delete.Transaction = transaction;
-                    delete.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-                    delete.Parameters.AddWithValue("$path", path);
-                    delete.ExecuteNonQuery();
-                }
-            }
+                DeletePath(context, path);
 
             transaction.Commit();
             return stale.Count;
@@ -553,14 +524,15 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT hash FROM mc_document
-                WHERE substr(path, 1, length($prefix)) = $prefix
-                LIMIT 1;
-                """;
-            command.Parameters.AddWithValue("$prefix", DecompiledPrefix + assemblyFileName + "/");
-            return command.ExecuteScalar() as string;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var prefix = DecompiledPrefix + assemblyFileName + "/";
+
+            return context.MetacodeDocuments
+                .AsNoTracking()
+                .Where(document => document.Path.StartsWith(prefix))
+                .OrderBy(document => document.Path)
+                .Select(document => document.Hash)
+                .FirstOrDefault();
         }
         catch (SqliteException)
         {
@@ -588,21 +560,19 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT path, hash FROM mc_document
-                WHERE substr(path, 1, length($managed)) = $managed
-                   OR substr(path, 1, length($native)) = $native
-                ORDER BY path;
-                """;
-            command.Parameters.AddWithValue("$managed", DecompiledPrefix);
-            command.Parameters.AddWithValue("$native", NativePrefix);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var rows = context.MetacodeDocuments
+                .AsNoTracking()
+                .Where(document =>
+                    document.Path.StartsWith(DecompiledPrefix) || document.Path.StartsWith(NativePrefix))
+                .OrderBy(document => document.Path)
+                .Select(document => new { document.Path, document.Hash })
+                .ToList();
 
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            foreach (var row in rows)
             {
-                var path = reader.GetString(0);
-                var identity = reader.GetString(1);
+                var path = row.Path;
+                var identity = row.Hash;
 
                 // assembly://<file>/<type> and native://<file>: the file name is everything before the
                 // first '/' — and for a native document there is no '/', so the rest is the name itself.
@@ -645,11 +615,16 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT {TreeColumns} FROM mc_tree WHERE path = $path ORDER BY line, col LIMIT $limit;";
-            command.Parameters.AddWithValue("$path", path);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-            return Read(command);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var rows = context.MetacodeTrees
+                .AsNoTracking()
+                .Where(tree => tree.Path == path)
+                .OrderBy(tree => tree.Line)
+                .ThenBy(tree => tree.Col)
+                .Take(Clamp(limit))
+                .ToList();
+
+            return rows.Select(Shape).ToList();
         }
         catch (SqliteException)
         {
@@ -674,28 +649,31 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT declaration_key, node_id, parent_id, slot, ordinal, depth, kind, line, col, end_line, data
-                FROM mc_node
-                WHERE path = $path AND declaration_key = $key
-                ORDER BY node_id LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$path", path);
-            command.Parameters.AddWithValue("$key", declarationKey);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-
-            var nodes = new List<MetacodeAstNode>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                nodes.Add(new MetacodeAstNode(
-                    reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetString(3),
-                    reader.GetInt32(4), reader.GetInt32(5), reader.GetString(6), reader.GetInt32(7),
-                    reader.GetInt32(8), reader.GetInt32(9), reader.GetString(10)));
-            }
-
-            return nodes;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.MetacodeNodes
+                .AsNoTracking()
+                .Where(node => node.Path == path && node.DeclarationKey == declarationKey)
+                .OrderBy(node => node.NodeId)
+                .Take(Clamp(limit))
+                .Select(node => new
+                {
+                    node.DeclarationKey,
+                    node.NodeId,
+                    node.ParentId,
+                    node.Slot,
+                    node.Ordinal,
+                    node.Depth,
+                    node.Kind,
+                    node.Line,
+                    node.Col,
+                    node.EndLine,
+                    node.Data,
+                })
+                .ToList()
+                .Select(node => new MetacodeAstNode(
+                    node.DeclarationKey, node.NodeId, node.ParentId, node.Slot, node.Ordinal, node.Depth,
+                    node.Kind, node.Line, node.Col, node.EndLine, node.Data))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -716,11 +694,8 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM mc_node WHERE path = $path AND declaration_key = $key;";
-            command.Parameters.AddWithValue("$path", path);
-            command.Parameters.AddWithValue("$key", declarationKey);
-            return Convert.ToInt32(command.ExecuteScalar());
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.MetacodeNodes.Count(node => node.Path == path && node.DeclarationKey == declarationKey);
         }
         catch (SqliteException)
         {
@@ -741,15 +716,21 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                SELECT {TreeColumns} FROM mc_tree
-                WHERE declaration_key = $q OR name = $q OR declaration_key LIKE '%' || $q || '%'
-                ORDER BY line, col LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$q", query);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-            return Read(command);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var needle = $"%{query}%";
+
+            var rows = context.MetacodeTrees
+                .AsNoTracking()
+                .Where(tree =>
+                    tree.DeclarationKey == query ||
+                    tree.Name == query ||
+                    EF.Functions.Like(tree.DeclarationKey, needle))
+                .OrderBy(tree => tree.Line)
+                .ThenBy(tree => tree.Col)
+                .Take(Clamp(limit))
+                .ToList();
+
+            return rows.Select(Shape).ToList();
         }
         catch (SqliteException)
         {
@@ -770,21 +751,33 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                SELECT {TreeColumns} FROM mc_tree
-                WHERE cyclomatic >= $min
-                  AND kind IN ('method', 'constructor', 'destructor', 'operator', 'function', 'local-function', 'property', 'indexer')
-                  AND ($project IS NULL OR path IN (SELECT path FROM mc_document WHERE project = $project))
-                  AND ($kind IS NULL OR kind = $kind)
-                ORDER BY cyclomatic DESC, cognitive DESC, name, line
-                LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$min", minCyclomatic);
-            command.Parameters.AddWithValue("$project", (object?)project ?? DBNull.Value);
-            command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
-            command.Parameters.AddWithValue("$limit", Clamp(limit));
-            return Read(command);
+            using var context = VisualMcpSchema.CreateContext(connection);
+
+            var callables = new[]
+            {
+                "method", "constructor", "destructor", "operator", "function",
+                "local-function", "property", "indexer",
+            };
+
+            var query = context.MetacodeTrees
+                .AsNoTracking()
+                .Where(tree => tree.Cyclomatic >= minCyclomatic && callables.Contains(tree.Kind));
+
+            if (project is not null)
+                query = query.Where(tree =>
+                    context.MetacodeDocuments.Any(document => document.Path == tree.Path && document.Project == project));
+            if (kind is not null)
+                query = query.Where(tree => tree.Kind == kind);
+
+            var rows = query
+                .OrderByDescending(tree => tree.Cyclomatic)
+                .ThenByDescending(tree => tree.Cognitive)
+                .ThenBy(tree => tree.Name)
+                .ThenBy(tree => tree.Line)
+                .Take(Clamp(limit))
+                .ToList();
+
+            return rows.Select(Shape).ToList();
         }
         catch (SqliteException)
         {
@@ -804,28 +797,36 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            var documents = Count(connection, "SELECT COUNT(*) FROM mc_document;");
+            using var context = VisualMcpSchema.CreateContext(connection);
+
+            var functionKinds = new[]
+            {
+                "method", "constructor", "destructor", "operator", "function", "local-function",
+            };
+            var typeKinds = new[] { "class", "struct", "interface", "enum", "record", "union", "trait" };
+
+            var documents = context.MetacodeDocuments.Count();
             // A file no frontend reads is stored as one `file` node: it is a document of the store, not a
             // declaration of anything, so it is counted apart instead of inflating this number.
-            var declarations = Count(connection, "SELECT COUNT(*) FROM mc_tree WHERE kind <> 'file';");
-            var functions = Count(connection,
-                "SELECT COUNT(*) FROM mc_tree WHERE kind IN ('method', 'constructor', 'destructor', 'operator', 'function', 'local-function');");
-            var types = Count(connection,
-                "SELECT COUNT(*) FROM mc_tree WHERE kind IN ('class', 'struct', 'interface', 'enum', 'record', 'union', 'trait');");
-            var max = Count(connection, "SELECT COALESCE(MAX(cyclomatic), 0) FROM mc_tree;");
-            var average = Count(connection,
-                "SELECT COALESCE(CAST(AVG(cyclomatic) AS INTEGER), 0) FROM mc_tree WHERE cyclomatic > 0;");
-            var sources = Count(connection, "SELECT COUNT(*) FROM source_document;");
-            var nodes = Count(connection, "SELECT COUNT(*) FROM mc_node;");
-            var decompiled = Count(connection, "SELECT COUNT(*) FROM mc_document WHERE decompiled <> 0;");
-            var files = Count(connection, "SELECT COUNT(*) FROM mc_tree WHERE kind = 'file';");
+            var declarations = context.MetacodeTrees.Count(tree => tree.Kind != "file");
+            var functions = context.MetacodeTrees.Count(tree => functionKinds.Contains(tree.Kind));
+            var types = context.MetacodeTrees.Count(tree => typeKinds.Contains(tree.Kind));
+            var max = context.MetacodeTrees.Select(tree => (int?)tree.Cyclomatic).Max() ?? 0;
+            var average = (int)(context.MetacodeTrees
+                .Where(tree => tree.Cyclomatic > 0)
+                .Select(tree => (int?)tree.Cyclomatic)
+                .Average() ?? 0);
+            var sources = context.SourceDocuments.Count();
+            var nodes = context.MetacodeNodes.Count();
+            var decompiled = context.MetacodeDocuments.Count(document => document.Decompiled);
+            var files = context.MetacodeTrees.Count(tree => tree.Kind == "file");
 
-            string? newest = null;
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT MAX(indexed_at) FROM mc_document;";
-                if (command.ExecuteScalar() is string value) newest = value;
-            }
+            // SQLite cannot ORDER BY a DateTimeOffset through EF; the timestamps are few enough to rank here.
+            var indexedAt = context.MetacodeDocuments
+                .AsNoTracking()
+                .Select(document => document.IndexedAt)
+                .ToList();
+            var newest = indexedAt.Count == 0 ? null : indexedAt.Max().ToUniversalTime().ToString("O");
 
             return new MetacodeIndexStatus(
                 documents, declarations, functions, types, max, average, newest, _path, null)
@@ -855,10 +856,8 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM mc_tree WHERE path = $path;";
-            command.Parameters.AddWithValue("$path", path);
-            return Convert.ToInt32(command.ExecuteScalar());
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return context.MetacodeTrees.Count(tree => tree.Path == path);
         }
         catch (SqliteException)
         {
@@ -882,11 +881,14 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT language, text FROM source_document WHERE path = $path;";
-            command.Parameters.AddWithValue("$path", path);
-            using var reader = command.ExecuteReader();
-            return reader.Read() ? (reader.GetString(0), reader.GetString(1)) : null;
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var source = context.SourceDocuments
+                .AsNoTracking()
+                .Where(document => document.Path == path)
+                .Select(document => new { document.Language, document.Text })
+                .FirstOrDefault();
+
+            return source is null ? null : (source.Language, source.Text);
         }
         catch (SqliteException)
         {
@@ -916,42 +918,26 @@ public sealed class MetacodeIndexStore : IDisposable
 
     private SqliteConnection? Open() => _connection;
 
-    private static IReadOnlyList<MetacodeTreeRow> Read(SqliteCommand command)
+    /// <summary>Removes everything one path owns; the caller wraps the calls in its transaction.</summary>
+    private static int DeletePath(VisualMcpDbContext context, string path)
     {
-        var rows = new List<MetacodeTreeRow>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
+        var removed = 0;
+        removed += context.MetacodeNodes.Where(row => row.Path == path).ExecuteDelete();
+        removed += context.MetacodeTrees.Where(row => row.Path == path).ExecuteDelete();
+        removed += context.MetacodeDocuments.Where(row => row.Path == path).ExecuteDelete();
+        removed += context.SourceDocuments.Where(row => row.Path == path).ExecuteDelete();
+        return removed;
+    }
+
+    /// <summary>One stored declaration in the shape the callers use, with its text decompressed.</summary>
+    private static MetacodeTreeRow Shape(SchemaTreeRow row) =>
+        new(row.DeclarationKey, row.Path, row.Kind, row.Name, row.Line, row.Col, row.EndLine,
+            row.Cyclomatic, row.Cognitive, row.MaxNesting, row.Statements, row.Branches, row.Expressions,
+            Decompress(row.Text))
         {
-            rows.Add(new MetacodeTreeRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetInt32(4),
-                reader.GetInt32(5),
-                reader.GetInt32(6),
-                reader.GetInt32(7),
-                reader.GetInt32(8),
-                reader.GetInt32(9),
-                reader.GetInt32(10),
-                reader.GetInt32(11),
-                reader.GetInt32(12),
-                Decompress((byte[])reader[13]))
-            {
-                SourcePath = reader.GetString(14),
-                Decompiled = reader.GetInt32(15) != 0,
-            });
-        }
-
-        return rows;
-    }
-
-    private static int Count(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-    }
+            SourcePath = row.SourcePath,
+            Decompiled = row.Decompiled,
+        };
 
     private static int Clamp(int limit) => limit <= 0 ? 1 : Math.Min(limit, 5000);
 

@@ -86,6 +86,15 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Execution.IBuildProjectService, Execution.BuildProjectService>();
         services.AddSingleton<Execution.IRunProjectService, Execution.RunProjectService>();
         services.AddSingleton<Execution.IRunCommandService, Execution.RunCommandService>();
+        // Build and run settings as data: the evaluated MSBuild view and one gated property write, the
+        // binlog the build actually produced, saved run configurations, launchSettings.json and the
+        // publish profiles, and the package sources with their credentials.
+        services.AddSingleton<Execution.IProjectPropertiesService, Execution.ProjectPropertiesService>();
+        services.AddSingleton<Execution.IBinlogAnalysisService, Execution.BinlogAnalysisService>();
+        services.AddSingleton<Execution.IRunConfigurationService, Execution.RunConfigurationService>();
+        services.AddSingleton<Execution.ILaunchSettingsService, Execution.LaunchSettingsService>();
+        services.AddSingleton<Execution.IPublishProfilesService, Execution.PublishProfilesService>();
+        services.AddSingleton<Languages.CSharp.Packages.INuGetSourcesService, Languages.CSharp.Packages.NuGetSourcesService>();
         services.AddSingleton<GitHub.IGitHubService, GitHub.GitHubService>();
         services.AddSingleton<IO.IIoService, IO.IoService>();
         services.AddSingleton<Languages.CSharp.Documentation.IDocumentationService, Languages.CSharp.Documentation.DocumentationService>();

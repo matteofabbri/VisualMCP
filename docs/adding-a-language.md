@@ -1,116 +1,116 @@
-# Aggiungere un linguaggio al motore di stile
+# Adding a language to the style engine
 
-Il motore delle regole IDE è diviso in due strati: un **nucleo neutro** che non sa nulla di sintassi, e un
-**livello di linguaggio** che fornisce solo ciò che cambia. Aggiungere Visual Basic significa scrivere il
-secondo; il primo si tocca solo quando una preferenza del linguaggio non ha un campo neutro dove vivere (è
-successo per `visual_basic_style_prefer_isnot_expression`, vedi sotto).
+The IDE-rule engine is split into two layers: a **neutral core** that knows nothing about syntax, and a
+**language layer** that supplies only what differs. Adding Visual Basic means writing the second layer; the
+first is touched only when a language preference has no neutral field to live in (that happened for
+`visual_basic_style_prefer_isnot_expression`, see below).
 
-## Cosa è già condiviso (`Snitch/Languages/Style/`)
+## What is already shared (`Snitch/Languages/Style/`)
 
-| Tipo | Ruolo |
+| Type | Role |
 |---|---|
-| `StyleRewrite` | la classe base di una regola: `Rule`, `Rules`, `RequiredOption`, `IsOptIn`, `TryMatch(node, model)` / `TryMatch(node, context)`, più gli helper neutri (`Match`, `Removal`, `SameSymbol`, `IsUserDefinedOperator`) |
-| `StyleRule`, `StyleMatch` | id/titolo/descrizione di una regola; il match con nodo, replacement, span finale e flag `Removes` |
-| `StyleOptions` + i cinque enum | le preferenze già mappate fuori dai nomi delle chiavi: graffe, ordine dei modificatori, namespace, cast nel foreach, accessibilità, `IsNot` |
-| `StyleContext` | modello semantico, opzioni, workspace, solution, `IsPristine` |
+| `StyleRewrite` | the base class of a rule: `Rule`, `Rules`, `RequiredOption`, `IsOptIn`, `TryMatch(node, model)` / `TryMatch(node, context)`, plus the neutral helpers (`Match`, `Removal`, `SameSymbol`, `IsUserDefinedOperator`) |
+| `StyleRule`, `StyleMatch` | a rule's id/title/description; the match with node, replacement, final span and the `Removes` flag |
+| `StyleOptions` + the five enums | the preferences already mapped away from key names: braces, modifier order, namespaces, foreach cast, accessibility, `IsNot` |
+| `StyleContext` | semantic model, options, workspace, solution, `IsPristine` |
 | `IStyleRuleSet` | `All`, `Supported`, `NotRewritten`, `SupportedIds` |
-| `IStyleLanguage` | i quattro punti di contatto con la sintassi (sotto) |
-| `StyleRewriteService` | **tutta la pipeline**: scope documento/progetto/solution, fino a 3 passate per documento, gate del compilatore con isolamento dei rifiuti, report, storia delle modifiche, scrittura dei file |
+| `IStyleLanguage` | the four points of contact with the syntax (below) |
+| `StyleRewriteService` | **the whole pipeline**: document/project/solution scope, up to 3 passes per document, compiler gate with per-refusal isolation, report, edit history, file writing |
 
-## Cosa deve fornire un linguaggio
+## What a language must provide
 
-1. **Il proprio base class delle regole** (`CSharpStyleRewrite` come modello): la classe neutra più gli
-   helper che richiedono la factory di sintassi del linguaggio — parsare un'espressione o un'istruzione da
-   testo, il binding speculativo per i controlli di qualificazione.
-2. **`IStyleLanguage`**, quattro membri più l'estensione:
+1. **Its own rule base class** (`CSharpStyleRewrite` as the model): the neutral class plus the helpers that
+   need the language's syntax factory — parsing an expression or a statement from text, the speculative
+   binding used by the qualification checks.
+2. **`IStyleLanguage`**, four members plus the extension:
    ```csharp
    string Name { get; }                 // LanguageNames.VisualBasic
    string Extension { get; }            // ".vb"
-   bool IsStatement(SyntaxNode node);   // distingue un'istruzione da un'espressione
-   bool IsShapeWrapper(SyntaxNode replacement);      // un blocco parsato che contiene istruzioni
+   bool IsStatement(SyntaxNode node);   // tells a statement from an expression
+   bool IsShapeWrapper(SyntaxNode replacement);      // a parsed block that contains statements
    IReadOnlyList<SyntaxNode> StatementsOf(SyntaxNode parent);
    SyntaxNode WithStatements(SyntaxNode parent, IReadOnlyList<SyntaxNode> statements);
    StyleOptions ReadOptions(Document document, SyntaxTree? tree);
    ```
-   `StatementsOf` + `WithStatements` sono tutto ciò che serve al servizio per sostituire o rimuovere un
-   intervallo di istruzioni: il resto dello splice (trivia, annotazioni, ordinamento) è condiviso.
-3. **`IStyleRuleSet`**: il catalogo delle regole del linguaggio e la tabella `NotRewritten` con il motivo
-   di ogni id che non si riscrive.
-4. **Il parser delle opzioni**: mappa le chiavi del linguaggio (`visual_basic_*`, `dotnet_style_*`) sui
-   campi di `StyleOptions`.
-5. **Il servizio concreto**: una classe di tre righe che eredita `StyleRewriteService` passando rule set,
-   language e il nome del refactoring — come `SimplifyCodeService` per il C#.
+   `StatementsOf` + `WithStatements` are all the service needs to replace or remove a range of statements:
+   the rest of the splice (trivia, annotations, ordering) is shared.
+3. **`IStyleRuleSet`**: the language's rule catalogue and the `NotRewritten` table with the reason for
+   every id that is not rewritten.
+4. **The options parser**: maps the language's keys (`visual_basic_*`, `dotnet_style_*`) onto the fields of
+   `StyleOptions`.
+5. **The concrete service**: a three-line class that inherits `StyleRewriteService`, passing the rule set,
+   the language and the refactoring name — like `SimplifyCodeService` for C#.
 
-## Cosa resta invece per forza al linguaggio
+## What necessarily stays with the language
 
-Le regole stesse: ogni matcher lavora sui tipi di nodo e sulle `SyntaxKind` del suo linguaggio, e il testo
-che emette è sintassi di quel linguaggio. Non c'è nulla da astrarre lì, e non va forzato.
+The rules themselves: every matcher works on its language's node types and `SyntaxKind`s, and the text it
+emits is that language's syntax. There is nothing to abstract there, and it must not be forced.
 
-## Stato attuale
+## Current state
 
-- **C#**: 87 id, 39 non riscritte con il motivo, `Snitch/Languages/CSharp/Style/`.
-- **Visual Basic**: 15 id, `Snitch/Languages/VB/Style/` (`VbStyleLanguage`, `VbStyleRuleSet`,
-  `VbStyleRewrites.cs`, `VbSimplifyCodeService`). I test sono `src/VisualMCP.Tests/VbStyleTests.cs`, su un
-  `AdhocWorkspace` con un progetto VB vero: per ogni id supportato un caso che si riscrive e uno che deve
-  restare intatto. Il servizio si registra con `AddSnitchVisualBasic()`
-  (`Snitch/Languages/VB/VbServiceCollectionExtensions.cs`) e non è cablato in `AddSnitch`: un host che
-  vuole il VB lo chiede, e i due servizi non si contendono lo stesso `ISimplifyCodeService`.
-- Una regola VB potrà dichiarare lo stesso id IDE di una C#: gli id appartengono alla tabella Microsoft,
-  non al linguaggio, e la tabella ha colonne separate per C# e VB. Per questo
-  `VbStyleRewriteCatalog.NotRewritten` copre la **colonna VB** (le regole `dotnet_style_*` condivise più le
-  `visual_basic_style_*`): un id che il VB non definisce affatto — pattern matching, graffe, expression
-  body — non è una regola VB e non compare lì, mentre tutto ciò che il VB definisce e non riscriviamo ha
-  un motivo, uno per riga.
+- **C#**: 87 ids, 39 not rewritten with a reason, `Snitch/Languages/CSharp/Style/`.
+- **Visual Basic**: 15 ids, `Snitch/Languages/VB/Style/` (`VbStyleLanguage`, `VbStyleRuleSet`,
+  `VbStyleRewrites.cs`, `VbSimplifyCodeService`). The tests are `src/VisualMCP.Tests/VbStyleTests.cs`, over
+  an `AdhocWorkspace` with a real VB project: for every supported id, one case that is rewritten and one
+  that must stay untouched. The service is registered by `AddSnitchVisualBasic()`
+  (`Snitch/Languages/VB/VbServiceCollectionExtensions.cs`) and is not wired into `AddSnitch`: a host that
+  wants VB asks for it, so the two services never compete for the same `ISimplifyCodeService`.
+- A VB rule may declare the same IDE id as a C# one: the ids belong to Microsoft's table, not to the
+  language, and the table has separate columns for C# and VB. That is why
+  `VbStyleRewriteCatalog.NotRewritten` covers the **VB column** (the shared `dotnet_style_*` rules plus the
+  `visual_basic_style_*` ones): an id VB does not define at all — pattern matching, braces, expression
+  bodies — is not a VB rule and does not appear there, while everything VB defines and we do not rewrite
+  has a reason, one per line.
 
-### Cosa ha richiesto una generalizzazione del nucleo neutro
+### What required a generalization of the neutral core
 
-- `StyleOptions` ha un campo in più, `PreferIsNot`
-  (`IsNotPreference.None | PreferIsNot | PreferNot`): `visual_basic_style_prefer_isnot_expression` è
-  un'opzione VB, ma il posto in cui vive una preferenza già mappata è il record neutro — come `Braces` per
-  il C# — e la regola non legge il nome della chiave.
-- `StyleRewriteService` spiegava gli id fermi per opzione con una frase che elencava
-  IDE0011/IDE0036/IDE0160/IDE0161, i quattro del C#. Ora la nota si costruisce dagli id selezionati in
-  quella run, e accanto a `braces`/`namespaces`/`modifierOrder` compare `preferIsNot`. Per il C# la lista e
-  il campo `braces` (su cui un test asserisce) restano identici.
-- Nient'altro è cambiato: `StyleRewrite`, la pipeline, il gate del compilatore, lo splice delle istruzioni
-  e la storia delle modifiche erano già neutri e il VB li usa così come sono.
+- `StyleOptions` gained one field, `PreferIsNot`
+  (`IsNotPreference.None | PreferIsNot | PreferNot`): `visual_basic_style_prefer_isnot_expression` is a VB
+  option, but the place where an already-mapped preference lives is the neutral record — like `Braces` for
+  C# — and the rule does not read the key name.
+- `StyleRewriteService` explained the ids held back by an option with a sentence that listed
+  IDE0011/IDE0036/IDE0160/IDE0161, the four C# ones. The note is now built from the ids selected in that
+  run, and `preferIsNot` appears next to `braces`/`namespaces`/`modifierOrder`. For C# the list and the
+  `braces` field (which a test asserts on) stay identical.
+- Nothing else changed: `StyleRewrite`, the pipeline, the compiler gate, the statement splice and the edit
+  history were already neutral, and VB uses them as they are.
 
-## Trappole già pagate che valgono anche per il VB
+## Traps already paid for that apply to VB too
 
-- Dal secondo passaggio l'albero non è più quello della solution: `StyleContext.IsPristine` è vero solo
-  alla prima passata, e una regola che consulta la soluzione deve rifiutare il resto.
-- `ReplaceNodes` ricostruisce **tutto** l'albero: i match sulle istruzioni trovati prima vanno ricalcolati
-  dopo (lo fa già il servizio).
-- Un replacement sulla radice (direttive) non va annotato con `Formatter.Annotation`, o si riformatta il
-  file intero.
+- From the second pass on, the tree is no longer the solution's: `StyleContext.IsPristine` is true only on
+  the first pass, and a rule that consults the solution must refuse the rest.
+- `ReplaceNodes` rebuilds **the whole** tree: statement matches found before it must be recomputed
+  afterwards (the service already does this).
+- A replacement on the root (directives) must not be annotated with `Formatter.Annotation`, or the whole
+  file gets reformatted.
 
-## Trappole del VB, pagate scrivendo `Languages/VB/`
+## VB traps, paid for while writing `Languages/VB/`
 
-- **Non esiste un `BlockSyntax` pubblico con `Statements`.** Il C# ha un solo tipo che possiede una lista
-  di istruzioni; il VB ne ha sedici (`MethodBlockBaseSyntax`, `MultiLineIfBlockSyntax`, `CaseBlockSyntax`,
-  `TryBlockSyntax`, `DoLoopBlockSyntax`, …) e nessuna base comune. `VbBlocks` è l'unico posto che li
-  conosce: un tipo mancante lì non è un errore di compilazione, è una regola sulle istruzioni che
-  silenziosamente non fa nulla. Quando si aggiunge una regola che splices statements, il caso di test deve
-  stare in un blocco il cui tipo è nella lista.
-- **La factory dice `ParseExecutableStatement`, non `ParseStatement`.** `SyntaxFactory.ParseStatement`
-  esiste in C# e non in VB: il compilatore lo segnala, ma il typo "ovvio" è proprio quello.
-- **`TypeSyntax` deriva da `ExpressionSyntax`.** Un nome di tipo VB è anche un'espressione, quindi
-  `ParseTypeName(...)` entra nelle API che prendono un `ExpressionSyntax` (binding speculativo compreso) e
-  non serve una seconda strada.
-- **Il test del null è `Is Nothing`, e `= Nothing` non è equivalente ovunque.** Per una `String` il VB
-  confronta i valori (`"" = Nothing` è vero); per un value type `= Nothing` è il valore di default. IDE0041
-  scatta solo su un tipo di riferimento diverso da `String`, o cambierebbe il significato.
-- **La coalescenza è `If(a, b)` e la condizione ternaria è `If(c, a, b)`**: due tipi di nodo diversi
-  (`BinaryConditionalExpressionSyntax` e `TernaryConditionalExpressionSyntax`), e IDE0029 deve riscrivere
-  il ternario nel binario, non il contrario.
-- **IDE0084 ha una direzione, non una forma.** `Not (o Is other)` e `o IsNot other` sono entrambe corrette:
-  quale delle due si scrive lo dice `visual_basic_style_prefer_isnot_expression`, quindi la regola legge
-  `StyleContext.Options.PreferIsNot` e dichiara `RequiredOption`; senza opzione non tocca nulla. La forma
-  senza parentesi (`Not o Is C`) è la stessa cosa: `Is` lega più stretto di `Not`.
-- **`Formatter.FormatAsync` per il VB funziona solo se l'assembly `Microsoft.CodeAnalysis.VisualBasic.Workspaces`
-  è nella composizione MEF.** `MefHostServices.DefaultAssemblies` lo carica per nome, quindi è il
-  `PackageReference` nel `.csproj` a renderlo disponibile: senza quel package il documento VB si parsa ma
-  la formattazione non trova il servizio.
-- **Nessuna delle regole C# "di sintassi" si porta dietro.** Niente graffe, niente expression body, niente
-  pattern property, niente `??=`: gli id corrispondenti non sono "non implementati", sono id che il VB non
-  ha. La tabella VB è volutamente corta (15 id) e ogni id non riscritto ha il suo motivo.
+- **There is no public `BlockSyntax` with `Statements`.** C# has a single type that owns a list of
+  statements; VB has sixteen (`MethodBlockBaseSyntax`, `MultiLineIfBlockSyntax`, `CaseBlockSyntax`,
+  `TryBlockSyntax`, `DoLoopBlockSyntax`, …) and no common base. `VbBlocks` is the only place that knows
+  them: a type missing there is not a compilation error, it is a statement rule that silently does
+  nothing. When a rule that splices statements is added, its test case must live in a block whose type is
+  in the list.
+- **The factory says `ParseExecutableStatement`, not `ParseStatement`.** `SyntaxFactory.ParseStatement`
+  exists in C# and not in VB: the compiler flags it, but the "obvious" typo is exactly that one.
+- **`TypeSyntax` derives from `ExpressionSyntax`.** A VB type name is also an expression, so
+  `ParseTypeName(...)` fits the APIs that take an `ExpressionSyntax` (speculative binding included) and no
+  second path is needed.
+- **The null test is `Is Nothing`, and `= Nothing` is not equivalent everywhere.** For a `String` VB
+  compares values (`"" = Nothing` is true); for a value type `= Nothing` is the default value. IDE0041
+  fires only on a reference type other than `String`, or it would change the meaning.
+- **Coalescing is `If(a, b)` and the ternary condition is `If(c, a, b)`**: two different node types
+  (`BinaryConditionalExpressionSyntax` and `TernaryConditionalExpressionSyntax`), and IDE0029 must rewrite
+  the ternary into the binary one, not the other way round.
+- **IDE0084 has a direction, not a shape.** `Not (o Is other)` and `o IsNot other` are both correct: which
+  one to write is decided by `visual_basic_style_prefer_isnot_expression`, so the rule reads
+  `StyleContext.Options.PreferIsNot` and declares `RequiredOption`; without the option it touches nothing.
+  The form without parentheses (`Not o Is C`) is the same thing: `Is` binds tighter than `Not`.
+- **`Formatter.FormatAsync` works for VB only if the `Microsoft.CodeAnalysis.VisualBasic.Workspaces`
+  assembly is in the MEF composition.** `MefHostServices.DefaultAssemblies` loads it by name, so it is the
+  `PackageReference` in the `.csproj` that makes it available: without that package the VB document parses
+  but formatting cannot find the service.
+- **None of the C# "syntax" rules come along.** No braces, no expression bodies, no property patterns, no
+  `??=`: the corresponding ids are not "unimplemented", they are ids VB does not have. The VB table is
+  deliberately short (15 ids) and every id that is not rewritten has its reason.

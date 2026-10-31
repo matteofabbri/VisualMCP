@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Snitch.Storage.Schema;
 
 namespace Snitch.Search;
@@ -109,16 +110,24 @@ public sealed class TextIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT path, kind, length, modified, hash, lines, indexed_at FROM ti_document;";
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                var at = DateTimeOffset.TryParse(reader.GetString(6), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                stamps[reader.GetString(0)] = new IndexedDocument(
-                    reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3),
-                    reader.GetString(4), reader.GetInt32(5), at);
-            }
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var rows = context.TextIndexDocuments
+                .AsNoTracking()
+                .Select(document => new
+                {
+                    document.Path,
+                    document.Kind,
+                    document.Length,
+                    document.Modified,
+                    document.Hash,
+                    document.Lines,
+                    document.IndexedAt,
+                })
+                .ToList();
+
+            foreach (var row in rows)
+                stamps[row.Path] = new IndexedDocument(
+                    row.Path, row.Kind, row.Length, row.Modified, row.Hash, row.Lines, row.IndexedAt);
 
             return stamps;
         }
@@ -202,28 +211,37 @@ public sealed class TextIndexStore : IDisposable
                 }
             }
 
-            using (var stamp = connection.CreateCommand())
+            using (var stamp = VisualMcpSchema.CreateContext(connection))
             {
-                stamp.Transaction = transaction;
-                stamp.CommandText = """
-                    INSERT INTO ti_document (path, kind, length, modified, hash, lines, indexed_at)
-                    VALUES ($path, $kind, $length, $modified, $hash, $lines, $at)
-                    ON CONFLICT(path) DO UPDATE SET
-                        kind = excluded.kind,
-                        length = excluded.length,
-                        modified = excluded.modified,
-                        hash = excluded.hash,
-                        lines = excluded.lines,
-                        indexed_at = excluded.indexed_at;
-                    """;
-                stamp.Parameters.AddWithValue("$path", path);
-                stamp.Parameters.AddWithValue("$kind", kind);
-                stamp.Parameters.AddWithValue("$length", length);
-                stamp.Parameters.AddWithValue("$modified", modified);
-                stamp.Parameters.AddWithValue("$hash", hash);
-                stamp.Parameters.AddWithValue("$lines", lines.Count);
-                stamp.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-                stamp.ExecuteNonQuery();
+                stamp.Database.UseTransaction(transaction);
+
+                var document = await stamp.TextIndexDocuments
+                    .FirstOrDefaultAsync(row => row.Path == path, cancellationToken).ConfigureAwait(false);
+
+                if (document is null)
+                {
+                    stamp.TextIndexDocuments.Add(new TextIndexDocumentRow
+                    {
+                        Path = path,
+                        Kind = kind,
+                        Length = length,
+                        Modified = modified,
+                        Hash = hash,
+                        Lines = lines.Count,
+                        IndexedAt = DateTimeOffset.UtcNow,
+                    });
+                }
+                else
+                {
+                    document.Kind = kind;
+                    document.Length = length;
+                    document.Modified = modified;
+                    document.Hash = hash;
+                    document.Lines = lines.Count;
+                    document.IndexedAt = DateTimeOffset.UtcNow;
+                }
+
+                await stamp.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
 
             transaction.Commit();
@@ -247,14 +265,13 @@ public sealed class TextIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                UPDATE ti_document SET length = $length, modified = $modified WHERE path = $path;
-                """;
-            command.Parameters.AddWithValue("$path", path);
-            command.Parameters.AddWithValue("$length", length);
-            command.Parameters.AddWithValue("$modified", modified);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            await context.TextIndexDocuments
+                .Where(document => document.Path == path)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(document => document.Length, length)
+                    .SetProperty(document => document.Modified, modified), cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (SqliteException)
         {
@@ -404,18 +421,19 @@ public sealed class TextIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            var documents = Count(connection, "SELECT COUNT(*) FROM ti_document;");
-            var lines = Count(connection, "SELECT COALESCE(SUM(lines), 0) FROM ti_document;");
-            var source = Count(connection, "SELECT COUNT(*) FROM ti_document WHERE kind = 'source';");
-            var documentation = Count(connection, "SELECT COUNT(*) FROM ti_document WHERE kind = 'doc';");
-            var decompiled = Count(connection, "SELECT COUNT(*) FROM ti_document WHERE kind = 'decompiled';");
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var documents = context.TextIndexDocuments.Count();
+            var lines = context.TextIndexDocuments.Sum(document => (long?)document.Lines) ?? 0;
+            var source = context.TextIndexDocuments.Count(document => document.Kind == "source");
+            var documentation = context.TextIndexDocuments.Count(document => document.Kind == "doc");
+            var decompiled = context.TextIndexDocuments.Count(document => document.Kind == "decompiled");
 
-            string? newest = null;
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "SELECT MAX(indexed_at) FROM ti_document;";
-                if (command.ExecuteScalar() is string value) newest = value;
-            }
+            // SQLite cannot ORDER BY a DateTimeOffset through EF; the timestamps are few enough to rank here.
+            var indexedAt = context.TextIndexDocuments
+                .AsNoTracking()
+                .Select(document => document.IndexedAt)
+                .ToList();
+            var newest = indexedAt.Count == 0 ? null : indexedAt.Max().ToUniversalTime().ToString("O");
 
             return new TextIndexStatus(documents, lines, source, documentation, decompiled, newest, _path);
         }
@@ -438,25 +456,29 @@ public sealed class TextIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                SELECT path, kind, length, modified, hash, lines, indexed_at FROM ti_document
-                WHERE ($kind IS NULL OR kind = $kind) ORDER BY lines DESC, path LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
-            command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 20_000));
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var query = context.TextIndexDocuments.AsNoTracking().AsQueryable();
+            if (kind is not null) query = query.Where(document => document.Kind == kind);
 
-            var documents = new List<IndexedDocument>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                var at = DateTimeOffset.TryParse(reader.GetString(6), out var parsed) ? parsed : DateTimeOffset.MinValue;
-                documents.Add(new IndexedDocument(
-                    reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3),
-                    reader.GetString(4), reader.GetInt32(5), at));
-            }
-
-            return documents;
+            return query
+                .OrderByDescending(document => document.Lines)
+                .ThenBy(document => document.Path)
+                .Take(Math.Clamp(limit, 1, 20_000))
+                .Select(document => new
+                {
+                    document.Path,
+                    document.Kind,
+                    document.Length,
+                    document.Modified,
+                    document.Hash,
+                    document.Lines,
+                    document.IndexedAt,
+                })
+                .ToList()
+                .Select(document => new IndexedDocument(
+                    document.Path, document.Kind, document.Length, document.Modified,
+                    document.Hash, document.Lines, document.IndexedAt))
+                .ToList();
         }
         catch (SqliteException)
         {
@@ -477,9 +499,15 @@ public sealed class TextIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM ti_line; DELETE FROM ti_row; DELETE FROM ti_document;";
-            command.ExecuteNonQuery();
+            // ti_line is the FTS5 virtual table and ti_row its rowid map: SQL stays for them.
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "DELETE FROM ti_line; DELETE FROM ti_row;";
+                command.ExecuteNonQuery();
+            }
+
+            using var context = VisualMcpSchema.CreateContext(connection);
+            context.TextIndexDocuments.ExecuteDelete();
         }
         catch (SqliteException)
         {
@@ -510,6 +538,7 @@ public sealed class TextIndexStore : IDisposable
 
     private async Task DeleteRowsAsync(SqliteConnection connection, string path, CancellationToken cancellationToken)
     {
+        // ti_line is the FTS5 virtual table and ti_row its rowid map: SQL stays for them.
         using (var lines = connection.CreateCommand())
         {
             lines.CommandText = "DELETE FROM ti_line WHERE rowid IN (SELECT rowid FROM ti_row WHERE path = $path);";
@@ -517,13 +546,18 @@ public sealed class TextIndexStore : IDisposable
             await lines.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        foreach (var table in new[] { "ti_row", "ti_document" })
+        using (var rows = connection.CreateCommand())
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = $"DELETE FROM {table} WHERE path = $path;";
-            command.Parameters.AddWithValue("$path", path);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            rows.CommandText = "DELETE FROM ti_row WHERE path = $path;";
+            rows.Parameters.AddWithValue("$path", path);
+            await rows.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        using var context = VisualMcpSchema.CreateContext(connection);
+        await context.TextIndexDocuments
+            .Where(document => document.Path == path)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private SqliteConnection? Open()
@@ -537,13 +571,6 @@ public sealed class TextIndexStore : IDisposable
         {
             _gate.Release();
         }
-    }
-
-    private static int Count(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        return Convert.ToInt32(command.ExecuteScalar());
     }
 
     /// <summary>The content hash every part of the store uses, so a stamp means the same thing everywhere.</summary>

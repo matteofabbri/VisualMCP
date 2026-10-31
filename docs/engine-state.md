@@ -1,227 +1,228 @@
-# Stato del motore e del solution store
+# State of the engine and of the solution store
 
-Ultimo aggiornamento: 2026-10-30. Questo documento dice, senza giri di parole, **cosa esiste già**, **cosa
-manca** e **perché manca** — le quattro limitazioni strutturali del motore di riscrittura, la copertura
-della tabella IDE di Microsoft, e lo stato del database di soluzione (`<solution>/.visualMCP/visualmcp.db`).
+Last updated: 2026-10-30. This document says, without beating around the bush, **what already exists**,
+**what is missing** and **why it is missing** — the four structural limitations of the rewrite engine, the
+coverage of Microsoft's IDE table, and the state of the solution database
+(`<solution>/.visualMCP/visualmcp.db`).
 
-Legenda: ✅ fatto · 🟡 parziale · ⬜ mancante · ❌ fuori scope per scelta.
+Legend: ✅ done · 🟡 partial · ⬜ missing · ❌ out of scope by choice.
 
 ---
 
-## 1. Cosa c'è oggi
+## 1. What exists today
 
-| Componente | Dove | Stato |
+| Component | Where | State |
 |---|---|---|
-| Motore delle regole IDE (`simplify_code`) | **nucleo neutro** `SNITCH\Languages\Style\` (`StyleCore.cs`, `StyleOptions.cs`, `StyleRewriteService.cs`) + **livello C#** `SNITCH\Languages\CSharp\Style\` (`StyleRewrites*.cs`, `CSharpStyleLanguage.cs`, `CSharpStyleRuleSet.cs`) | ✅ **87 id** riscritti, **39** elencati con il motivo, 126 totali (conteggio su `SNITCH\Languages\CSharp\Style\`); il livello VB li estende ([docs/adding-a-language.md](adding-a-language.md)) |
-| **Livello Visual Basic** (`simplify_vb_code`) | `SNITCH\Languages\VB\Style\` (`VbStyleLanguage.cs`, `VbBlocks.cs`, `VbStyleRewrites.cs`, `VbStyleRewriteCatalog.cs`, `VbSimplifyCodeService.cs`) + `VbServiceCollectionExtensions.AddSnitchVisualBasic()` | ✅ **15 id** VB (14 riscritture: IDE0001, IDE0002, IDE0003, IDE0004, IDE0049, IDE0041, IDE0029/IDE0030, IDE0031, IDE0047, IDE0054, IDE0100, IDE0075, IDE0084, IDE0081) e **34** elencati con il motivo; stesso `StyleRewriteService`, quindi stesso gate e stessa storia delle modifiche |
-| Tool MCP | `simplify_code(scope, filePath, projectName, rules, dryRun)` per il C# · `simplify_vb_code(scope, filePath, projectName, rules, dryRun)` per il VB | ✅ due tool distinti: il container tiene un servizio di stile per lingua (`ISimplifyCodeService` / `IVbSimplifyCodeService`), così nessuno dei due può oscurare l'altro |
-| **Context action** (`context_action`) | `SNITCH\Languages\CSharp\ContextActions\` (`ContextActionService.cs` + i quattro partial: `Usings`, `NullChecks`, `Wrapping`, `Strings`) | ✅ **13 azioni** in quattro famiglie che né le riscritture IDE né i refactoring raggiungevano: import del tipo, guardie sugli argomenti, surround-with su intervallo di righe, conversioni di string literal. Ogni azione risolve il bersaglio da una riga, fa il preview, e passa dal gate del compilatore; l'inventario delle 307 context action C# di ReSharper è in [resharper-context-actions.md](resharper-context-actions.md) |
-| **Decompilazione → metacode** | `SNITCH\Libraries\Snitch.Metacode\Decompilation\` (`DecompileService.cs` con `IDecompileService` + `IMetacodeDecompileService`, `MetacodeDecompilation.cs`) + `SnitchMetacodeServiceCollectionExtensions.AddSnitchMetacode()` | ✅ il C# di ILSpy passa dal `CSharpFrontend` e dà `MetacodeDocument` + pseudocodice per tipo; tool `decompile_to_metacode`. L'estensione è l'unica che registra `IDecompileService` e `IPackageInspectionService` (tolte da `AddSnitch`) |
-| **Binario nativo → metacode** | `SNITCH\Libraries\Snitch.Metacode\Decompilation\` (`GhidraService.cs`, `GhidraFrontend.cs`, `GhidraC.cs`, `GhidraSnapshot.cs`) | ✅ Ghidra headless (progetto temporaneo, `ExportNativeGraph.java`, timeout che uccide l'albero, `JAVA_HOME_OVERRIDE` con un retry) + normalizzazione del C e rilettura col `PseudocodeFrontend`; tool `analyze_native_binary`, snapshot rileggibile da `metacode_translate` |
-| Gate del compilatore | `StyleRewriteService.ErrorsAsync` (`StyleRewriteService.cs:608`): per progetto, tutti i documenti insieme e poi uno per uno per isolare il colpevole; il file rifiutato non viene toccato | ✅ per documento, **non** per singola modifica |
-| Formattazione dell'output | `Formatter.FormatAsync(..., Formatter.Annotation)`: riformatta **solo** i nodi prodotti dal motore, non il file | ✅ |
-| Canale delle opzioni | `StyleOptions` legge da `AnalyzerConfigOptions` **cinque** chiavi C# (`CSharpStyleLanguage.cs:49-73`): `csharp_prefer_braces`, `csharp_preferred_modifier_order`, `csharp_style_namespace_declarations`, `dotnet_style_prefer_foreach_explicit_cast_in_source`, `dotnet_style_require_accessibility_modifiers`; il livello VB ne legge tre proprie (`visual_basic_preferred_modifier_order`, `dotnet_style_require_accessibility_modifiers`, `visual_basic_style_prefer_isnot_expression`) | 🟡 cinque chiavi C# e tre VB su tutte quelle dell'IDE |
-| **Indice dei simboli** | `SNITCH\Libraries\Snitch.Metacode\Symbols\` (`SymbolIndexBuilder`, `CSharpSymbolIndexFrontend`, `SymbolIndexStore`, `SymbolIndexService`) + tabelle `si_symbol`, `si_usage`, `si_metacode`, `si_document` nello stesso `visualmcp.db`; tool `reference_index` (`build`/`status`/`find`/`describe`/`refs`/`callers`/`callees`/`hierarchy`/`outline`/`metacode`/`unused`) | ✅ incrementale per hash di contenuto: dove è dichiarato un membro, ogni uso **con il come** (`call`, `read`, `write`, `instantiate`, `inherit`, `implement`, `override`, `attribute`, …), il membro che lo contiene, e l'**albero metacode** di ogni dichiarazione ([metacode.md](metacode.md#lindice-dei-simboli)) |
-| **Sorgenti nel database** | tabelle `source_document` + `mc_document`/`mc_tree`/`mc_node` in `visualmcp.db`, scritte dall'indice del metacode (la stessa passata che legge il file) | ✅ ogni **file di testo** della soluzione — documenti Roslyn di qualunque lingua, Razor letto da disco, e `README`/`.csproj`/`.json` — con testo, lingua, hash e timestamp; un file senza frontend resta qui **e nell'AST** come nodo `File`, e ogni riga dell'AST porta `source_path` (file o binario) e il flag `decompiled`, quindi codice letto e codice decompilato convivono senza confondersi |
-| Fatti sui pacchetti | tabelle `package_fact` e `package_dependency` + tool `package_facts` | ✅ da `obj/project.assets.json`, senza restore né rete |
-| Decompilati | tabella `decompiled_artifact` + `decompile_assembly(persist=true)` | ✅ chiavati sull'MVID, riusati |
-| Storia delle modifiche | tabella `applied_edit` + tool `edit_history`, con il testo compresso di prima | ✅ e revertibile |
-| Annullamento | tool `revert_edit` sull'id della storia, con controllo che il file non sia cambiato dopo | ✅ |
-| Log delle chiamate | tabella `command_log` + tool `command_log` | ✅ |
-| Cache dei report di ispezione | tabella `context`, chiavata su path del documento + mtime | ✅ |
-| Kanban della soluzione | tabelle `board_item`, `board_comment`, `board_history` | ✅ |
-| Test | **574** metodi `[Fact]`/`[Theory]` in `src/VisualMCP.Tests` (conteggio sul sorgente), che `dotnet test` esegue come **742** casi; di cui **17** sulla famiglia `context_action` (`ContextActionTests`) e **13** sullo store (`SolutionStoreTests` 8 + `StoreTests` 5) | ✅ |
+| IDE rule engine (`simplify_code`) | **neutral core** `SNITCH\Languages\Style\` (`StyleCore.cs`, `StyleOptions.cs`, `StyleRewriteService.cs`) + **C# layer** `SNITCH\Languages\CSharp\Style\` (`StyleRewrites*.cs`, `CSharpStyleLanguage.cs`, `CSharpStyleRuleSet.cs`) | ✅ **87 ids** rewritten, **39** listed with their reason, 126 in total (count over `SNITCH\Languages\CSharp\Style\`); the VB layer extends them ([docs/adding-a-language.md](adding-a-language.md)) |
+| **Visual Basic layer** (`simplify_vb_code`) | `SNITCH\Languages\VB\Style\` (`VbStyleLanguage.cs`, `VbBlocks.cs`, `VbStyleRewrites.cs`, `VbStyleRewriteCatalog.cs`, `VbSimplifyCodeService.cs`) + `VbServiceCollectionExtensions.AddSnitchVisualBasic()` | ✅ **15 VB ids** (14 rewrites: IDE0001, IDE0002, IDE0003, IDE0004, IDE0049, IDE0041, IDE0029/IDE0030, IDE0031, IDE0047, IDE0054, IDE0100, IDE0075, IDE0084, IDE0081) and **34** listed with their reason; same `StyleRewriteService`, so same gate and same edit history |
+| MCP tool | `simplify_code(scope, filePath, projectName, rules, dryRun)` for C# · `simplify_vb_code(scope, filePath, projectName, rules, dryRun)` for VB | ✅ two distinct tools: the container holds one style service per language (`ISimplifyCodeService` / `IVbSimplifyCodeService`), so neither can shadow the other |
+| **Context action** (`context_action`) | `SNITCH\Languages\CSharp\ContextActions\` (`ContextActionService.cs` + the four partials: `Usings`, `NullChecks`, `Wrapping`, `Strings`) | ✅ **13 actions** in four families that neither the IDE rewrites nor the refactorings reached: type import, argument guards, surround-with on a line range, string literal conversions. Every action resolves its target from a line, previews, and goes through the compiler gate; the inventory of ReSharper's 307 C# context actions is in [resharper-context-actions.md](resharper-context-actions.md) |
+| **Decompilation → metacode** | `SNITCH\Libraries\Snitch.Metacode\Decompilation\` (`DecompileService.cs` with `IDecompileService` + `IMetacodeDecompileService`, `MetacodeDecompilation.cs`) + `SnitchMetacodeServiceCollectionExtensions.AddSnitchMetacode()` | ✅ ILSpy's C# goes through `CSharpFrontend` and yields a `MetacodeDocument` + pseudocode per type; tool `decompile_to_metacode`. This extension is the only one that registers `IDecompileService` and `IPackageInspectionService` (removed from `AddSnitch`) |
+| **Native binary → metacode** | `SNITCH\Libraries\Snitch.Metacode\Decompilation\` (`GhidraService.cs`, `GhidraFrontend.cs`, `GhidraC.cs`, `GhidraSnapshot.cs`) | ✅ Ghidra headless (temporary project, `ExportNativeGraph.java`, timeout that kills the process tree, `JAVA_HOME_OVERRIDE` with one retry) + C normalization and re-read through `PseudocodeFrontend`; tool `analyze_native_binary`, snapshot re-readable by `metacode_translate` |
+| Compiler gate | `StyleRewriteService.ErrorsAsync` (`StyleRewriteService.cs:608`): per project, all documents together and then one by one to isolate the culprit; the refused file is left untouched | ✅ per document, **not** per single change |
+| Output formatting | `Formatter.FormatAsync(..., Formatter.Annotation)`: reformats **only** the nodes the engine produced, not the file | ✅ |
+| Options channel | `StyleOptions` reads **five** C# keys from `AnalyzerConfigOptions` (`CSharpStyleLanguage.cs:49-73`): `csharp_prefer_braces`, `csharp_preferred_modifier_order`, `csharp_style_namespace_declarations`, `dotnet_style_prefer_foreach_explicit_cast_in_source`, `dotnet_style_require_accessibility_modifiers`; the VB layer reads three of its own (`visual_basic_preferred_modifier_order`, `dotnet_style_require_accessibility_modifiers`, `visual_basic_style_prefer_isnot_expression`) | 🟡 five C# keys and three VB ones out of all the IDE options |
+| **Symbol index** | `SNITCH\Libraries\Snitch.Metacode\Symbols\` (`SymbolIndexBuilder`, `CSharpSymbolIndexFrontend`, `SymbolIndexStore`, `SymbolIndexService`) + tables `si_symbol`, `si_usage`, `si_metacode`, `si_document` in the same `visualmcp.db`; tool `reference_index` (`build`/`status`/`find`/`describe`/`refs`/`callers`/`callees`/`hierarchy`/`outline`/`metacode`/`unused`) | ✅ incremental by content hash: where a member is declared, every use **with how it is used** (`call`, `read`, `write`, `instantiate`, `inherit`, `implement`, `override`, `attribute`, …), the member that contains it, and the **metacode tree** of every declaration ([metacode.md](metacode.md#the-symbol-index)) |
+| **Sources in the database** | tables `source_document` + `mc_document`/`mc_tree`/`mc_node` in `visualmcp.db`, written by the metacode index (the same pass that reads the file) | ✅ every **text file** of the solution — Roslyn documents in any language, Razor read from disk, and `README`/`.csproj`/`.json` — with text, language, hash and timestamp; a file with no frontend still lands here **and in the AST** as a `File` node, and every AST row carries `source_path` (file or binary) and the `decompiled` flag, so source code and decompiled code coexist without being confused |
+| Package facts | tables `package_fact` and `package_dependency` + tool `package_facts` | ✅ from `obj/project.assets.json`, with no restore and no network |
+| Decompiled artifacts | table `decompiled_artifact` + `decompile_assembly(persist=true)` | ✅ keyed on MVID, reused |
+| Edit history | table `applied_edit` + tool `edit_history`, with the previous text compressed | ✅ and revertible |
+| Undo | tool `revert_edit` on the history id, checking that the file has not changed since | ✅ |
+| Call log | table `command_log` + tool `command_log` | ✅ |
+| Inspection report cache | table `context`, keyed on document path + mtime | ✅ |
+| Solution kanban | tables `board_item`, `board_comment`, `board_history` | ✅ |
+| Tests | **574** `[Fact]`/`[Theory]` methods in `src/VisualMCP.Tests` (count over the source), which `dotnet test` runs as **742** cases; of which **17** on the `context_action` family (`ContextActionTests`) and **13** on the store (`SolutionStoreTests` 8 + `StoreTests` 5) | ✅ |
 
 ---
 
-## 2. I quattro limiti strutturali
+## 2. The four structural limitations
 
-Sono i limiti che spiegano perché la maggior parte delle regole IDE restanti non è implementabile "per
-come è fatto il motore". Tre sono stati tolti; resta parziale il solo #3, per scelta (le preferenze
-`var` e il naming non sono riscritture).
+These are the limitations that explain why most of the remaining IDE rules are not implementable "given how
+the engine is built". Three have been removed; only #3 remains partial, by choice (the `var` and naming
+preferences are not rewrites).
 
-| # | Limite | Stato | Cosa servirebbe per toglierlo | Cosa esiste già come pezzo |
+| # | Limitation | State | What removing it would take | What already exists as a piece |
 |---|---|---|---|---|
-| 1 | **Una sola regione contigua, in un solo documento.** `StyleMatch` è `(Node … Last) → Replacement` | ✅ | — | `StyleMatch.SpanEdits` più la pianificazione in tre fasi descritta sotto: un suggerimento multi-file viene risolto contro **tutta la soluzione**, ogni progetto toccato passa dal gate, e il suggerimento è applicato **tutto o niente** |
-| 2 | **Il gate prova solo che compili, non che sia equivalente.** Un errore di semantica che compila passa | ✅ | — | il gate semantico descritto sotto: confronto `IOperation` per le regole che dichiarano l'equivalenza |
-| 3 | **Nessun canale per le opzioni del repository** | 🟡 | leggere `AnalyzerConfigOptions` — **fatto** per cinque chiavi C# e tre VB; mancano le preferenze `csharp_style_var_*` (che però si contraddicono: IDE0007 vs IDE0008) e le opzioni di naming (che richiedono un rename, non una riscrittura) | `StyleContext` + `StyleOptions` + `RequiredOption` + `IsOptIn` |
-| 4 | **Non esiste il verbo "cancella".** Una regola sostituisce un nodo, non lo rimuove | ✅ | — | `StyleMatch.Removes`: IDE0035 (codice irraggiungibile), IDE0051 (membro privato mai referenziato), IDE0052 (campo scritto e mai letto) |
+| 1 | **A single contiguous region, in a single document.** `StyleMatch` is `(Node … Last) → Replacement` | ✅ | — | `StyleMatch.SpanEdits` plus the three-phase planning described below: a multi-file suggestion is resolved against **the whole solution**, every project it touches goes through the gate, and the suggestion is applied **all or nothing** |
+| 2 | **The gate only proves that it compiles, not that it is equivalent.** A semantic error that compiles gets through | ✅ | — | the semantic gate described below: `IOperation` comparison for rules that declare equivalence |
+| 3 | **No channel for the repository's options** | 🟡 | read `AnalyzerConfigOptions` — **done** for five C# keys and three VB ones; missing are the `csharp_style_var_*` preferences (which contradict each other: IDE0007 vs IDE0008) and the naming options (which need a rename, not a rewrite) | `StyleContext` + `StyleOptions` + `RequiredOption` + `IsOptIn` |
+| 4 | **There is no "delete" verb.** A rule replaces a node, it does not remove it | ✅ | — | `StyleMatch.Removes`: IDE0035 (unreachable code), IDE0051 (private member never referenced), IDE0052 (field written and never read) |
 
-### 1. Workspace edit: come è fatto adesso
+### 1. Workspace edit: how it works now
 
-La pianificazione avviene in tre fasi (`StyleRewriteService.SimplifyAsync`), perché un suggerimento
-multi-file non appartiene a un progetto:
+Planning happens in three phases (`StyleRewriteService.SimplifyAsync`), because a multi-file suggestion does
+not belong to one project:
 
-1. **Riscritture sintattiche** per ogni documento, raccolte per progetto.
-2. **Suggerimenti multi-documento** (`StyleMatch.SpanEdits`) risolti contro la soluzione intera: ogni
-   file nominato è cercato in *qualunque* progetto (`FindDocument`), e i documenti prodotti finiscono nel
-   piano del progetto che li possiede.
-3. **Gate del compilatore** per ogni progetto toccato, usando `CompilationCache`. Poi un suggerimento
-   multi-file sopravvive **solo se ogni suo documento è stato accettato**: se uno è rifiutato, gli altri
-   vengono ritirati dal piano prima di qualsiasi scrittura.
+1. **Syntactic rewrites** for every document, collected per project.
+2. **Multi-document suggestions** (`StyleMatch.SpanEdits`) resolved against the whole solution: every named
+   file is looked up in *any* project (`FindDocument`), and the resulting documents join the plan of the
+   project that owns them.
+3. **Compiler gate** for every project touched, using `CompilationCache`. A multi-file suggestion then
+   survives **only if every one of its documents was accepted**: if one is refused, the others are withdrawn
+   from the plan before any write.
 
-Un file già riscritto come albero sintattico è un blocco: gli offset di un altro suggerimento punterebbero
-al testo che sta per sparire, quindi il secondo viene rifiutato con il motivo.
+A file already rewritten as a syntax tree is a block: another suggestion's offsets would point at text
+about to disappear, so the second one is refused with the reason.
 
-### 2. Gate semantico: cosa prova e cosa no
+### 2. Semantic gate: what it proves and what it does not
 
-`StyleRule.ClaimsEquivalence` marca le regole che devono lasciare intatto il significato a livello di
-operazioni (oggi IDE0001, IDE0002, IDE0003, IDE0047, IDE0049). Per quelle, `StyleRewriteService` prende
-la regione riscritta, la sostituisce in un albero usa e getta, e confronta l'albero `IOperation` prima e
-dopo (`SemanticEquivalence`):
+`StyleRule.ClaimsEquivalence` marks the rules that must leave the meaning intact at the operation level
+(today IDE0001, IDE0002, IDE0003, IDE0047, IDE0049). For those, `StyleRewriteService` takes the rewritten
+region, substitutes it into a throwaway tree, and compares the `IOperation` tree before and after
+(`SemanticEquivalence`):
 
-- si ignorano le operazioni implicite e il ricevitore di un accesso qualificato (`this._x` e `_x` sono la
-  stessa cosa);
-- si confrontano tipo di operazione, operatore, valore costante, simbolo referenziato e numero di figli;
-- una differenza **rifiuta il file** con regola, riga e primi percorsi diversi; il risultato la riporta in
+- implicit operations and the receiver of a qualified access are ignored (`this._x` and `_x` are the same
+  thing);
+- it compares operation type, operator, constant value, referenced symbol and number of children;
+- a difference **refuses the file** with rule, line and the first differing paths; the result reports it in
   `semantics { compared, verified, failures }`.
 
-Un nodo senza operazione propria (un nome di tipo in una firma, un'espressione fra parentesi) **non è
-confrontabile**: viene saltato e non conta né come verificato né come fallito, invece di produrre una
-prova finta. Le regole non marcate restano al solo gate del compilatore: il campo `semantics` dice quante
-ne sono state confrontate, non quante ne esistono.
+A node with no operation of its own (a type name in a signature, an expression in parentheses) **cannot be
+compared**: it is skipped and counts neither as verified nor as failed, instead of producing a fake proof.
+Rules that are not marked stay with the compiler gate alone: the `semantics` field says how many were
+compared, not how many exist.
 
-### Cosa sbloccherebbe ciascuno
+### What each one would unlock
 
-- **(1) workspace edit** → la metà del catalogo ReSharper che è intrinsecamente multi-file (rename, change
-  signature, spostare un membro e aggiornare i chiamanti).
-- **(2) gate semantico + cache** → le regole il cui errore *compila* sono confrontate a livello di
-  `IOperation` quando dichiarano l'equivalenza; l'isolamento per singola modifica è economico perché il
-  "prima" viene dalla cache e il "dopo" è un riparse.
-- **(3) opzioni** → già usato da IDE0011, IDE0036, IDE0040, IDE0055, IDE0073, IDE0160/IDE0161.
-- **(4) cancellazione** → IDE0035, IDE0051, IDE0052, IDE0110 resta fuori con il motivo.
-- **(5) composizione** → IDE0005, IDE0032 e IDE0290 sono raggiunti da `simplify_code` per delega.
+- **(1) workspace edit** → the half of the ReSharper catalogue that is intrinsically multi-file (rename,
+  change signature, moving a member and updating its callers).
+- **(2) semantic gate + cache** → rules whose error *compiles* are compared at the `IOperation` level when
+  they declare equivalence; per-change isolation is cheap because the "before" comes from the cache and the
+  "after" is a reparse.
+- **(3) options** → already used by IDE0011, IDE0036, IDE0040, IDE0055, IDE0073, IDE0160/IDE0161.
+- **(4) deletion** → IDE0035, IDE0051, IDE0052; IDE0110 stays out with its reason.
+- **(5) composition** → IDE0005, IDE0032 and IDE0290 are reached by `simplify_code` through delegation.
 
 ---
 
-## 3. Copertura della tabella IDE
+## 3. Coverage of the IDE table
 
-**87 riscritti + 39 con motivo scritto = 126 id**, cioè la tabella ufficiale è interamente rendicontata.
-Il dettaglio riga per riga è in [CAPABILITY_MAP.md](../CAPABILITY_MAP.md); qui solo il riassunto.
-**Il livello Visual Basic conta a parte** — è la colonna VB della tabella (`dotnet_style_*` condivise +
-`visual_basic_style_*`): 15 id riscritti e 34 con il motivo in `VbStyleRewriteCatalog`, esposti da
-`simplify_vb_code`; gli id che il VB non definisce affatto (pattern matching, graffe, expression
-bodies) restano nel catalogo C#.
+**87 rewritten + 39 with a written reason = 126 ids**, meaning the official table is fully accounted for.
+The line-by-line detail is in [CAPABILITY_MAP.md](../CAPABILITY_MAP.md); here only the summary.
+**The Visual Basic layer counts separately** — it is the VB column of the table (shared `dotnet_style_*` +
+`visual_basic_style_*`): 15 ids rewritten and 34 with a reason in `VbStyleRewriteCatalog`, exposed by
+`simplify_vb_code`; ids that VB does not define at all (pattern matching, braces, expression bodies) stay in
+the C# catalogue.
 
-| Gruppo | Quanti | Esempi | **Cosa manca all'engine** (non "è fuori per scelta") |
+| Group | Count | Examples | **What the engine is missing** (not "it is out by choice") |
 |---|---|---|---|
-| Delegati ad altri tool | 3 | IDE0005, IDE0032, IDE0290 | ✅ `simplify_code` li accetta e li affida a `optimize_usings` / `property_to_auto` / `convert_to_primary_constructor` |
-| Coppie che si contraddicono | 3 | IDE0007 vs IDE0008, IDE0048 vs IDE0047 | **un'opzione**: sono scelte di squadra, non difetti |
-| Cambiano il contratto | 3 | IDE0050, IDE0064, IDE0110 | una **decisione di API** (un record diventa tupla, un campo diventa scrivibile, un discard può essere voluto) |
-| Layout e policy | 13 | IDE0065, IDE0130, IDE0210/0211, IDE0221, IDE0360, IDE2000–2006 | **decisioni di progetto**: dove stanno gli using, namespace vs cartella, forma dei blank line |
-| Liste di target documentati | 2 | IDE0076, IDE0077 | i **target ammessi** da Microsoft per `SuppressMessage` |
-| Feature specifica | 8 | IDE0078, IDE0303/0304/0305, IDE0330, IDE0350, IDE0410, IDE1005 | builder contract, analisi async, pattern di lock, conversione della lambda |
-| Non applicabili al C# | 3 | IDE0081/0084/0140 (VB) | sono Visual Basic: due dei tre **ci sono** nel livello VB (IDE0081, IDE0084) |
-| Naming, compilatore, Copilot | 3 | IDE1006, IDE1007, IDE3000 | un **rename**, una diagnostica del compilatore, una suggestione non deterministica |
-| Coperto da un altro id | 1 | IDE0370 | ✅ Microsoft l'ha divisa in IDE0240/IDE0241, già riscritte |
+| Delegated to other tools | 3 | IDE0005, IDE0032, IDE0290 | ✅ `simplify_code` accepts them and hands them to `optimize_usings` / `property_to_auto` / `convert_to_primary_constructor` |
+| Contradicting pairs | 3 | IDE0007 vs IDE0008, IDE0048 vs IDE0047 | **an option**: these are team choices, not defects |
+| Change the contract | 3 | IDE0050, IDE0064, IDE0110 | an **API decision** (a record becomes a tuple, a field becomes writable, a discard may be intentional) |
+| Layout and policy | 13 | IDE0065, IDE0130, IDE0210/0211, IDE0221, IDE0360, IDE2000–2006 | **project decisions**: where the usings go, namespace vs folder, the shape of blank lines |
+| Documented target lists | 2 | IDE0076, IDE0077 | the **allowed targets** Microsoft accepts for `SuppressMessage` |
+| Feature-specific | 8 | IDE0078, IDE0303/0304/0305, IDE0330, IDE0350, IDE0410, IDE1005 | builder contract, async analysis, lock patterns, lambda conversion |
+| Not applicable to C# | 3 | IDE0081/0084/0140 (VB) | these are Visual Basic: two of the three **exist** in the VB layer (IDE0081, IDE0084) |
+| Naming, compiler, Copilot | 3 | IDE1006, IDE1007, IDE3000 | a **rename**, a compiler diagnostic, a non-deterministic suggestion |
+| Covered by another id | 1 | IDE0370 | ✅ Microsoft split it into IDE0240/IDE0241, already rewritten |
 
-**Nessun id resta nel gruppo "implementabile senza feature nuove":** l'ultimo (IDE0220) è stato fatto, e
-anche IDE0010, IDE0072, IDE0120 e IDE0121, che erano classificati come "analisi" per pigrizia e non per
-limite tecnico.
+**No id is left in the "implementable without new features" group:** the last one (IDE0220) is done, and so
+are IDE0010, IDE0072, IDE0120 and IDE0121, which had been classified as "analysis" out of laziness rather
+than a technical limit.
 
-**Correzione di impostazione:** "fuori per scelta" era una classificazione comoda e sbagliata. A parte i 5
-non applicabili (Visual Basic, diagnostica del compilatore, Copilot), ogni gruppo è fermo su **una feature
-mancante**, non su una decisione. La tabella sotto dice quale, e cosa sblocca.
+**A correction of framing:** "out by choice" was a convenient and wrong classification. Apart from the 5
+non-applicable ones (Visual Basic, compiler diagnostic, Copilot), every group is stuck on **a missing
+feature**, not on a decision. The table below names it, and what it unlocks.
 
-### Le feature mancanti, in ordine di resa
+### The missing features, in order of payoff
 
-| Feature | Stato | Cosa sblocca |
+| Feature | State | What it unlocks |
 |---|---|---|
-| **Rimozione di un nodo** (`StyleMatch.Removes`) | ✅ fatta | IDE0035, IDE0051, IDE0052 |
-| **La soluzione nel contesto** (`StyleContext.Solution` + `IsPristine`) | ✅ fatta | le regole la cui risposta è fuori dal documento |
-| **Completamento degli switch su enum** (semantica, nessuna feature nuova) | ✅ fatto | IDE0010 e IDE0072 |
-| **Catene LINQ** (riscritture di espressione) | ✅ fatto | IDE0120, IDE0121, IDE0220 |
-| **Nullability flow** (`Nullability.FlowState`) | ✅ fatto | IDE0080 |
-| **Modifiche al trivia** (direttive `#nullable`) | ✅ fatto | IDE0240, IDE0241 (e IDE0370, che Microsoft ha dividiso in queste due) |
-| **Opzione accessibilità** (`dotnet_style_require_accessibility_modifiers`) | ✅ fatto | IDE0040 |
-| Indice dei riferimenti persistente | ✅ fatto | rende quelle risposte veloci e ripetibili |
-| **Cache di compilazione incrementale** | ✅ fatta | il "prima" del gate è gratis e ogni candidato è giudicato riparsando il solo documento cambiato (`CompilationCache`) |
-| **Gate semantico** (`IOperation`) | ✅ fatto per le regole che dichiarano l'equivalenza | rende sicure le regole il cui errore compila; per le altre resta il solo compilatore |
-| **Workspace edit** multi-documento | ✅ fatto | qualunque regola può toccare più file della soluzione, in modo atomico |
-| **Dataflow di Roslyn** (`AnalyzeDataFlow`) — assegnazioni morte | ⬜ | non blocca più nessun id: IDE0059 è stato fatto per altra via |
-| **Classificazione lettura/scrittura** sui riferimenti | ✅ fatta | IDE0052 |
-| **Modifiche al trivia** per le soppressioni | ✅ fatta | IDE0079: solo la forma `[SuppressMessage]` e solo id del compilatore (`CS####`), giudicati con `WithReportSuppressedDiagnostics(true)` — il compilatore onora l'attributo, quindi la lista normale è già filtrata |
-| **`file_header_template`** | ✅ fatta | IDE0073 — inserisce l'intestazione e non la sostituisce mai, perché quella presente è testo del repository |
-| **Composizione dei tre tool** | ✅ fatta | IDE0005, IDE0032, IDE0290: i due servizi per-simbolo sono raggiunti da un'enumerazione dei candidati dentro `SimplifyCodeService`; non fanno parte di `rules=all` |
+| **Removal of a node** (`StyleMatch.Removes`) | ✅ done | IDE0035, IDE0051, IDE0052 |
+| **The solution in the context** (`StyleContext.Solution` + `IsPristine`) | ✅ done | rules whose answer lies outside the document |
+| **Switch completion over enums** (semantics, no new feature) | ✅ done | IDE0010 and IDE0072 |
+| **LINQ chains** (expression rewrites) | ✅ done | IDE0120, IDE0121, IDE0220 |
+| **Nullability flow** (`Nullability.FlowState`) | ✅ done | IDE0080 |
+| **Trivia edits** (`#nullable` directives) | ✅ done | IDE0240, IDE0241 (and IDE0370, which Microsoft split into these two) |
+| **Accessibility option** (`dotnet_style_require_accessibility_modifiers`) | ✅ done | IDE0040 |
+| Persistent reference index | ✅ done | makes those answers fast and repeatable |
+| **Incremental compilation cache** | ✅ done | the gate's "before" is free and every candidate is judged by reparsing only the changed document (`CompilationCache`) |
+| **Semantic gate** (`IOperation`) | ✅ done for rules that declare equivalence | makes safe the rules whose error compiles; for the others the compiler alone remains |
+| **Multi-document workspace edit** | ✅ done | any rule can touch several files of the solution, atomically |
+| **Roslyn dataflow** (`AnalyzeDataFlow`) — dead assignments | ⬜ | no longer blocks any id: IDE0059 was done another way |
+| **Read/write classification** on references | ✅ done | IDE0052 |
+| **Trivia edits** for suppressions | ✅ done | IDE0079: only the `[SuppressMessage]` form and only compiler ids (`CS####`), judged with `WithReportSuppressedDiagnostics(true)` — the compiler honours the attribute, so the normal list is already filtered |
+| **`file_header_template`** | ✅ done | IDE0073 — inserts the header and never replaces it, because the existing one is repository text |
+| **Composition of the three tools** | ✅ done | IDE0005, IDE0032, IDE0290: the two per-symbol services are reached by an enumeration of candidates inside `SimplifyCodeService`; they are not part of `rules=all` |
 
-**Il modo più economico per salire di copertura** era comporre i tre servizi già esistenti dentro
-`simplify_code` (IDE0005, IDE0032, IDE0290): fatto, e sono contati negli 87. Il passo successivo non è
-un altro id IDE — è la famiglia `context_action` (`docs/resharper-context-actions.md`): le azioni che né
-una riscrittura di stile né un refactoring raggiungono, con l'inventario delle 307 context action C# di
-ReSharper e le 13 implementate.
+**The cheapest way to gain coverage** was to compose the three existing services inside `simplify_code`
+(IDE0005, IDE0032, IDE0290): done, and they are counted in the 87. The next step is not another IDE id — it
+is the `context_action` family (`docs/resharper-context-actions.md`): the actions that neither a style
+rewrite nor a refactoring reaches, with the inventory of ReSharper's 307 C# context actions and the 13
+implemented.
 
 ---
 
-## 4. Il solution store
+## 4. The solution store
 
-Il database è `<solution>/.visualMCP/visualmcp.db`, SQLite, scoping per soluzione. Regola di progetto:
-**ci finisce solo ciò che è derivato e ricostruibile, con l'hash dei suoi input**; il codice su disco resta
-l'unica verità. Un dato senza hash di freschezza produce analisi stantie, e le analisi stantie sono
-peggiori della lentezza perché sono silenziose.
+The database is `<solution>/.visualMCP/visualmcp.db`, SQLite, scoped per solution. Project rule: **only
+what is derived and rebuildable goes in, stamped with the hash of its inputs**; the code on disk remains the
+only truth. A datum without a freshness hash produces stale analysis, and stale analysis is worse than
+slowness because it is silent.
 
-Lo **schema è un modello EF Core**, non sei stringhe di `CREATE TABLE`: `SNITCH/Storage/Schema/`
-(`VisualMcpDbContext.cs` dichiara tabelle, chiavi, indici e colonne; `VisualMcpSchema.cs` genera lo script
-dal modello e crea solo ciò che manca). I sei store — `VisualMcpStore`, board, indice testuale, metacode,
-simboli, nativo — scrivono ancora SQL a mano sulle proprie connessioni, perché diversi percorsi
-(bulk insert dell'indice, transazioni, blob compressi) una query provider li renderebbe solo opachi; ma
-nessuno di loro possiede più il DDL. Le due eccezioni al modello sono dichiarate: `ti_line` è una tabella
-virtuale FTS5 e resta SQL in `VisualMcpSchema`, e `applied_edit.before_text` viene aggiunta in loco su un
-database creato prima che la colonna esistesse.
+The **schema is an EF Core model**, not six `CREATE TABLE` strings: `SNITCH/Storage/Schema/`
+(`VisualMcpDbContext.cs` declares tables, keys, indexes and columns; `VisualMcpSchema.cs` generates the
+script from the model and creates only what is missing). The six stores — `VisualMcpStore`, board, text
+index, metacode, symbols, native — still write SQL by hand on their own connections, because different
+paths (bulk index insert, transactions, compressed blobs) would only be made opaque by a query provider;
+but none of them owns the DDL any more. The two exceptions to the model are declared: `ti_line` is an FTS5
+virtual table and stays SQL in `VisualMcpSchema`, and `applied_edit.before_text` is added in place on a
+database created before the column existed.
 
-| Dato | Stato | Chiave | A cosa serve |
+| Datum | State | Key | What it is for |
 |---|---|---|---|
-| Report di ispezione | ✅ | path documento + mtime | non ricalcolare `inspect_code` a ogni chiamata |
-| Log delle chiamate | ✅ | id crescente | audit, "cosa è stato fatto e quando" |
-| Storia delle modifiche + testo di prima | ✅ | file + timestamp | audit delle riscritture **e revert** (`revert_edit`), solo se il file non è cambiato dopo |
-| Fingerprint dei documenti | ✅ | path, con l'hash del contenuto | dice quali file sono cambiati: è la chiave di freschezza di indice, gate e cache future |
-| Indice dei riferimenti (simbolo → documenti e span) | ✅ | hash del file, ricostruito solo per i file cambiati | `who` (chi usa un simbolo), `unused` (membri non pubblici mai referenziati), impatto di una modifica |
-| **AST del metacode** | ✅ | path + declaration_key + node_id | ogni nodo di ogni dichiarazione (`parent_id`, `slot`, `ordinal`, `depth`, span, payload JSON): una domanda strutturale è una query, e `metacode_index action=ast` la restituisce annidata. Un tipo annida i membri, quindi i nodi di un membro compaiono due volte — il prezzo della completezza per dichiarazione |
-| Fatti sui pacchetti NuGet (versione risolta, TFM, archi) | ✅ | id + versione + TFM, da `project.assets.json` | "questa API esiste nella versione che targettiamo", chi tira dentro un pacchetto |
-| Artefatti decompilati | ✅ | MVID dell'assembly | il decompilato non si perde e non si rilancia ILSpy due volte |
-| **Cache di compilazione incrementale** | ✅ | riferimenti già chiusi + hash per file (`SNITCH/Languages/Gate/CompilationCache.cs`) | rende economico l'isolamento per singola modifica nel gate. Nota: gli alberi Roslyn non sono serializzabili, quindi una "parse cache" fra processi non esiste — ciò che si può persistere è il fingerprint, ed è quello che c'è |
-| **Superficie pubblica per versione di pacchetto** | ⬜ | id + versione | richiede di leggere gli assembly del pacchetto: si appoggia agli artefatti decompilati, quindi va dopo |
-| **Soluzione sintetica dai decompilati** | ❌ | — | il pipeline nativo (Ghidra) che la costruiva non è più in questo repo: lo store è pronto (artefatti per MVID) se torna |
+| Inspection report | ✅ | document path + mtime | don't recompute `inspect_code` on every call |
+| Call log | ✅ | increasing id | audit, "what was done and when" |
+| Edit history + previous text | ✅ | file + timestamp | audit of the rewrites **and revert** (`revert_edit`), only if the file has not changed since |
+| Document fingerprints | ✅ | path, with the content hash | says which files changed: it is the freshness key of the index, the gate and future caches |
+| Reference index (symbol → documents and spans) | ✅ | file hash, rebuilt only for changed files | `who` (who uses a symbol), `unused` (non-public members never referenced), impact of a change |
+| **Metacode AST** | ✅ | path + declaration_key + node_id | every node of every declaration (`parent_id`, `slot`, `ordinal`, `depth`, span, JSON payload): a structural question is a query, and `metacode_index action=ast` returns it nested. A type nests its members, so a member's nodes appear twice — the price of per-declaration completeness |
+| NuGet package facts (resolved version, TFM, edges) | ✅ | id + version + TFM, from `project.assets.json` | "this API exists in the version we target", who pulls a package in |
+| Decompiled artifacts | ✅ | assembly MVID | the decompiled output is not lost and ILSpy is not run twice |
+| **Incremental compilation cache** | ✅ | references already closed + per-file hash (`SNITCH/Languages/Gate/CompilationCache.cs`) | makes per-change isolation in the gate cheap. Note: Roslyn trees are not serializable, so a cross-process "parse cache" does not exist — what can be persisted is the fingerprint, and that is what is there |
+| **Public surface per package version** | ⬜ | id + version | requires reading the package assemblies: it builds on the decompiled artifacts, so it comes later |
+| **Synthetic solution from the decompiled output** | ❌ | — | the native (Ghidra) pipeline that built it is no longer in this repo: the store is ready (artifacts per MVID) if it comes back |
 
-Nota operativa: **`visualmcp.db` non è più tracciato da git** (è uscito dall'indice): un file binario che
-cambia a ogni chiamata sporcava ogni diff, e la cartella viene ricreata al bisogno.
+Operational note: **`visualmcp.db` is no longer tracked by git** (it left the index): a binary file that
+changed on every call dirtied every diff, and the folder is recreated when needed.
 
 ---
 
-## 5. Ordine consigliato
+## 5. Recommended order
 
-| Passo | Stato | Costo | Sblocca |
+| Step | State | Cost | Unlocks |
 |---|---|---|---|
-| 1. Fingerprint dei documenti + indice dei riferimenti | ✅ fatto | medio | `who`, `unused`, impatto di una modifica; ed è la chiave per un gate incrementale |
-| 2. Artefatti decompilati per MVID | ✅ fatto | piccolo | il decompilato si riusa invece di rilanciare ILSpy |
-| 3. Fatti sui pacchetti + grafo | ✅ fatto | piccolo | versione risolta per TFM, chi tira dentro un pacchetto |
-| 4. Storia delle modifiche con il testo + `revert_edit` | ✅ fatto | piccolo | ogni scrittura è annullabile (se il file non è cambiato dopo) |
-| 5. Cache di compilazione incrementale per il gate | ✅ fatto (`SNITCH/Languages/Gate/CompilationCache.cs`) | medio | isolamento per singola modifica: una regola sbagliata smette di rifiutare il file intero |
-| 6. Compose dei tre tool esistenti dentro `simplify_code` | ✅ fatto (`SimplifyCodeService` delega e il servizio di stile accetta gli id) | piccolo, ma per-simbolo | IDE0005, IDE0032, IDE0290 |
-| 7. Regole residue a basso costo | ✅ fatte: IDE0073, IDE0079, IDE0039 | piccolo | +3 id |
-| 8. Workspace edit (multi-documento, atomico) | ✅ fatto | medio | la famiglia multi-file dei refactoring |
-| 9. Gate semantico (`IOperation` diff) | ✅ fatto per le regole che dichiarano l'equivalenza | grande | le regole il cui errore compila |
+| 1. Document fingerprints + reference index | ✅ done | medium | `who`, `unused`, impact of a change; and it is the key to an incremental gate |
+| 2. Decompiled artifacts per MVID | ✅ done | small | the decompiled output is reused instead of rerunning ILSpy |
+| 3. Package facts + graph | ✅ done | small | resolved version per TFM, who pulls a package in |
+| 4. Edit history with the text + `revert_edit` | ✅ done | small | every write is undoable (if the file has not changed since) |
+| 5. Incremental compilation cache for the gate | ✅ done (`SNITCH/Languages/Gate/CompilationCache.cs`) | medium | per-change isolation: a wrong rule stops refusing the whole file |
+| 6. Compose the three existing tools inside `simplify_code` | ✅ done (`SimplifyCodeService` delegates and the style service accepts the ids) | small, but per-symbol | IDE0005, IDE0032, IDE0290 |
+| 7. Low-cost remaining rules | ✅ done: IDE0073, IDE0079, IDE0039 | small | +3 ids |
+| 8. Workspace edit (multi-document, atomic) | ✅ done | medium | the multi-file family of refactorings |
+| 9. Semantic gate (`IOperation` diff) | ✅ done for rules that declare equivalence | large | rules whose error compiles |
 
 ---
 
-## 6. Come verificare lo stato da soli
+## 6. How to verify the state yourself
 
-- Regole attive e relativi perché: `simplify_code` con un id non supportato restituisce `notRewritten` con
-  il motivo; `StyleRewriteCatalog.Supported` / `.NotRewritten` sono le due liste nel motore.
-- Regole Visual Basic: le stesse due liste sono `VbSimplifyCodeService.Rules` / `.NotRewritten`
-  (`VbStyleRewriteCatalog`); `simplify_vb_code` con un id che il VB non riscrive restituisce
-  `notRewritten` con il motivo, e con `scope=solution` tocca solo i file `.vb` della soluzione caricata.
-- Opzioni lette: il risultato di `simplify_code` include `styleOptions` quando si chiede una regola
-  guidata dall'`.editorconfig` (per il VB riporta anche `preferIsNot`).
-- Cosa c'è nell'indice: `reference_index(action=status)` riporta documenti, simboli, dichiarazioni, usi e i
-  conteggi per tipo (dichiarazioni e usi).
-- Dove è dichiarato un membro, come si chiama la sua firma, chi lo usa e **come**: `reference_index` con
-  `action=find|describe|refs`; `action=callers|callees` per la gerarchia delle chiamate, `action=hierarchy`
-  per basi/interfacce/derivati/override, `action=outline` per la forma di un tipo o di un file, `action=unused`
-  per ciò che nessuno usa.
-- Pacchetti e dipendenze: `package_facts(action=list|dependencies)` dopo un `action=refresh`.
-- Storia e annullamento: `edit_history` (ogni riga dice se è `revertible`) e `revert_edit(id)`.
-- Decompilazione in pseudocodice: `decompile_to_metacode(assemblyPath, typeFullName=…)` restituisce
-  l'intestazione con `type(s)`, `hidden` ed `error(s)`; `analyze_native_binary` restituisce le funzioni
-  recuperate, i percorsi di snapshot e log e i diagnostici `RAW`/`MC0008`.
-- Da dove viene ogni numero di questo documento: `StyleRewriteCatalog.cs`, `VisualMcpStore*.cs` e i test
-  in `src/VisualMCP.Tests/` (`SimplifyCode*.cs`, `SolutionStoreTests.cs`).
+- Active rules and their reasons: `simplify_code` with an unsupported id returns `notRewritten` with the
+  reason; `StyleRewriteCatalog.Supported` / `.NotRewritten` are the two lists in the engine.
+- Visual Basic rules: the same two lists are `VbSimplifyCodeService.Rules` / `.NotRewritten`
+  (`VbStyleRewriteCatalog`); `simplify_vb_code` with an id VB does not rewrite returns `notRewritten` with
+  the reason, and with `scope=solution` it touches only the `.vb` files of the loaded solution.
+- Options read: the result of `simplify_code` includes `styleOptions` when a rule driven by `.editorconfig`
+  is requested (for VB it also reports `preferIsNot`).
+- What is in the index: `reference_index(action=status)` reports documents, symbols, declarations, uses and
+  the per-kind counts (declarations and uses).
+- Where a member is declared, what its signature is called, who uses it and **how**: `reference_index` with
+  `action=find|describe|refs`; `action=callers|callees` for the call hierarchy, `action=hierarchy` for
+  bases/interfaces/derived/override, `action=outline` for the shape of a type or a file, `action=unused`
+  for what nobody uses.
+- Packages and dependencies: `package_facts(action=list|dependencies)` after an `action=refresh`.
+- History and undo: `edit_history` (every row says whether it is `revertible`) and `revert_edit(id)`.
+- Decompilation to pseudocode: `decompile_to_metacode(assemblyPath, typeFullName=…)` returns the header with
+  `type(s)`, `hidden` and `error(s)`; `analyze_native_binary` returns the recovered functions, the snapshot
+  and log paths and the `RAW`/`MC0008` diagnostics.
+- Where every number in this document comes from: `StyleRewriteCatalog.cs`, `VisualMcpStore*.cs` and the
+  tests in `src/VisualMCP.Tests/` (`SimplifyCode*.cs`, `SolutionStoreTests.cs`).

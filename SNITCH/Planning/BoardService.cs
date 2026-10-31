@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Snitch.Storage;
 using Snitch.Storage.Schema;
 
@@ -61,30 +62,37 @@ public sealed class BoardService : IBoardService
         var level = NormalizePriority(priority);
         if (level is null) return Fail(PriorityError(priority));
 
-        return With(connection =>
+        return With(context =>
         {
-            var now = Stamped();
-            var position = NextPosition(connection, column);
+            var now = DateTimeOffset.UtcNow;
+            var item = new BoardItemRow
+            {
+                Title = title.Trim(),
+                Description = description,
+                Status = column!,
+                Priority = level!,
+                Labels = Join(labels),
+                Assignee = assignee,
+                Position = NextPosition(context, column!),
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
 
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                INSERT INTO board_item (title, description, status, priority, labels, assignee, position, created_at, updated_at)
-                VALUES ($title, $description, $status, $priority, $labels, $assignee, $position, $now, $now);
-                SELECT last_insert_rowid();
-                """;
-            command.Parameters.AddWithValue("$title", title.Trim());
-            command.Parameters.AddWithValue("$description", (object?)description ?? DBNull.Value);
-            command.Parameters.AddWithValue("$status", column);
-            command.Parameters.AddWithValue("$priority", level);
-            command.Parameters.AddWithValue("$labels", (object?)Join(labels) ?? DBNull.Value);
-            command.Parameters.AddWithValue("$assignee", (object?)assignee ?? DBNull.Value);
-            command.Parameters.AddWithValue("$position", position);
-            command.Parameters.AddWithValue("$now", now);
+            context.BoardItems.Add(item);
+            context.SaveChanges();
 
-            var id = Convert.ToInt32(command.ExecuteScalar());
-            Record(connection, id, "created", null, column, now);
+            Record(context, item.Id, "created", null, column, now);
+            context.SaveChanges();
 
-            return (object)new { added = true, id, status = column, priority = level, position, item = ReadItem(connection, id) };
+            return (object)new
+            {
+                added = true,
+                id = item.Id,
+                status = column,
+                priority = level,
+                position = item.Position,
+                item = ReadItem(context, item.Id),
+            };
         });
     }
 
@@ -96,27 +104,23 @@ public sealed class BoardService : IBoardService
         var level = priority is null ? null : NormalizePriority(priority);
         if (priority is not null && level is null) return Fail(PriorityError(priority));
 
-        return With(connection =>
+        return With(context =>
         {
-            var current = ReadItem(connection, id);
-            if (current is null) return (object)new { error = $"No board item with id {id}." };
+            var item = context.BoardItems.FirstOrDefault(row => row.Id == id);
+            if (item is null) return (object)new { error = $"No board item with id {id}." };
 
-            var now = Stamped();
+            var now = DateTimeOffset.UtcNow;
             var changes = new List<object>();
 
             void Apply(string field, string? value)
             {
                 if (value is null) return;
-                var old = Field(connection, id, field);
+                var (old, set) = FieldAccess(item, field);
                 if (string.Equals(old, value, StringComparison.Ordinal)) return;
 
-                using var command = connection.CreateCommand();
-                command.CommandText = $"UPDATE board_item SET {field} = $value, updated_at = $now WHERE id = $id;";
-                command.Parameters.AddWithValue("$value", value);
-                command.Parameters.AddWithValue("$now", now);
-                command.Parameters.AddWithValue("$id", id);
-                command.ExecuteNonQuery();
-                Record(connection, id, field, old, value, now);
+                set(value);
+                item.UpdatedAt = now;
+                Record(context, id, field, old, value, now);
                 changes.Add(new { field, from = old, to = value });
             }
 
@@ -129,7 +133,8 @@ public sealed class BoardService : IBoardService
             if (changes.Count == 0)
                 return (object)new { updated = false, id, note = "Nothing to change: the values already match." };
 
-            return new { updated = true, id, changes, item = ReadItem(connection, id) };
+            context.SaveChanges();
+            return new { updated = true, id, changes, item = ReadItem(context, id) };
         });
     }
 
@@ -140,32 +145,35 @@ public sealed class BoardService : IBoardService
         var column = NormalizeStatus(status);
         if (column is null) return Fail(StatusError(status));
 
-        return With(connection =>
+        return With(context =>
         {
-            var item = ReadItem(connection, id);
+            var item = context.BoardItems.FirstOrDefault(row => row.Id == id);
             if (item is null) return (object)new { error = $"No board item with id {id}." };
 
-            var now = Stamped();
-            var from = Field(connection, id, "status");
-            var target = position ?? NextPosition(connection, column);
+            var now = DateTimeOffset.UtcNow;
+            var from = item.Status;
+            var target = position ?? NextPosition(context, column!);
+            var statusChanged = !string.Equals(from, column, StringComparison.Ordinal);
 
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "UPDATE board_item SET status = $status, position = $position, updated_at = $now WHERE id = $id;";
-                command.Parameters.AddWithValue("$status", column);
-                command.Parameters.AddWithValue("$position", target);
-                command.Parameters.AddWithValue("$now", now);
-                command.Parameters.AddWithValue("$id", id);
-                command.ExecuteNonQuery();
-            }
+            using var transaction = context.Database.BeginTransaction();
 
-            if (!string.Equals(from, column, StringComparison.Ordinal))
-                Record(connection, id, "status", from, column, now);
-            Record(connection, id, "position", null, target.ToString(), now);
+            item.Status = column!;
+            item.Position = target;
+            item.UpdatedAt = now;
 
-            Renumber(connection, column);
-            if (from is not null && !string.Equals(from, column, StringComparison.Ordinal))
-                Renumber(connection, from);
+            if (statusChanged)
+                Record(context, id, "status", from, column, now);
+            Record(context, id, "position", null, target.ToString(), now);
+
+            // Renumbering reads the stored positions, so the move is saved first and rewritten after.
+            context.SaveChanges();
+
+            Renumber(context, column!);
+            if (from is not null && statusChanged)
+                Renumber(context, from);
+
+            context.SaveChanges();
+            transaction.Commit();
 
             return new
             {
@@ -174,7 +182,7 @@ public sealed class BoardService : IBoardService
                 from,
                 to = column,
                 position = target,
-                item = ReadItem(connection, id),
+                item = ReadItem(context, id),
             };
         });
     }
@@ -184,36 +192,30 @@ public sealed class BoardService : IBoardService
         if (id < 1) return Fail("A valid item id is required.");
         if (string.IsNullOrWhiteSpace(body)) return Fail("The comment body is required.");
 
-        return With(connection =>
+        return With(context =>
         {
-            if (ReadItem(connection, id) is null) return (object)new { error = $"No board item with id {id}." };
+            var item = context.BoardItems.FirstOrDefault(row => row.Id == id);
+            if (item is null) return (object)new { error = $"No board item with id {id}." };
 
-            var now = Stamped();
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                INSERT INTO board_comment (item_id, author, body, created_at) VALUES ($item, $author, $body, $now);
-                SELECT last_insert_rowid();
-                """;
-            command.Parameters.AddWithValue("$item", id);
-            command.Parameters.AddWithValue("$author", (object?)author ?? DBNull.Value);
-            command.Parameters.AddWithValue("$body", body.Trim());
-            command.Parameters.AddWithValue("$now", now);
-            var commentId = Convert.ToInt32(command.ExecuteScalar());
-
-            using (var touch = connection.CreateCommand())
+            var now = DateTimeOffset.UtcNow;
+            var comment = new BoardCommentRow
             {
-                touch.CommandText = "UPDATE board_item SET updated_at = $now WHERE id = $id;";
-                touch.Parameters.AddWithValue("$now", now);
-                touch.Parameters.AddWithValue("$id", id);
-                touch.ExecuteNonQuery();
-            }
+                ItemId = id,
+                Author = author,
+                Body = body.Trim(),
+                CreatedAt = now,
+            };
+
+            context.BoardComments.Add(comment);
+            item.UpdatedAt = now;
+            context.SaveChanges();
 
             return (object)new
             {
                 commented = true,
                 item = id,
-                comment = new { id = commentId, author, body = body.Trim(), createdAt = now },
-                commentCount = Comments(connection, id).Count,
+                comment = new { id = comment.Id, author, body = body.Trim(), createdAt = now.ToString("O") },
+                commentCount = context.BoardComments.Count(row => row.ItemId == id),
             };
         });
     }
@@ -222,18 +224,14 @@ public sealed class BoardService : IBoardService
     {
         if (id < 1) return Fail("A valid item id is required.");
 
-        return With(connection =>
+        return With(context =>
         {
-            var item = ReadItem(connection, id);
+            var item = ReadItem(context, id);
             if (item is null) return (object)new { error = $"No board item with id {id}." };
 
-            foreach (var table in new[] { "board_comment", "board_history", "board_item" })
-            {
-                using var command = connection.CreateCommand();
-                command.CommandText = $"DELETE FROM {table} WHERE {(table == "board_item" ? "id" : "item_id")} = $id;";
-                command.Parameters.AddWithValue("$id", id);
-                command.ExecuteNonQuery();
-            }
+            context.BoardComments.Where(row => row.ItemId == id).ExecuteDelete();
+            context.BoardHistory.Where(row => row.ItemId == id).ExecuteDelete();
+            context.BoardItems.Where(row => row.Id == id).ExecuteDelete();
 
             return (object)new { deleted = true, id, item };
         });
@@ -243,16 +241,16 @@ public sealed class BoardService : IBoardService
     {
         if (id < 1) return Fail("A valid item id is required.");
 
-        return With(connection =>
+        return With(context =>
         {
-            var item = ReadItem(connection, id);
+            var item = ReadItem(context, id);
             if (item is null) return (object)new { error = $"No board item with id {id}." };
 
             return new
             {
                 item,
-                comments = Comments(connection, id),
-                history = History(connection, id),
+                comments = Comments(context, id),
+                history = History(context, id),
             };
         });
     }
@@ -273,32 +271,43 @@ public sealed class BoardService : IBoardService
             if (level is null) return Fail(PriorityError(priority));
         }
 
-        return With(connection =>
+        return With(context =>
         {
-            var where = new List<string>();
-            using var command = connection.CreateCommand();
+            var query = context.BoardItems.AsNoTracking().AsQueryable();
 
-            if (column is not null) { where.Add("status = $status"); command.Parameters.AddWithValue("$status", column); }
-            if (level is not null) { where.Add("priority = $priority"); command.Parameters.AddWithValue("$priority", level); }
-            if (!string.IsNullOrWhiteSpace(assignee)) { where.Add("assignee = $assignee"); command.Parameters.AddWithValue("$assignee", assignee); }
-            if (!string.IsNullOrWhiteSpace(label)) { where.Add("(',' || COALESCE(labels,'') || ',') LIKE $label"); command.Parameters.AddWithValue("$label", $"%,{label!.Trim()},%"); }
-            if (!string.IsNullOrWhiteSpace(text))
+            if (column is not null) query = query.Where(item => item.Status == column);
+            if (level is not null) query = query.Where(item => item.Priority == level);
+            if (!string.IsNullOrWhiteSpace(assignee)) query = query.Where(item => item.Assignee == assignee);
+
+            if (!string.IsNullOrWhiteSpace(label))
             {
-                where.Add("(title LIKE $text OR COALESCE(description,'') LIKE $text)");
-                command.Parameters.AddWithValue("$text", $"%{text!.Trim()}%");
+                var needle = $"%,{label.Trim()},%";
+                query = query.Where(item => EF.Functions.Like("," + (item.Labels ?? string.Empty) + ",", needle));
             }
 
-            command.CommandText = "SELECT id FROM board_item" +
-                                  (where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "") +
-                                  " ORDER BY CASE status" +
-                                  " WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2" +
-                                  " WHEN 'review' THEN 3 WHEN 'done' THEN 4 ELSE 5 END, position, id;";
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                var needle = $"%{text.Trim()}%";
+                query = query.Where(item =>
+                    EF.Functions.Like(item.Title, needle) ||
+                    EF.Functions.Like(item.Description ?? string.Empty, needle));
+            }
 
-            var ids = new List<long>();
-            using (var reader = command.ExecuteReader())
-                while (reader.Read()) ids.Add(reader.GetInt64(0));
+            var rows = query
+                .Select(item => new
+                {
+                    Item = item,
+                    CommentCount = context.BoardComments.Count(comment => comment.ItemId == item.Id),
+                })
+                .ToList();
 
-            var items = ids.Select(id => ReadItem(connection, (int)id)).OfType<object>().ToList();
+            var items = rows
+                .OrderBy(row => Array.IndexOf(Statuses, row.Item.Status))
+                .ThenBy(row => row.Item.Position)
+                .ThenBy(row => row.Item.Id)
+                .Select(row => Shape(row.Item, row.CommentCount))
+                .ToList();
+
             return (object)new
             {
                 count = items.Count,
@@ -308,11 +317,11 @@ public sealed class BoardService : IBoardService
         });
     }
 
-    public Task<object> BoardAsync() => With(connection =>
+    public Task<object> BoardAsync() => With(context =>
     {
         var columns = Statuses.Select(status =>
         {
-            var items = Items(connection, status);
+            var items = Items(context, status);
             return new
             {
                 status,
@@ -321,7 +330,7 @@ public sealed class BoardService : IBoardService
             };
         }).ToList();
 
-        var totals = Statuses.ToDictionary(status => status, status => Count(connection, status));
+        var totals = columns.ToDictionary(column => column.status, column => column.count);
 
         return (object)new
         {
@@ -341,7 +350,7 @@ public sealed class BoardService : IBoardService
         if (policy is not ("skip" or "update" or "duplicate"))
             return Fail("'existing' must be one of: skip (default), update, duplicate.");
 
-        return With(connection =>
+        return With(context =>
         {
             var imported = new List<object>();
             var updated = new List<object>();
@@ -372,49 +381,50 @@ public sealed class BoardService : IBoardService
                     continue;
                 }
 
-                var now = Stamped();
-                var currentId = FindByTitle(connection, title);
+                var now = DateTimeOffset.UtcNow;
+                var current = FindByTitle(context, title);
 
-                if (currentId is int known)
+                if (current is not null)
                 {
                     if (policy == "skip")
                     {
-                        skipped.Add(new { index, id = known, title });
+                        skipped.Add(new { index, id = current.Id, title });
                         continue;
                     }
 
                     if (policy == "update")
                     {
                         var changes = new List<object>();
-                        UpdateField(connection, known, "description", card.Description, changes, now);
-                        UpdateField(connection, known, "status", column, changes, now);
-                        UpdateField(connection, known, "priority", level, changes, now);
-                        UpdateField(connection, known, "labels", Join(card.Labels), changes, now);
-                        UpdateField(connection, known, "assignee", card.Assignee, changes, now);
-                        updated.Add(new { index, id = known, title, changes });
+                        UpdateField(context, current, "description", card.Description, changes, now);
+                        UpdateField(context, current, "status", column, changes, now);
+                        UpdateField(context, current, "priority", level, changes, now);
+                        UpdateField(context, current, "labels", Join(card.Labels), changes, now);
+                        UpdateField(context, current, "assignee", card.Assignee, changes, now);
+                        context.SaveChanges();
+                        updated.Add(new { index, id = current.Id, title, changes });
                         continue;
                     }
                 }
 
-                var position = NextPosition(connection, column);
-                using var command = connection.CreateCommand();
-                command.CommandText = """
-                    INSERT INTO board_item (title, description, status, priority, labels, assignee, position, created_at, updated_at)
-                    VALUES ($title, $description, $status, $priority, $labels, $assignee, $position, $now, $now);
-                    SELECT last_insert_rowid();
-                    """;
-                command.Parameters.AddWithValue("$title", title);
-                command.Parameters.AddWithValue("$description", (object?)card.Description ?? DBNull.Value);
-                command.Parameters.AddWithValue("$status", column);
-                command.Parameters.AddWithValue("$priority", level);
-                command.Parameters.AddWithValue("$labels", (object?)Join(card.Labels) ?? DBNull.Value);
-                command.Parameters.AddWithValue("$assignee", (object?)card.Assignee ?? DBNull.Value);
-                command.Parameters.AddWithValue("$position", position);
-                command.Parameters.AddWithValue("$now", now);
+                var item = new BoardItemRow
+                {
+                    Title = title,
+                    Description = card.Description,
+                    Status = column,
+                    Priority = level,
+                    Labels = Join(card.Labels),
+                    Assignee = card.Assignee,
+                    Position = NextPosition(context, column),
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                };
 
-                var id = Convert.ToInt32(command.ExecuteScalar());
-                Record(connection, id, "created", null, column, now);
-                imported.Add(new { index, id, title, status = column, priority = level });
+                context.BoardItems.Add(item);
+                context.SaveChanges();
+
+                Record(context, item.Id, "created", null, column, now);
+                context.SaveChanges();
+                imported.Add(new { index, id = item.Id, title, status = column, priority = level });
             }
 
             return (object)new
@@ -441,7 +451,7 @@ public sealed class BoardService : IBoardService
             if (column is null) return Fail(StatusError(status));
         }
 
-        return With(connection =>
+        return With(context =>
         {
             var columns = column is null ? Statuses : [column];
             var markdown = new StringBuilder();
@@ -450,7 +460,7 @@ public sealed class BoardService : IBoardService
 
             foreach (var name in columns)
             {
-                var rows = ExportRows(connection, name);
+                var rows = ExportRows(context, name);
                 counts[name] = rows.Count;
                 markdown.AppendLine();
                 markdown.AppendLine($"## {name} ({rows.Count})");
@@ -483,210 +493,177 @@ public sealed class BoardService : IBoardService
 
     private sealed record ExportRow(int Id, string Title, string? Description, string Priority, string[] Labels, string? Assignee);
 
-    private static List<ExportRow> ExportRows(SqliteConnection connection, string status)
+    private static List<ExportRow> ExportRows(VisualMcpDbContext context, string status)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT id, title, description, priority, labels, assignee
-            FROM board_item WHERE status = $status ORDER BY position, id;
-            """;
-        command.Parameters.AddWithValue("$status", status);
-
-        var rows = new List<ExportRow>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            rows.Add(new ExportRow(
-                reader.GetInt32(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.GetString(3),
-                Split(reader.IsDBNull(4) ? null : reader.GetString(4)).ToArray(),
-                reader.IsDBNull(5) ? null : reader.GetString(5)));
-        }
-
-        return rows;
+        return context.BoardItems
+            .AsNoTracking()
+            .Where(item => item.Status == status)
+            .OrderBy(item => item.Position)
+            .ThenBy(item => item.Id)
+            .Select(item => new { item.Id, item.Title, item.Description, item.Priority, item.Labels, item.Assignee })
+            .ToList()
+            .Select(item => new ExportRow(
+                item.Id, item.Title, item.Description, item.Priority, Split(item.Labels).ToArray(), item.Assignee))
+            .ToList();
     }
 
-    private static int? FindByTitle(SqliteConnection connection, string title)
+    private static BoardItemRow? FindByTitle(VisualMcpDbContext context, string title)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id FROM board_item WHERE title = $title ORDER BY id LIMIT 1;";
-        command.Parameters.AddWithValue("$title", title);
-        var value = command.ExecuteScalar();
-        return value is null or DBNull ? null : Convert.ToInt32(value);
+        return context.BoardItems
+            .Where(item => item.Title == title)
+            .OrderBy(item => item.Id)
+            .FirstOrDefault();
     }
 
     /// <summary>Set one field when the draft supplies it, and record the history entry when it actually changes.</summary>
-    private static void UpdateField(SqliteConnection connection, int id, string field, string? value,
-        List<object> changes, string now)
+    private static void UpdateField(VisualMcpDbContext context, BoardItemRow item, string field, string? value,
+        List<object> changes, DateTimeOffset at)
     {
         if (value is null) return;
 
-        var old = Field(connection, id, field);
+        var (old, set) = FieldAccess(item, field);
         if (string.Equals(old, value, StringComparison.Ordinal)) return;
 
-        using var command = connection.CreateCommand();
-        command.CommandText = $"UPDATE board_item SET {field} = $value, updated_at = $now WHERE id = $id;";
-        command.Parameters.AddWithValue("$value", value);
-        command.Parameters.AddWithValue("$now", now);
-        command.Parameters.AddWithValue("$id", id);
-        command.ExecuteNonQuery();
-        Record(connection, id, field, old, value, now);
+        set(value);
+        item.UpdatedAt = at;
+        Record(context, item.Id, field, old, value, at);
         changes.Add(new { field, from = old, to = value });
     }
 
+    /// <summary>The property a board field names: callers keep passing a field name, but nothing builds SQL from it.</summary>
+    private static (string? Old, Action<string?> Set) FieldAccess(BoardItemRow item, string field) => field switch
+    {
+        "title" => (item.Title, value => item.Title = value!),
+        "description" => (item.Description, value => item.Description = value),
+        "status" => (item.Status, value => item.Status = value!),
+        "priority" => (item.Priority, value => item.Priority = value!),
+        "labels" => (item.Labels, value => item.Labels = value),
+        "assignee" => (item.Assignee, value => item.Assignee = value),
+        _ => throw new ArgumentOutOfRangeException(nameof(field), field, "Unknown board field."),
+    };
+
     // ── reading ──────────────────────────────────────────────────────────────
-    private object? ReadItem(SqliteConnection connection, int id)
+    private static object? ReadItem(VisualMcpDbContext context, int id)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT id, title, description, status, priority, labels, assignee, position, created_at, updated_at,
-                   (SELECT COUNT(*) FROM board_comment WHERE item_id = board_item.id)
-            FROM board_item WHERE id = $id;
-            """;
-        command.Parameters.AddWithValue("$id", id);
-
-        using var reader = command.ExecuteReader();
-        if (!reader.Read()) return null;
-
-        return new
-        {
-            id = reader.GetInt32(0),
-            title = reader.GetString(1),
-            description = reader.IsDBNull(2) ? null : reader.GetString(2),
-            status = reader.GetString(3),
-            priority = reader.GetString(4),
-            labels = Split(reader.IsDBNull(5) ? null : reader.GetString(5)),
-            assignee = reader.IsDBNull(6) ? null : reader.GetString(6),
-            position = reader.GetInt32(7),
-            createdAt = reader.GetString(8),
-            updatedAt = reader.GetString(9),
-            commentCount = reader.GetInt32(10),
-        };
-    }
-
-    private List<object> Items(SqliteConnection connection, string status)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id FROM board_item WHERE status = $status ORDER BY position, id;";
-        command.Parameters.AddWithValue("$status", status);
-
-        var ids = new List<long>();
-        using (var reader = command.ExecuteReader())
-            while (reader.Read()) ids.Add(reader.GetInt64(0));
-
-        return ids.Select(id => ReadItem(connection, (int)id)).OfType<object>().ToList();
-    }
-
-    private static int Count(SqliteConnection connection, string status)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM board_item WHERE status = $status;";
-        command.Parameters.AddWithValue("$status", status);
-        return Convert.ToInt32(command.ExecuteScalar());
-    }
-
-    private List<object> Comments(SqliteConnection connection, int id)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, author, body, created_at FROM board_comment WHERE item_id = $id ORDER BY id;";
-        command.Parameters.AddWithValue("$id", id);
-
-        var comments = new List<object>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            comments.Add(new
+        var row = context.BoardItems
+            .AsNoTracking()
+            .Where(item => item.Id == id)
+            .Select(item => new
             {
-                id = reader.GetInt32(0),
-                author = reader.IsDBNull(1) ? null : reader.GetString(1),
-                body = reader.GetString(2),
-                createdAt = reader.GetString(3),
-            });
-        }
+                Item = item,
+                CommentCount = context.BoardComments.Count(comment => comment.ItemId == item.Id),
+            })
+            .FirstOrDefault();
 
-        return comments;
+        return row is null ? null : Shape(row.Item, row.CommentCount);
     }
 
-    private List<object> History(SqliteConnection connection, int id)
+    /// <summary>The JSON shape of one item, shared by every read path so the responses cannot drift apart.</summary>
+    private static object Shape(BoardItemRow item, int commentCount) => new
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT field, old_value, new_value, at FROM board_history WHERE item_id = $id ORDER BY id;";
-        command.Parameters.AddWithValue("$id", id);
+        id = item.Id,
+        title = item.Title,
+        description = item.Description,
+        status = item.Status,
+        priority = item.Priority,
+        labels = Split(item.Labels),
+        assignee = item.Assignee,
+        position = item.Position,
+        createdAt = item.CreatedAt.ToUniversalTime().ToString("O"),
+        updatedAt = item.UpdatedAt.ToUniversalTime().ToString("O"),
+        commentCount,
+    };
 
-        var history = new List<object>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            history.Add(new
+    private static List<object> Items(VisualMcpDbContext context, string status)
+    {
+        var rows = context.BoardItems
+            .AsNoTracking()
+            .Where(item => item.Status == status)
+            .OrderBy(item => item.Position)
+            .ThenBy(item => item.Id)
+            .Select(item => new
             {
-                field = reader.GetString(0),
-                from = reader.IsDBNull(1) ? null : reader.GetString(1),
-                to = reader.IsDBNull(2) ? null : reader.GetString(2),
-                at = reader.GetString(3),
-            });
-        }
+                Item = item,
+                CommentCount = context.BoardComments.Count(comment => comment.ItemId == item.Id),
+            })
+            .ToList();
 
-        return history;
+        return rows.Select(row => Shape(row.Item, row.CommentCount)).ToList();
     }
 
-    private static string? Field(SqliteConnection connection, int id, string field)
+    private static List<object> Comments(VisualMcpDbContext context, int id)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {field} FROM board_item WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", id);
-        var value = command.ExecuteScalar();
-        return value is null or DBNull ? null : value.ToString();
+        return context.BoardComments
+            .AsNoTracking()
+            .Where(comment => comment.ItemId == id)
+            .OrderBy(comment => comment.Id)
+            .Select(comment => new { comment.Id, comment.Author, comment.Body, comment.CreatedAt })
+            .ToList()
+            .Select(comment => (object)new
+            {
+                id = comment.Id,
+                author = comment.Author,
+                body = comment.Body,
+                createdAt = comment.CreatedAt.ToUniversalTime().ToString("O"),
+            })
+            .ToList();
+    }
+
+    private static List<object> History(VisualMcpDbContext context, int id)
+    {
+        return context.BoardHistory
+            .AsNoTracking()
+            .Where(entry => entry.ItemId == id)
+            .OrderBy(entry => entry.Id)
+            .Select(entry => new { entry.Field, entry.OldValue, entry.NewValue, entry.At })
+            .ToList()
+            .Select(entry => (object)new
+            {
+                field = entry.Field,
+                from = entry.OldValue,
+                to = entry.NewValue,
+                at = entry.At.ToUniversalTime().ToString("O"),
+            })
+            .ToList();
     }
 
     // ── writing helpers ──────────────────────────────────────────────────────
-    private static int NextPosition(SqliteConnection connection, string status)
+    private static int NextPosition(VisualMcpDbContext context, string status)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COALESCE(MAX(position), -1) + 1 FROM board_item WHERE status = $status;";
-        command.Parameters.AddWithValue("$status", status);
-        return Convert.ToInt32(command.ExecuteScalar());
+        var highest = context.BoardItems
+            .Where(item => item.Status == status)
+            .Max(item => (int?)item.Position);
+
+        return (highest ?? -1) + 1;
     }
 
     /// <summary>Rewrite one column's positions to 0..n-1, so a move never leaves holes or ties.</summary>
-    private static void Renumber(SqliteConnection connection, string status)
+    private static void Renumber(VisualMcpDbContext context, string status)
     {
-        using var select = connection.CreateCommand();
-        select.CommandText = "SELECT id FROM board_item WHERE status = $status ORDER BY position, id;";
-        select.Parameters.AddWithValue("$status", status);
+        var items = context.BoardItems
+            .Where(item => item.Status == status)
+            .OrderBy(item => item.Position)
+            .ThenBy(item => item.Id)
+            .ToList();
 
-        var ids = new List<long>();
-        using (var reader = select.ExecuteReader())
-            while (reader.Read()) ids.Add(reader.GetInt64(0));
-
-        for (var index = 0; index < ids.Count; index++)
-        {
-            using var update = connection.CreateCommand();
-            update.CommandText = "UPDATE board_item SET position = $position WHERE id = $id;";
-            update.Parameters.AddWithValue("$position", index);
-            update.Parameters.AddWithValue("$id", ids[index]);
-            update.ExecuteNonQuery();
-        }
+        for (var index = 0; index < items.Count; index++)
+            items[index].Position = index;
     }
 
-    private static void Record(SqliteConnection connection, int id, string field, string? oldValue, string? newValue, string at)
+    private static void Record(VisualMcpDbContext context, int id, string field, string? oldValue, string? newValue, DateTimeOffset at)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO board_history (item_id, field, old_value, new_value, at)
-            VALUES ($item, $field, $old, $new, $at);
-            """;
-        command.Parameters.AddWithValue("$item", id);
-        command.Parameters.AddWithValue("$field", field);
-        command.Parameters.AddWithValue("$old", (object?)oldValue ?? DBNull.Value);
-        command.Parameters.AddWithValue("$new", (object?)newValue ?? DBNull.Value);
-        command.Parameters.AddWithValue("$at", at);
-        command.ExecuteNonQuery();
+        context.BoardHistory.Add(new BoardHistoryRow
+        {
+            ItemId = id,
+            Field = field,
+            OldValue = oldValue,
+            NewValue = newValue,
+            At = at,
+        });
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────────
-    private Task<object> With(Func<SqliteConnection, object> work)
+    private Task<object> With(Func<VisualMcpDbContext, object> work)
     {
         var path = _store.EnsureDatabase();
         if (path is null)
@@ -702,17 +679,16 @@ public sealed class BoardService : IBoardService
             connection.Open();
             VisualMcpSchema.Ensure(connection);
 
-            return Task.FromResult(work(connection));
+            using var context = VisualMcpSchema.CreateContext(connection);
+            return Task.FromResult(work(context));
         }
-        catch (SqliteException ex)
+        catch (Exception ex) when (ex is SqliteException or DbUpdateException)
         {
             return Task.FromResult<object>(new { error = $"Board database error: {ex.Message}", database = path });
         }
     }
 
     private static Task<object> Fail(string error) => Task.FromResult<object>(new { error });
-
-    private static string Stamped() => DateTimeOffset.UtcNow.ToString("O");
 
     private static string? NormalizeStatus(string? status)
     {

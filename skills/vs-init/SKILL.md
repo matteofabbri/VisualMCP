@@ -1,4 +1,4 @@
-﻿# vs-init
+# vs-init
 
 Initialise a project to use the `VisualMCP` MCP server: writes (or updates) a `CLAUDE.md` in the current working directory that instructs Claude to prefer MCP tools over Grep/PowerShell for all C# analysis.
 
@@ -24,7 +24,7 @@ When this skill is invoked:
 1. Determine the current working directory.
 2. If the user supplied a path argument, treat it as the solution path; otherwise leave it as a placeholder.
 3. Check if `CLAUDE.md` exists in the cwd using the Read tool (catch the error if it does not exist).
-4. Build the block to write (see template below). If CLAUDE.md already contains the string `VisualMCP MCP` do NOT append again â€” tell the user it is already configured.
+4. Build the block to write (see template below). If CLAUDE.md already contains the string `VisualMCP MCP` do NOT append again - tell the user it is already configured.
 5. If CLAUDE.md exists, append the block at the end. If it does not exist, write it as the entire file content.
 6. Confirm to the user: what file was written, what the solution path is set to, and that they should restart Claude Code if this is the first time.
 
@@ -33,43 +33,43 @@ When this skill is invoked:
 ```
 ## VisualMCP MCP
 
-Questo progetto usa il server MCP `VisualMCP` per l'analisi semantica del codice C#.
+This project uses the MCP server `VisualMCP` for semantic analysis of C# code.
 
-### Regole obbligatorie
+### Mandatory rules
 
-- All'inizio di ogni sessione su codice C# chiama `load_solution` con il path della soluzione.
-  Soluzione di default: {{SOLUTION_PATH}}
+- At the start of every session on C# code call `load_solution` with the solution path.
+  Default solution: {{SOLUTION_PATH}}
 
-- Per qualsiasi operazione su codice C# usa i tool MCP, NON Grep/Bash/PowerShell:
+- For any operation on C# code use the MCP tools, NOT Grep/Bash/PowerShell:
 
-  | Operazione                        | Tool MCP da usare          |
-  |-----------------------------------|----------------------------|
-  | Cercare una classe/metodo/tipo    | `find_symbol`              |
-  | Trovare tutti i riferimenti       | `find_references`          |
-  | Implementazioni di un'interfaccia | `find_implementations`     |
-  | Gerarchia di ereditarietÃ          | `find_derived_types`       |
-  | Chi chiama un metodo              | `find_callers`             |
-  | Simbolo a riga specifica          | `get_symbol_info`          |
-  | Membri di un tipo                 | `get_type_members`         |
-  | Corpo/definizione di un simbolo   | `read_symbol`              |
-  | Errori e warning del compilatore  | `get_diagnostics`          |
-  | Dipendenze tra progetti           | `analyze_dependencies`     |
-  | Codice morto                      | `find_unused_symbols`      |
-  | ComplessitÃ  ciclomatica           | `get_metrics`              |
-  | Code smell                        | `find_code_smells`         |
-  | Documentazione XML                | `get_xml_docs`             |
-  | API pubbliche senza doc           | `find_undocumented_public_api` |
-  | Anteprima rename                  | `preview_rename`           |
-  | Candidati estrazione metodo       | `extract_method_candidates`|
-  | Eseguire i test                   | `run_tests`                |
-  | Coverage dei test                 | `get_test_coverage_map`    |
+  | Operation                        | MCP tool to use            |
+  |----------------------------------|----------------------------|
+  | Find a class/method/type         | `find_symbol`              |
+  | Find all references              | `find_references`          |
+  | Implementations of an interface  | `find_implementations`     |
+  | Inheritance hierarchy            | `find_derived_types`       |
+  | Who calls a method               | `find_callers`             |
+  | Symbol at a specific line        | `get_symbol_info`          |
+  | Members of a type                | `get_type_members`         |
+  | Body/definition of a symbol      | `read_symbol`              |
+  | Compiler errors and warnings     | `get_diagnostics`          |
+  | Dependencies between projects    | `analyze_dependencies`     |
+  | Dead code                        | `find_unused_symbols`      |
+  | Cyclomatic complexity            | `get_metrics`              |
+  | Code smells                      | `find_code_smells`         |
+  | XML documentation                | `get_xml_docs`             |
+  | Public APIs without docs         | `find_undocumented_public_api` |
+  | Rename preview                   | `preview_rename`           |
+  | Method extraction candidates     | `extract_method_candidates`|
+  | Run the tests                    | `run_tests`                |
+  | Test coverage                    | `get_test_coverage_map`    |
 
-- Usa Grep/Bash/PowerShell solo per file non-C# (JSON, YAML, log, script, ecc.)
-  o quando il server MCP non Ã¨ disponibile.
+- Use Grep/Bash/PowerShell only for non-C# files (JSON, YAML, logs, scripts, etc.)
+  or when the MCP server is unavailable.
 
-### Note sul server MCP
+### Notes on the MCP server
 
-Il server `VisualMCP` Ã¨ un processo locale sulla tua macchina.
-Non carica nÃ© trasmette file sorgente da nessuna parte â€” legge dal filesystem locale
-e restituisce solo risultati strutturati (nomi di simboli, numeri di riga, ecc.).
+The `VisualMCP` server is a local process on your machine.
+It does not upload or transmit source files anywhere - it reads from the local filesystem
+and returns only structured results (symbol names, line numbers, etc.).
 ```

@@ -1,41 +1,42 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installa VisualMCP come server MCP per ZCode e/o Claude Code.
+    Installs VisualMCP as an MCP server for ZCode and/or Claude Code.
 
 .DESCRIPTION
-    Wrapper di scripts\install.ps1 (l'unica implementazione: publish + registrazione,
-    che ora installa anche il routing guard: hook PreToolUse + blocco AGENTS.md).
+    Wrapper around scripts\install.ps1 (the single implementation: publish + registration,
+    which now also installs the routing guard: PreToolUse hook + AGENTS.md block).
 
-    Questo file aggiunge -SetupProject, che scrive nel progetto C# di destinazione
-    lo stesso blocco di istruzioni gestito da VisualMCP (hooks\agents-block.md),
-    sia in CLAUDE.md (Claude Code) sia in AGENTS.md (ZCode), cosi' ogni client sa
-    quando usare i tool invece di Grep/PowerShell.
+    This file adds -SetupProject, which writes into the destination C# project the same
+    instructions block managed by VisualMCP (hooks\agents-block.md), both in CLAUDE.md
+    (Claude Code) and in AGENTS.md (ZCode), so every client knows when to use the tools
+    instead of Grep/PowerShell.
 
-    Il blocco e' delimitato dai marker "<!-- VisualMCP:begin/end -->": rieseguire
-    lo script lo sostituisce invece di duplicarlo, e lascia intatto il resto del file.
+    The block is delimited by the "<!-- VisualMCP:begin/end -->" markers: running the
+    script again replaces it instead of duplicating it, and leaves the rest of the file
+    untouched.
 
 .PARAMETER Scope
-    all (default) = ZCode + Claude Code + app desktop; zcode = solo ZCode;
-    user/project/local = solo Claude Code (vedi scripts\install.ps1).
+    all (default) = ZCode + Claude Code + desktop app; zcode = ZCode only;
+    user/project/local = Claude Code only (see scripts\install.ps1).
 
 .PARAMETER Uninstall
-    Rimuove il server MCP (e il routing guard) dalle configurazioni e cancella i
-    file pubblicati.
+    Removes the MCP server (and the routing guard) from the configurations and deletes
+    the published files.
 
 .PARAMETER StopRunning
-    Ferma le istanze del server attualmente in esecuzione prima del publish
-    (l'exe installato altrimenti e' bloccato).
+    Stops the running server instances before publishing (the installed exe is
+    otherwise locked).
 
 .PARAMETER SetupProject
-    Scrive (o aggiorna) il blocco istruzioni VisualMCP in CLAUDE.md e AGENTS.md
-    nella directory indicata. Esempio: .\install.ps1 -SetupProject C:\REPOSITORY\MyApp
+    Writes (or updates) the VisualMCP instructions block in CLAUDE.md and AGENTS.md in
+    the given directory. Example: .\install.ps1 -SetupProject C:\REPOSITORY\MyApp
 
 .PARAMETER SolutionPath
-    Opzionale: soluzione di default da citare nel blocco scritto da -SetupProject.
+    Optional: default solution to name in the block written by -SetupProject.
 
 .PARAMETER ProjectDir
-    Solo per -Scope project/local: il progetto a cui agganciare il server.
+    For -Scope project/local only: the project the server is attached to.
 
 .EXAMPLE
     .\install.ps1
@@ -66,14 +67,14 @@ function Write-Ok([string]$msg)   { Write-Host "    OK  $msg" -ForegroundColor G
 function Write-Err([string]$msg)  { Write-Host "    ERR $msg" -ForegroundColor Red; exit 1 }
 
 if (-not (Test-Path $InstallScript)) {
-    Write-Err "Script non trovato: $InstallScript`nEsegui questo script dalla root del repository."
+    Write-Err "Script not found: $InstallScript`nRun this script from the repository root."
 }
 
 # --- Setup-Project ----------------------------------------------------------
 if ($SetupProject -ne "") {
     $targetDir = Resolve-Path $SetupProject -ErrorAction SilentlyContinue
-    if (-not $targetDir) { Write-Err "Directory non trovata: $SetupProject" }
-    if (-not (Test-Path $BlockSource)) { Write-Err "Blocco istruzioni non trovato: $BlockSource" }
+    if (-not $targetDir) { Write-Err "Directory not found: $SetupProject" }
+    if (-not (Test-Path $BlockSource)) { Write-Err "Instructions block not found: $BlockSource" }
 
     $block = (Get-Content $BlockSource -Raw).TrimEnd()
 
@@ -88,7 +89,7 @@ if ($SetupProject -ne "") {
     # BOM-less UTF-8: PS 5.1's -Encoding UTF8 would prepend one.
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-    Write-Step "Configurazione progetto in $targetDir ..."
+    Write-Step "Configuring project in $targetDir ..."
 
     # CLAUDE.md for Claude Code, AGENTS.md for ZCode: same block, both clients.
     foreach ($name in @("CLAUDE.md", "AGENTS.md")) {
@@ -104,18 +105,18 @@ if ($SetupProject -ne "") {
         }
         [System.IO.File]::WriteAllText($docPath, $text, $utf8NoBom)
 
-        if ($existed) { Write-Ok "Blocco VisualMCP aggiornato in $docPath" }
-        else          { Write-Ok "Creato $docPath" }
+        if ($existed) { Write-Ok "VisualMCP block updated in $docPath" }
+        else          { Write-Ok "Created $docPath" }
     }
 
     Write-Host @"
 
-Setup completato.
+Setup complete.
 
-Claude Code (CLAUDE.md) e ZCode (AGENTS.md) useranno i tool MCP per l'analisi C# in questo progetto.
+Claude Code (CLAUDE.md) and ZCode (AGENTS.md) will use the MCP tools for C# analysis in this project.
 
-Nota: l'hook PreToolUse che blocca grep/sed/cat/ls su .NET e' a livello utente, non di
-progetto: si installa (o si aggiorna) con
+Note: the PreToolUse hook that blocks grep/sed/cat/ls on .NET is user-level, not
+per-project: it is installed (or updated) with
   powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1
 "@ -ForegroundColor Green
     exit 0

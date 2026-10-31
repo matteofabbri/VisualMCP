@@ -2,7 +2,12 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Snitch.Storage.Schema;
+using SchemaDocumentRow = Snitch.Storage.Schema.SymbolDocumentRow;
+using SchemaMetacodeRow = Snitch.Storage.Schema.SymbolMetacodeRow;
+using SchemaSymbolRow = Snitch.Storage.Schema.SymbolRow;
+using SchemaUsageRow = Snitch.Storage.Schema.SymbolUsageRow;
 
 namespace Snitch.Metacode.Symbols;
 
@@ -92,10 +97,15 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT path, hash FROM si_document;";
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) hashes[reader.GetString(0)] = reader.GetString(1);
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var documents = context.SymbolDocuments
+                .AsNoTracking()
+                .Select(document => new { document.Path, document.Hash })
+                .ToList();
+
+            foreach (var document in documents)
+                hashes[document.Path] = document.Hash;
+
             return hashes;
         }
         catch (SqliteException)

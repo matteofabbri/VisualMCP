@@ -13,13 +13,16 @@ public static class RunProjectTool
         "It enforces a timeout and then stops the process, so long-running apps (e.g. a web server or a " +
         "service) return their startup output (such as the listening URL) instead of blocking forever. " +
         "If no project name is given it auto-selects the single executable project, or lists the options " +
-        "when there is more than one. The working-directory solution auto-loads on first use.")]
+        "when there is more than one. A saved run configuration (run_config action=save) supplies the project, " +
+        "arguments, configuration and environment variables; a parameter passed here wins over the config. " +
+        "The working-directory solution auto-loads on first use.")]
     public static Task<object> RunProject(
         IRunProjectService run,
         [Description("Optional: name of the project to run. If omitted, the single runnable (executable) project is used.")] string? projectName = null,
         [Description("Optional: arguments to pass to the application itself (forwarded after '--').")] string? appArgs = null,
         [Description("Seconds to let the app run before it is stopped and output is returned (default: 20). For a one-shot console app that exits on its own, it returns as soon as it exits.")] int timeoutSeconds = 20,
         [Description("Build configuration to run (e.g. 'Debug' or 'Release'). Omit for the dotnet default (Debug).")] string? configuration = null,
-        [Description("Skip building before running (pass --no-build). Default: false.")] bool noBuild = false)
-        => run.RunAsync(projectName, appArgs, timeoutSeconds, configuration, noBuild);
+        [Description("Skip building before running (pass --no-build). Default: false.")] bool noBuild = false,
+        [Description("A run configuration saved with run_config: applies its project, args, configuration and environment variables.")] string? configName = null)
+        => run.RunAsync(projectName, appArgs, timeoutSeconds, configuration, noBuild, configName);
 }

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Snitch.Languages.CSharp.Refactoring;
 using Snitch.Storage.Schema;
 using Snitch.Workspace;
@@ -140,35 +141,23 @@ public sealed class LocalHistoryService : ILocalHistoryService
             if (limit < 1) limit = 1;
             if (limit > 500) limit = 500;
 
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT id, captured_at, hash, chars, origin
-                FROM file_snapshot
-                WHERE file = $file
-                ORDER BY id DESC
-                LIMIT $limit;
-                """;
-            command.Parameters.AddWithValue("$file", path);
-            command.Parameters.AddWithValue("$limit", limit);
-
-            var snapshots = new List<object>();
-            using (var reader = command.ExecuteReader())
-            {
-                while (reader.Read())
+            using var context = VisualMcpSchema.CreateContext(connection);
+            var snapshots = context.FileSnapshots
+                .AsNoTracking()
+                .Where(row => row.File == path)
+                .OrderByDescending(row => row.Id)
+                .Take(limit)
+                .Select(row => new { row.Id, row.CapturedAt, row.Hash, row.Chars, row.Origin })
+                .ToList()
+                .Select(row => (object)new
                 {
-                    var capturedAt = DateTimeOffset.TryParse(reader.GetString(1), out var parsed)
-                        ? parsed
-                        : DateTimeOffset.MinValue;
-                    snapshots.Add(new
-                    {
-                        id = reader.GetInt64(0),
-                        at = capturedAt.ToString("O"),
-                        hash = reader.GetString(2),
-                        chars = reader.GetInt32(3),
-                        origin = reader.IsDBNull(4) ? null : reader.GetString(4),
-                    });
-                }
-            }
+                    id = row.Id,
+                    at = row.CapturedAt.ToUniversalTime().ToString("O"),
+                    hash = row.Hash,
+                    chars = row.Chars,
+                    origin = row.Origin,
+                })
+                .ToList();
 
             var current = File.Exists(path) ? await File.ReadAllTextAsync(path) : null;
             var currentHash = current is null ? null : VisualMcpStore.ContentHash(current);
@@ -399,49 +388,73 @@ public sealed class LocalHistoryService : ILocalHistoryService
     private static Dictionary<string, string> LatestHashes(SqliteConnection connection)
     {
         var latest = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT file, hash FROM file_snapshot ORDER BY id;";
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-            latest[reader.GetString(0)] = reader.GetString(1);
+
+        using var context = VisualMcpSchema.CreateContext(connection);
+        var stamps = context.FileSnapshots
+            .AsNoTracking()
+            .OrderBy(row => row.Id)
+            .Select(row => new { row.File, row.Hash })
+            .ToList();
+
+        foreach (var stamp in stamps)
+            latest[stamp.File] = stamp.Hash;
 
         return latest;
     }
 
     private static void Insert(SqliteConnection connection, string path, string hash, string text, string origin)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT OR IGNORE INTO file_snapshot (file, hash, captured_at, chars, origin, text)
-            VALUES ($file, $hash, $at, $chars, $origin, $text);
-            DELETE FROM file_snapshot
-            WHERE file = $file
-              AND id NOT IN (SELECT id FROM file_snapshot WHERE file = $file ORDER BY id DESC LIMIT $keep);
-            """;
-        command.Parameters.AddWithValue("$file", path);
-        command.Parameters.AddWithValue("$hash", hash);
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-        command.Parameters.AddWithValue("$chars", text.Length);
-        command.Parameters.AddWithValue("$origin", origin);
-        command.Parameters.AddWithValue("$text", VisualMcpStore.CompressText(text));
-        command.Parameters.AddWithValue("$keep", KeepPerFile);
-        command.ExecuteNonQuery();
+        using var context = VisualMcpSchema.CreateContext(connection);
+
+        // The unique (file, hash) index is the deduplication: unchanged content is one row, not two.
+        if (context.FileSnapshots.Any(row => row.File == path && row.Hash == hash)) return;
+
+        context.FileSnapshots.Add(new FileSnapshotRow
+        {
+            File = path,
+            Hash = hash,
+            CapturedAt = DateTimeOffset.UtcNow,
+            Chars = text.Length,
+            Origin = origin,
+            Text = VisualMcpStore.CompressText(text),
+        });
+
+        try
+        {
+            context.SaveChanges();
+        }
+        catch (DbUpdateException)
+        {
+            // Another owner of the database captured the same content between the check and the
+            // write; the index refused the duplicate, which is the outcome this method wants anyway.
+            context.ChangeTracker.Clear();
+        }
+
+        // A file keeps its newest snapshots only: a snapshot is a convenience, not a backup.
+        var stale = context.FileSnapshots
+            .Where(row => row.File == path)
+            .OrderByDescending(row => row.Id)
+            .Skip(KeepPerFile)
+            .ToList();
+
+        if (stale.Count == 0) return;
+
+        context.FileSnapshots.RemoveRange(stale);
+        context.SaveChanges();
     }
 
     private static (string File, DateTimeOffset CapturedAt, string Text)? Read(SqliteConnection connection, long id)
     {
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT file, captured_at, text FROM file_snapshot WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", id);
+        using var context = VisualMcpSchema.CreateContext(connection);
+        var snapshot = context.FileSnapshots
+            .AsNoTracking()
+            .Where(row => row.Id == id)
+            .Select(row => new { row.File, row.CapturedAt, row.Text })
+            .FirstOrDefault();
 
-        using var reader = command.ExecuteReader();
-        if (!reader.Read() || reader.IsDBNull(2)) return null;
-
-        var capturedAt = DateTimeOffset.TryParse(reader.GetString(1), out var parsed)
-            ? parsed
-            : DateTimeOffset.MinValue;
-
-        return (reader.GetString(0), capturedAt, VisualMcpStore.DecompressText((byte[])reader[2]));
+        return snapshot?.Text is null
+            ? null
+            : (snapshot.File, snapshot.CapturedAt, VisualMcpStore.DecompressText(snapshot.Text));
     }
 
     private static object NoStore() => new
