@@ -28,6 +28,13 @@ public sealed class CapabilityReportService : ICapabilityReportService
             .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
 
+        // Read from the rule catalogue instead of a hardcoded string: a rule set that grows must not leave
+        // this report claiming the old range.
+        var markupIds = Snitch.Languages.WebMarkup.MarkupAnalyzer.Rules.Keys.ToList();
+        string MarkupRange(string prefix) =>
+            $"{markupIds.Where(id => id.StartsWith(prefix, StringComparison.Ordinal)).Min()}-" +
+            $"{markupIds.Where(id => id.StartsWith(prefix, StringComparison.Ordinal)).Max()}";
+
         return new
         {
             toolCount = tools.Count,
@@ -55,8 +62,8 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 },
                 markupRules = new
                 {
-                    html = "HTML0001-HTML0014",
-                    css = "CSS0001-CSS0008",
+                    html = MarkupRange("HTML"),
+                    css = MarkupRange("CSS"),
                 },
                 yamlRules = new
                 {
@@ -84,9 +91,10 @@ public sealed class CapabilityReportService : ICapabilityReportService
                       "a pattern scanner, not a dialect parser)",
                 javascript = "Snitch.Node (the project's own npm/pnpm/yarn plus tsc and eslint interpreted) + " +
                              "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0017, " +
-                             "relative imports resolved, module and export inventory; no module graph or type checking)",
-                markup = "Snitch.Languages.WebMarkup (MarkupAnalyzer: quote-aware HTML tag scanner, HTML0001-HTML0014; " +
-                         "CSS/SCSS masked, CSS0001-CSS0008; no DOM and no selector resolution)",
+                             "relative imports resolved into a module graph with its cycles; no type checking)",
+                markup = "Snitch.Languages.WebMarkup (MarkupAnalyzer: quote-aware HTML tag scanner, " +
+                         $"{MarkupRange("HTML")}; CSS/SCSS masked, {MarkupRange("CSS")}; the simple selectors are " +
+                         "matched against the page index and <style> blocks are analysed; no DOM, combinators or cascade)",
                 yaml = "Snitch.Languages.Yaml (YamlAnalyzer: indentation-aware line scan, YAML0001-YAML0012, manifest " +
                        "identity and container checks; not a schema validator)",
                 fsharp = "Snitch.Languages.FSharp (FSharpAnalyzer: masked scan, FS0001-FS0010, declaration inventory). " +
