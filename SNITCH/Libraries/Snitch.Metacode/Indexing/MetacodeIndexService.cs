@@ -136,6 +136,13 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     private readonly IVisualMcpStore _store;
     private readonly MetacodeIndexStore _index = new();
     private readonly SemaphoreSlim _buildGate = new(1, 1);
+
+    /// <summary>
+    /// The text/binary verdict per path, with the timestamp it was made at. The solution walk runs every
+    /// couple of seconds: opening every file of the tree to ask again would cost more than the pass.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (long Mtime, bool Text)> _textFiles = new(StringComparer.OrdinalIgnoreCase);
+
     private CancellationTokenSource? _watching;
 
     public MetacodeIndexService(IRoslynWorkspace workspace, IVisualMcpStore store)
@@ -610,7 +617,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     /// The same file reached twice (a shared file, a project nested in another project's folder) is
     /// indexed once, attributed to the project whose directory is its closest ancestor.
     /// </summary>
-    private static IReadOnlyList<IndexItem> Sources(IEnumerable<Project> projects, string? solutionPath)
+    private IReadOnlyList<IndexItem> Sources(IEnumerable<Project> projects, string? solutionPath)
     {
         var items = new List<IndexItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -632,6 +639,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         var solutionRoot = SolutionDirectory(solutionPath, roots);
         foreach (var path in WorkspaceSources.FilesUnder(solutionRoot))
         {
+            if (!IsTextFile(path)) continue;
             if (!seen.Add(path)) continue;
             items.Add(new IndexItem(path, ProjectOf(path, roots), WorkspaceSources.LanguageTag(path), null));
         }
@@ -643,6 +651,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             {
                 foreach (var path in WorkspaceSources.FilesUnder(directory))
                 {
+                    if (!IsTextFile(path)) continue;
                     if (!seen.Add(path)) continue;
                     items.Add(new IndexItem(path, name, WorkspaceSources.LanguageTag(path), null));
                 }
@@ -650,6 +659,29 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// Whether a file can be read as text, answered from a cache keyed on its timestamp: a file that did
+    /// not move is not opened again, which is what keeps the two-second pass a walk and not 1,200 reads.
+    /// </summary>
+    private bool IsTextFile(string path)
+    {
+        long mtime;
+        try
+        {
+            mtime = File.GetLastWriteTimeUtc(path).Ticks;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        if (_textFiles.TryGetValue(path, out var known) && known.Mtime == mtime) return known.Text;
+
+        var text = WorkspaceSources.IsTextFile(path, out mtime);
+        _textFiles[path] = (mtime, text);
+        return text;
     }
 
     /// <summary>The folder a project lives in, or null when the project has no file on disk.</summary>

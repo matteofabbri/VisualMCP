@@ -33,8 +33,11 @@ internal static class WorkspaceSources
         name.Length > 0 && (name[0] == '.' || NoiseDirectories.Contains(name));
 
     /// <summary>
-    /// Every text file under <paramref name="root"/>, recursively, in a stable order (sorted, so a build
-    /// report reads the same twice). Unreadable folders cost that folder and nothing else.
+    /// <summary>
+    /// Every file under <paramref name="root"/>, recursively, in a stable order (sorted, so a build
+    /// report reads the same twice), with the tool and VCS folders skipped. <see cref="IsTextFile"/>
+    /// decides which ones the store can read: the walk itself opens nothing, because the background pass
+    /// runs it every couple of seconds and the caller can cache that answer per file.
     /// </summary>
     public static IEnumerable<string> FilesUnder(string? root)
     {
@@ -67,18 +70,28 @@ internal static class WorkspaceSources
                     continue;
                 }
 
-                if (IsTextFile(entry)) yield return Path.GetFullPath(entry);
+                yield return Path.GetFullPath(entry);
             }
         }
     }
 
     /// <summary>Whether a file is small enough and looks like text (no NUL byte in its head).</summary>
-    public static bool IsTextFile(string path)
+    public static bool IsTextFile(string path) => IsTextFile(path, out _);
+
+    /// <summary>
+    /// The same answer, with the timestamp the decision was made at: a caller that runs repeatedly can
+    /// reuse it until the file moves, instead of opening every file of the solution every pass.
+    /// </summary>
+    public static bool IsTextFile(string path, out long mtime)
     {
+        mtime = 0;
         try
         {
             var info = new FileInfo(path);
-            if (!info.Exists || info.Length > MaxFileBytes) return false;
+            if (!info.Exists) return false;
+
+            mtime = info.LastWriteTimeUtc.Ticks;
+            if (info.Length > MaxFileBytes) return false;
 
             using var stream = info.OpenRead();
             var head = new byte[(int)Math.Min(SniffBytes, info.Length)];
