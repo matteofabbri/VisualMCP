@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **346 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **355 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -74,7 +74,7 @@ walkthrough: [Getting started](getting-started.md).
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
 | [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 346 tools, grouped by area, with a one-line description of each |
+| [Tool catalogue](tools.md) | All 355 tools, grouped by area, with a one-line description of each |
 | [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |

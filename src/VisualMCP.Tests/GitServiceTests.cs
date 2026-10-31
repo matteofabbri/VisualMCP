@@ -1,7 +1,4 @@
-using System.Diagnostics;
-using Snitch;
 using Snitch.Docker;
-using Snitch.Git;
 using Xunit;
 
 namespace VisualMCP.Tests;
@@ -12,82 +9,11 @@ namespace VisualMCP.Tests;
 /// </summary>
 public sealed class GitServiceTests
 {
-    private sealed class Repo : IDisposable
-    {
-        public string Directory { get; }
-        public GitService Service { get; }
-
-        public Repo()
-        {
-            Directory = Path.Combine(Path.GetTempPath(), "vmcp-git-" + Guid.NewGuid().ToString("N"));
-            System.IO.Directory.CreateDirectory(Directory);
-
-            Git("init", "-q");
-            Git("config", "user.email", "tests@example.com");
-            Git("config", "user.name", "VisualMCP Tests");
-            Git("checkout", "-q", "-b", "main");
-
-            var options = new SnitchOptions { ApplicationName = "vmcptests" };
-            var workspace = FakeWorkspace.Create(("C.cs", "internal class C { }"));
-            Workspace = workspace;
-            Service = new GitService(options, workspace);
-        }
-
-        public FakeWorkspace Workspace { get; }
-
-        public void Write(string name, string content) => File.WriteAllText(Path.Combine(Directory, name), content);
-
-        public string Commit(string message)
-        {
-            Git("add", "-A");
-            Git("commit", "-q", "--allow-empty", "-m", message);
-            var output = Capture("rev-parse", "HEAD");
-            return output.Trim();
-        }
-
-        public string Capture(params string[] args) => Run(args).stdout;
-
-        private void Git(params string[] args)
-        {
-            var (exitCode, stdout, stderr) = Run(args);
-            if (exitCode != 0)
-                throw new Xunit.Sdk.XunitException($"git {string.Join(' ', args)} failed ({exitCode}): {stderr}{stdout}");
-        }
-
-        private (int exitCode, string stdout, string stderr) Run(string[] args)
-        {
-            var startInfo = new ProcessStartInfo("git")
-            {
-                WorkingDirectory = Directory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-
-            foreach (var argument in args) startInfo.ArgumentList.Add(argument);
-
-            using var process = Process.Start(startInfo)!;
-            var stdout = process.StandardOutput.ReadToEnd();
-            var stderr = process.StandardError.ReadToEnd();
-            process.WaitForExit();
-            return (process.ExitCode, stdout, stderr);
-        }
-
-        public void Dispose()
-        {
-            Workspace.Dispose();
-            // git marks its objects read-only on Windows, so a plain recursive delete can fail; the
-            // temp folder is disposable either way.
-            try { System.IO.Directory.Delete(Directory, recursive: true); }
-            catch (Exception) { /* best effort */ }
-        }
-    }
 
     [Fact]
     public async Task GitSquash_FoldsTheLastCommitsIntoOne()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
         repo.Write("a.txt", "2");
@@ -106,7 +32,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitSquash_RefusesADirtyWorkingTree()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
         repo.Write("a.txt", "2");
@@ -120,7 +46,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitAmend_RewordsTheLastCommitAndKeepsItsContent()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "content");
         repo.Commit("typo in mesage");
 
@@ -135,7 +61,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitBranch_CreatesRenamesListsAndDeletes()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
 
@@ -162,7 +88,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitMerge_FastForwardsAndReportsTheResult()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
 
@@ -183,7 +109,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitReset_HardRequiresConfirm()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
         repo.Write("a.txt", "2");
@@ -202,7 +128,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitStash_PushesAndPopsTheWorkingTree()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "committed");
         repo.Commit("first");
         repo.Write("a.txt", "work in progress");
@@ -219,7 +145,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitTag_CreatesListsAndDeletes()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
 
@@ -237,7 +163,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitShowAndRun_ReturnTheInspectionData()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
 
@@ -252,7 +178,7 @@ public sealed class GitServiceTests
     [Fact]
     public async Task GitSync_ForceNeedsConfirmation()
     {
-        using var repo = new Repo();
+        using var repo = new TestGitRepo();
         repo.Write("a.txt", "1");
         repo.Commit("first");
 

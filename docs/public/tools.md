@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **346 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **355 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -413,11 +413,13 @@ Everything else changes the repository; the destructive cases require `confirm=t
 | `git_squash` | Fold the last N commits into one (refused on a dirty tree) |
 | `git_amend` | Reword the last commit, keeping its tree |
 | `git_merge` | Merge with default/no-ff/ff-only/squash, or abort; reports conflicts |
-| `git_rebase` | Start, continue, abort or skip a rebase |
+| `git_conflicts` | The conflict model: `list` the conflicted files with their hunks (ours/theirs/base labels, line counts, previews), `show` one file's three sides and diff3 text, `resolve` with `ours`/`theirs`/`both`/`base`/`custom` for one hunk (`blockIndex`) or the whole file, staging it once no marker remains |
+| `git_rebase` | Start, continue, abort or skip a rebase; `action=plan` is the interactive rebase as data — a JSON todo list of `pick`/`reword`/`squash`/`fixup`/`drop` steps with messages, applied through `GIT_SEQUENCE_EDITOR`, no editor opened |
 | `git_cherry_pick` | Copy commits onto the current branch, or continue/abort/skip |
 | `git_revert` | Undo commits with new commits |
 | `git_reset` | soft/mixed/hard; hard requires `confirm=true` |
 | `git_stash` | push, list, pop, apply, drop, show, clear |
+| `git_patch` | Named shelves on disk: `create` (working, staged or a revision/range), `list`, `show`, `apply` (with `--check`, `--3way` or `reverse=true`), `delete` (with `confirm=true`) |
 | `git_tag` | List, create (annotated when messaged) or delete tags |
 | `git_remote` | List, add, remove or change remotes |
 | `git_show` | One commit in full, plus one file's diff |
@@ -426,6 +428,7 @@ Everything else changes the repository; the destructive cases require `confirm=t
 | `git_worktree` | List, add (on a branch, optionally new), remove or prune linked working trees |
 | `git_bisect` | Start, mark good/bad, skip, log, view or reset a binary search; reports when it finds the first bad commit |
 | `git_submodule` | status (structured), update, init, sync or deinit |
+| `git_host` | GitLab, Azure DevOps and Bitbucket Cloud: `detect` the provider/host/project/repository from the remote, `list-prs`, `view-pr`, `create-pr`, `comment-pr`, `merge-pr`, `list-issues`, `create-issue`, `pipelines` (`confirm=true` for the writes; credentials from `GITLAB_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `BITBUCKET_*`) |
 | `git_run` | Escape hatch: any git command, verbatim, with exit code and output |
 
 ## GitHub
@@ -436,12 +439,19 @@ the other actions change GitHub, and merges/deletes require `confirm=true`.
 | Tool | What it does |
 |---|---|
 | `gh_repo` | list, view, create, fork, clone, edit, delete |
-| `gh_pr` | list, view, create, merge, close, reopen, comment, diff, checkout, ready |
+| `gh_pr` | list, view, create, merge, close, reopen, comment, `review` (a review with line-anchored comments: `comments` as `[{path,line,side,body}]`, event comment/approve/request-changes), `review-comments`, `checks`, diff, checkout, ready |
 | `gh_issue` | list, view, create, close, reopen, comment |
 | `gh_release` | list, view, create, upload assets, delete |
 | `gh_actions` | Runs list/view/logs, rerun, cancel, workflows, dispatch |
 | `gh_secret` | list, set, delete repository Actions secrets |
+| `gh_branch_protection` | Read-only inspection of branch protection: `get` (protected, required checks/reviews, enforce-admins, restrictions), `checks` (strict mode and the contexts), `rules` (repository rulesets that apply) |
 | `github` | Escape hatch: any `gh` command, verbatim |
+
+## Collaboration
+
+| Tool | What it does |
+|---|---|
+| `code_review` | The review brief for a diff: changed files by kind (source/test/ui/docs/config), additions/deletions, a risk checklist (deleted test, source without test, 400+ line files, new TODO/FIXME markers with their line), the worst methods of each changed C# file, and — with `includeInspections=true` — the inspection findings inside the changed files |
 
 ## Docker
 

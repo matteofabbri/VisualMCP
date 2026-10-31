@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Snitch.Execution;
 using Snitch.Workspace;
 
@@ -14,11 +15,14 @@ public interface IGitHubService
 {
     Task<object> RunAsync(string args, string? workingDirectory, int timeoutSeconds);
     Task<object> RepoAsync(string action, string? name, string? description, string? visibility, bool confirm, string? repo, string? directory, bool push);
-    Task<object> PullRequestAsync(string action, int? number, string? title, string? body, string? baseBranch, string? headBranch, string? mergeMethod, bool deleteBranch, bool confirm, string? repo);
+    Task<object> PullRequestAsync(string action, int? number, string? title, string? body, string? baseBranch, string? headBranch, string? mergeMethod, bool deleteBranch, bool confirm, string? repo, string? commentsJson = null, string? reviewEvent = null);
     Task<object> IssueAsync(string action, int? number, string? title, string? body, string? labels, bool confirm, string? repo);
     Task<object> ReleaseAsync(string action, string? tag, string? title, string? notes, string? asset, bool draft, bool prerelease, bool confirm, string? repo);
     Task<object> ActionsAsync(string action, string? runId, string? workflow, string? branch, bool failedOnly, bool confirm, string? repo);
     Task<object> SecretsAsync(string action, string? name, string? value, bool confirm, string? repo);
+
+    /// <summary>Branch protection as GitHub reports it: rules, required status checks, rulesets.</summary>
+    Task<object> BranchProtectionAsync(string action, string? branch, string? repo);
 }
 
 public sealed class GitHubService : IGitHubService
@@ -99,7 +103,8 @@ public sealed class GitHubService : IGitHubService
 
     // ── pull requests ────────────────────────────────────────────────────────
     public async Task<object> PullRequestAsync(string action, int? number, string? title, string? body,
-        string? baseBranch, string? headBranch, string? mergeMethod, bool deleteBranch, bool confirm, string? repo)
+        string? baseBranch, string? headBranch, string? mergeMethod, bool deleteBranch, bool confirm, string? repo,
+        string? commentsJson = null, string? reviewEvent = null)
     {
         var verb = (action ?? "list").Trim().ToLowerInvariant();
         var target = Target(repo);
@@ -154,6 +159,36 @@ public sealed class GitHubService : IGitHubService
                 if (string.IsNullOrWhiteSpace(body)) return new { error = "A comment body is required." };
                 return await ExecuteAsync($"pr comment {number} --body {Q(body!)}{target}", null, 120, json: false);
 
+            case "review":
+            {
+                if (number is null) return new { error = "A pull request number is required." };
+                if (!confirm) return new { error = "Posting a review is visible to others. Pass confirm=true to proceed.", number };
+
+                var (payload, payloadError) = BuildReviewPayload(body, reviewEvent, commentsJson);
+                if (payloadError is not null) return new { error = payloadError };
+
+                var file = Path.Combine(Path.GetTempPath(), $"vmcp-review-{Guid.NewGuid():N}.json");
+                await File.WriteAllTextAsync(file, payload);
+                try
+                {
+                    return await ExecuteAsync(
+                        $"api -X POST \"repos/{RepoPath(repo)}/pulls/{number}/reviews\" --input \"{file}\"",
+                        null, 120, json: true);
+                }
+                finally { try { File.Delete(file); } catch { /* best effort */ } }
+            }
+
+            case "review-comments":
+                if (number is null) return new { error = "A pull request number is required." };
+                return await ExecuteAsync(
+                    $"api \"repos/{RepoPath(repo)}/pulls/{number}/comments?per_page=100\"", null, 90, json: true);
+
+            case "checks":
+                if (number is null) return new { error = "A pull request number is required." };
+                // gh exits non-zero when a check failed; the JSON is still the answer.
+                return await ExecuteAsync($"pr checks {number}{target} --json name,state,bucket,link,description,event",
+                    null, 120, json: true);
+
             case "diff":
                 if (number is null) return new { error = "A pull request number is required." };
                 return await ExecuteAsync($"pr diff {number}{target}", null, 120, json: false);
@@ -167,8 +202,183 @@ public sealed class GitHubService : IGitHubService
                 return await ExecuteAsync($"pr ready {number}{target}", null, 120, json: false);
 
             default:
-                return new { error = $"Unknown action '{action}'. Use list, view, create, merge, close, reopen, comment, diff, checkout or ready." };
+                return new { error = $"Unknown action '{action}'. Use list, view, create, merge, close, reopen, comment, review, review-comments, checks, diff, checkout or ready." };
         }
+    }
+
+    /// <summary>
+    /// The review payload GitHub's create-review endpoint takes: an event, an optional body and
+    /// zero or more comments, each anchored to a line (or an offset) of the diff. Validated here so a
+    /// malformed comment is a message, not a 422 from the API.
+    /// </summary>
+    public static (string Payload, string? Error) BuildReviewPayload(string? body, string? reviewEvent, string? commentsJson)
+    {
+        var reviewEventName = (reviewEvent ?? "comment").Trim().ToLowerInvariant() switch
+        {
+            "" or "comment" => "COMMENT",
+            "approve" => "APPROVE",
+            "request-changes" or "request_changes" or "requestchanges" => "REQUEST_CHANGES",
+            _ => null,
+        };
+
+        if (reviewEventName is null)
+            return ("", "reviewEvent must be comment, approve or request-changes.");
+
+        var comments = new JsonArray();
+        if (!string.IsNullOrWhiteSpace(commentsJson))
+        {
+            JsonDocument document;
+            try { document = JsonDocument.Parse(commentsJson!); }
+            catch (JsonException ex) { return ("", $"comments is not valid JSON: {ex.Message}"); }
+
+            using (document)
+            {
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    return ("", "comments must be a JSON array: [{ \"path\": \"src/A.cs\", \"line\": 42, \"side\": \"RIGHT\", \"body\": \"…\" }].");
+
+                var index = 0;
+                foreach (var item in document.RootElement.EnumerateArray())
+                {
+                    index++;
+                    if (item.ValueKind != JsonValueKind.Object)
+                        return ("", $"comment {index} is not an object.");
+
+                    var path = StringProperty(item, "path");
+                    var text = StringProperty(item, "body");
+                    var line = IntProperty(item, "line");
+                    var position = IntProperty(item, "position");
+                    var side = (StringProperty(item, "side") ?? "RIGHT").ToUpperInvariant();
+
+                    if (string.IsNullOrWhiteSpace(path)) return ("", $"comment {index} needs 'path'.");
+                    if (string.IsNullOrWhiteSpace(text)) return ("", $"comment {index} needs 'body'.");
+                    if (line is null && position is null)
+                        return ("", $"comment {index} needs 'line' (a line number in the diff) or 'position' (an offset into the diff).");
+                    if (side is not ("RIGHT" or "LEFT"))
+                        return ("", $"comment {index}: 'side' must be RIGHT (the new file) or LEFT (the old one).");
+
+                    var comment = new JsonObject
+                    {
+                        ["path"] = path,
+                        ["body"] = text,
+                        ["side"] = side,
+                    };
+                    if (line is { } l) comment["line"] = l;
+                    if (position is { } p) comment["position"] = p;
+                    comments.Add(comment);
+                }
+            }
+        }
+
+        if (comments.Count == 0 && string.IsNullOrWhiteSpace(body))
+            return ("", "A review needs a body or at least one line comment.");
+
+        var root = new JsonObject
+        {
+            ["body"] = body ?? string.Empty,
+            ["event"] = reviewEventName,
+            ["comments"] = comments,
+        };
+
+        return (root.ToJsonString(), null);
+    }
+
+    // ── branch protection ────────────────────────────────────────────────────
+    public async Task<object> BranchProtectionAsync(string action, string? branch, string? repo)
+    {
+        var verb = (action ?? "get").Trim().ToLowerInvariant();
+        if (verb is not ("get" or "checks" or "rules"))
+            return new { error = $"Unknown action '{action}'. Use get, checks or rules." };
+
+        var target = RepoPath(repo);
+        var resolved = branch;
+
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            var info = await ApiAsync($"repos/{target}", 60);
+            if (info.ExitCode != 0) return ApiFailure(info, "the repository");
+            resolved = info.Data is { } data && data.TryGetProperty("default_branch", out var name) && name.ValueKind == JsonValueKind.String
+                ? name.GetString()
+                : null;
+            if (string.IsNullOrWhiteSpace(resolved))
+                return new { error = "Could not read the default branch of the repository: pass branch." };
+        }
+
+        var encoded = Uri.EscapeDataString(resolved!);
+
+        if (verb == "rules")
+        {
+            var rules = await ApiAsync($"repos/{target}/rules/branches/{encoded}", 60);
+            if (rules.ExitCode != 0) return ApiFailure(rules, $"the rules for branch '{resolved}'");
+
+            var count = rules.Data is { ValueKind: JsonValueKind.Array } array ? array.GetArrayLength() : 0;
+            return new
+            {
+                branch = resolved,
+                rulesetCount = count,
+                rules = rules.Data,
+                note = count == 0 ? "No repository ruleset applies to this branch." : null,
+            };
+        }
+
+        var branchInfo = await ApiAsync($"repos/{target}/branches/{encoded}", 60);
+        if (branchInfo.ExitCode != 0) return ApiFailure(branchInfo, $"branch '{resolved}'");
+
+        var isProtected = branchInfo.Data is { } infoData &&
+                          infoData.TryGetProperty("protected", out var flag) &&
+                          flag.ValueKind == JsonValueKind.True;
+
+        if (verb == "checks")
+        {
+            var checks = await ApiAsync($"repos/{target}/branches/{encoded}/protection/required_status_checks", 60);
+            if (checks.ExitCode != 0)
+                return new
+                {
+                    branch = resolved,
+                    protectedBranch = isProtected,
+                    configured = false,
+                    error = ApiFailure(checks, "the required status checks"),
+                    hint = isProtected ? "Reading the protection rules needs a token with admin access to the repository." : "The branch is not protected.",
+                };
+
+            return new
+            {
+                branch = resolved,
+                protectedBranch = isProtected,
+                configured = true,
+                strict = checks.Data is { } d && d.TryGetProperty("strict", out var strict) && strict.ValueKind == JsonValueKind.True,
+                contexts = ArrayOfStrings(checks.Data, "contexts"),
+                checks = checks.Data is { } detail && detail.TryGetProperty("checks", out var checkArray) ? checkArray : (JsonElement?)null,
+                data = checks.Data,
+            };
+        }
+
+        if (!isProtected)
+            return new
+            {
+                branch = resolved,
+                @protected = false,
+                note = "This branch has no branch protection rules; action=rules shows repository rulesets that may still apply.",
+            };
+
+        var protection = await ApiAsync($"repos/{target}/branches/{encoded}/protection", 60);
+        return protection.ExitCode == 0
+            ? new
+            {
+                branch = resolved,
+                @protected = true,
+                requiredStatusChecks = protection.Data is { } p && p.TryGetProperty("required_status_checks", out var rsc) ? rsc : (JsonElement?)null,
+                pullRequestReviews = protection.Data is { } p2 && p2.TryGetProperty("required_pull_request_reviews", out var rpr) ? rpr : (JsonElement?)null,
+                enforceAdmins = protection.Data is { } p3 && p3.TryGetProperty("enforce_admins", out var ea) ? ea : (JsonElement?)null,
+                restrictions = protection.Data is { } p4 && p4.TryGetProperty("restrictions", out var re) ? re : (JsonElement?)null,
+                data = protection.Data,
+            }
+            : new
+            {
+                branch = resolved,
+                @protected = true,
+                error = ApiFailure(protection, "the protection rules"),
+                hint = "GitHub returns the protection detail only to a token with admin access to the repository.",
+            };
     }
 
     // ── issues ───────────────────────────────────────────────────────────────
@@ -353,11 +563,7 @@ public sealed class GitHubService : IGitHubService
             if (!Directory.Exists(workingDirectory)) return new { error = $"Working directory not found: {workingDirectory}" };
             dir = Path.GetFullPath(workingDirectory);
         }
-        else
-        {
-            var solutionPath = _workspace.LoadedSolutionPath;
-            dir = solutionPath is not null ? Path.GetDirectoryName(solutionPath)! : Directory.GetCurrentDirectory();
-        }
+        else dir = WorkingDirectory();
 
         var (exitCode, timedOut, stdout, stderr, elapsed) = await ProcessRunner.RunAsync("gh", args, dir, timeoutSeconds);
 
@@ -383,12 +589,70 @@ public sealed class GitHubService : IGitHubService
             elapsedMs = (int)elapsed.TotalMilliseconds,
             data,
             stdout = ProcessRunner.Truncate(stdout, 24_000),
-            stderr = ProcessRunner.Truncate(stderr, 8000),
+            stderr = ProcessRunner.Truncate(stderr, 8_000),
             note = exitCode != 0 && (stderr + stdout).Contains("not found", StringComparison.OrdinalIgnoreCase)
                 ? "If gh is not installed or not authenticated, run 'gh auth login' once in a terminal."
                 : null,
         };
     }
+
+    private string WorkingDirectory()
+    {
+        var solutionPath = _workspace.LoadedSolutionPath;
+        return solutionPath is not null ? Path.GetDirectoryName(solutionPath)! : Directory.GetCurrentDirectory();
+    }
+
+    /// <summary>`gh api` against one endpoint, parsed; the exit code and stderr stay available so a 403/404 can be told apart.</summary>
+    private async Task<(int ExitCode, JsonElement? Data, string Stdout, string Stderr)> ApiAsync(string endpoint, int timeoutSeconds)
+    {
+        var (exitCode, timedOut, stdout, stderr, _) =
+            await ProcessRunner.RunAsync("gh", $"api \"{endpoint}\"", WorkingDirectory(), timeoutSeconds);
+
+        if (timedOut) return (-1, null, stdout, $"gh api timed out after {timeoutSeconds}s.");
+
+        JsonElement? data = null;
+        if (exitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(stdout);
+                data = document.RootElement.Clone();
+            }
+            catch (JsonException) { /* not JSON */ }
+        }
+
+        return (exitCode, data, stdout, stderr);
+    }
+
+    private static object ApiFailure((int ExitCode, JsonElement? Data, string Stdout, string Stderr) response, string what)
+    {
+        var detail = string.IsNullOrWhiteSpace(response.Stderr) ? response.Stdout.Trim() : response.Stderr.Trim();
+        return new
+        {
+            error = $"gh api could not read {what}: {ProcessRunner.Truncate(detail, 2000)}",
+            hint = response.Stderr.Contains("403", StringComparison.Ordinal)
+                ? "The branch protection detail needs a token with admin access to the repository."
+                : response.Stderr.Contains("404", StringComparison.Ordinal) ? "Check the branch name and the repository." : null,
+        };
+    }
+
+    private static string? StringProperty(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static int? IntProperty(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)
+            ? number
+            : value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed) ? parsed : null;
+
+    private static List<string> ArrayOfStrings(JsonElement? element, string name)
+    {
+        if (element is not { ValueKind: JsonValueKind.Object } data) return [];
+        if (!data.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array) return [];
+        return array.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!).ToList();
+    }
+
+    /// <summary>`owner/name` when the caller named a repository; gh's own `{owner}/{repo}` placeholders otherwise.</summary>
+    private static string RepoPath(string? repo) => string.IsNullOrWhiteSpace(repo) ? "{owner}/{repo}" : repo!;
 
     /// <summary>`--repo owner/name` when the caller named a repository; empty otherwise.</summary>
     private static string Target(string? repo) =>

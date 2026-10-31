@@ -202,7 +202,20 @@ static async Task RunServerAsync(string[] args)
         "whose outcome changes between runs -> find_flaky_tests.\n" +
         "- Add/remove projects to/from the solution (.sln/.slnx) -> add_projects_to_solution / remove_projects_from_solution.\n" +
         "- Modernize the solution: add Aspire (status, install the templates if missing, scaffold AppHost + ServiceDefaults, wire and verify) -> aspire; move the projects to a newer target framework with a build gate and rollback -> update_framework; upgrade every outdated NuGet package (Central Package Management aware), optionally with the framework bump, in one gated pass -> update_solution. Prefer update_solution over one update_nuget_package call per package when modernising a whole solution.\n" +
-        "- Git: inspect state -> git_status / git_log / git_diff; stage -> git_stage; commit -> git_commit; new branch -> git_create_branch. (No push/force — use run_command for those.)\n" +
+        "- Version control (prefer these to shell git): inspect -> git_status / git_log / git_diff; stage and commit -> " +
+        "git_stage / git_commit; branches -> git_branch; integrate -> git_merge / git_rebase / git_cherry_pick; push with " +
+        "force=false -> git_sync. Conflicts are data, not text to edit: git_conflicts lists the hunks with ours/theirs/base " +
+        "and resolve (ours|theirs|both|base|custom, per hunk with blockIndex) stages the file — never hand-edit '<<<<<<<' " +
+        "blocks. An interactive rebase is a plan, not an editor: git_rebase action=plan with a JSON todo list of " +
+        "pick/reword/squash/fixup/drop steps and their messages. Park work as a NAMED shelf on disk -> git_patch " +
+        "(create/list/show/apply with --check/--3way/reverse/delete); git_stash stays the anonymous in-repo variant.\n" +
+        "- Hosting services: GitHub -> gh_* (gh_pr covers list/view/create/merge/comment, plus REVIEW with line-anchored " +
+        "comments via comments=[{path,line,side,body}] and reviewEvent, review-comments, checks; gh_branch_protection " +
+        "inspects protection, required checks and rulesets). GitLab, Azure DevOps and Bitbucket Cloud -> git_host (PRs, " +
+        "comments, merges, issues/work items, pipelines; provider/host/project/repository parsed from the remote; " +
+        "credentials from GITLAB_TOKEN / AZURE_DEVOPS_EXT_PAT / BITBUCKET_*). Before reviewing a change -> code_review " +
+        "gives the brief (changed files by kind, risk signals, new TODOs with lines, worst methods, optional inspection " +
+        "findings); it does not run tests (run_affected_tests) and does not post (gh_pr action=review).\n" +
         "- Check if the solution/project compiles and get structured errors/warnings -> build_project " +
         "(runs 'dotnet build', works even while the app is running).\n" +
         "- Extract errors from a native/C++ or MSBuild log file (handles UTF-16) -> extract_build_log_errors.\n" +

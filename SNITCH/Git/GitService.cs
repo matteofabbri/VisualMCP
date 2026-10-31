@@ -1,3 +1,4 @@
+using System.Text;
 using Snitch.Execution;
 using Snitch.Workspace;
 
@@ -33,10 +34,16 @@ public interface IGitService
 
     // integration
     Task<object> MergeAsync(string branch, string strategy, string? message, bool abort, string? repoPath);
-    Task<object> RebaseAsync(string? onto, string action, string? repoPath);
+    Task<object> RebaseAsync(string? onto, string action, string plan, string? repoPath);
     Task<object> CherryPickAsync(string[] commits, string action, string? repoPath);
     Task<object> RevertAsync(string[] commits, string? repoPath);
     Task<object> ResetAsync(string target, string mode, bool confirm, string? repoPath);
+
+    // conflicts: a merge editor as data
+    Task<object> ConflictsAsync(string action, string? path, string strategy, int? hunkIndex, string? content, bool stage, string? repoPath);
+
+    // patches: named shelves on disk
+    Task<object> PatchAsync(string action, string? name, string? target, string? path, bool reverse, bool check, bool confirm, string? directory, string? repoPath);
 
     // stash, tags, remotes
     Task<object> StashAsync(string action, string? message, string? name, string? repoPath);
@@ -594,7 +601,7 @@ public sealed class GitService : IGitService
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 120);
         if (timedOut) return new { error = "git merge timed out." };
 
-        var conflicts = await ConflictsAsync(repoDir!);
+        var conflicts = await UnmergedPathsAsync(repoDir!);
         var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 4000);
 
         if (exitCode != 0)
@@ -622,12 +629,14 @@ public sealed class GitService : IGitService
         };
     }
 
-    public async Task<object> RebaseAsync(string? onto, string action, string? repoPath)
+    public async Task<object> RebaseAsync(string? onto, string action, string plan, string? repoPath)
     {
         var (repoDir, error) = await ResolveAsync(repoPath);
         if (error is not null) return error;
 
         var verb = (action ?? "start").Trim().ToLowerInvariant();
+        if (verb == "plan") return await RebasePlanAsync(repoDir!, onto, plan);
+
         var args = verb switch
         {
             "start" => string.IsNullOrWhiteSpace(onto) ? null : $"rebase {Q(onto!)}",
@@ -642,13 +651,19 @@ public sealed class GitService : IGitService
             {
                 error = verb == "start"
                     ? "A revision to rebase onto is required."
-                    : $"Unknown action '{action}'. Use start, continue, abort or skip.",
+                    : $"Unknown action '{action}'. Use start, continue, abort, skip or plan.",
             };
 
-        var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 180);
+        // An in-progress rebase reopens the commit message editor on continue/skip; without a
+        // definitive editor the child would wait on a terminal that is not there.
+        var env = verb is "continue" or "skip"
+            ? new Dictionary<string, string> { ["GIT_EDITOR"] = "true" }
+            : null;
+
+        var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 180, env);
         if (timedOut) return new { error = "git rebase timed out (resolve conflicts, then action=continue)." };
 
-        var conflicts = await ConflictsAsync(repoDir!);
+        var conflicts = await UnmergedPathsAsync(repoDir!);
         var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 4000);
 
         if (exitCode != 0)
@@ -659,13 +674,159 @@ public sealed class GitService : IGitService
                 command = $"git {args}",
                 conflicts,
                 error = conflicts.Count > 0
-                    ? $"Rebase stopped with {conflicts.Count} conflict(s). Resolve them and call action=continue, or action=abort."
+                    ? $"Rebase stopped with {conflicts.Count} conflict(s). Resolve them with git_conflicts, then call action=continue; or action=abort."
                     : $"git {args} failed: {stderr.Trim()}",
                 output,
             };
 
         var (_, _, branch, _, _) = await GitCli.RunAsync(repoDir!, "rev-parse --abbrev-ref HEAD", 20);
         return new { rebased = true, action = verb, onto, branch = branch.Trim(), command = $"git {args}", output };
+    }
+
+    /// <summary>
+    /// A non-interactive <c>rebase -i</c>: the todo list is written by this call and handed to git
+    /// through GIT_SEQUENCE_EDITOR, so the order and the action of every commit are explicit data
+    /// rather than an editor session. No editor is ever opened.
+    /// </summary>
+    private async Task<object> RebasePlanAsync(string repoDir, string? onto, string plan)
+    {
+        if (string.IsNullOrWhiteSpace(onto))
+            return new { error = "A base revision is required for a plan: the commit BEFORE the first one in the plan (e.g. HEAD~4 or main)." };
+        if (LooksLikeFlag(onto)) return new { error = $"'{onto}' is not a revision." };
+        if (string.IsNullOrWhiteSpace(plan)) return new { error = "A plan is required: [{ \"commit\": \"abc123\", \"action\": \"pick\" }, …]." };
+
+        List<RebaseStep>? steps;
+        try
+        {
+            steps = System.Text.Json.JsonSerializer.Deserialize<List<RebaseStep>>(plan,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return new { error = $"The plan is not valid JSON: {ex.Message}", expected = "[{ \"commit\": \"hash\", \"action\": \"pick|reword|squash|fixup|drop\", \"message\": \"…\" }]" };
+        }
+
+        if (steps is not { Count: > 0 })
+            return new { error = "The plan is empty: give at least one step." };
+
+        var todo = new System.Text.StringBuilder();
+        var tempFiles = new List<string>();
+
+        try
+        {
+            for (var i = 0; i < steps.Count; i++)
+            {
+                var step = steps[i];
+                var sha = step.Commit?.Trim();
+                if (string.IsNullOrWhiteSpace(sha) || LooksLikeFlag(sha))
+                    return new { error = $"Step {i + 1}: 'commit' must be a hash or revision.", step = i + 1 };
+
+                var verb = (step.Action ?? "pick").Trim().ToLowerInvariant();
+                switch (verb)
+                {
+                    case "pick":
+                        todo.AppendLine($"pick {sha}");
+                        break;
+
+                    case "drop":
+                        todo.AppendLine($"drop {sha}");
+                        break;
+
+                    case "reword":
+                        if (string.IsNullOrWhiteSpace(step.Message))
+                            return new { error = $"Step {i + 1}: reword needs a message.", step = i + 1, action = verb };
+                        todo.AppendLine($"pick {sha}");
+                        todo.AppendLine(ExecCommitMessage(repoDir, step.Message!, tempFiles));
+                        break;
+
+                    case "squash":
+                    case "fixup":
+                        // Deterministic fold: no editor. The previous commit's message survives
+                        // unless this step carries its own.
+                        todo.AppendLine($"fixup {sha}");
+                        if (!string.IsNullOrWhiteSpace(step.Message))
+                            todo.AppendLine(ExecCommitMessage(repoDir, step.Message!, tempFiles));
+                        break;
+
+                    default:
+                        return new { error = $"Step {i + 1}: unknown action '{step.Action}'. Use pick, reword, squash, fixup or drop.", step = i + 1 };
+                }
+            }
+
+            var todoFile = Path.Combine(Path.GetTempPath(), $"{_options.TempFilePrefix}-todo-{Guid.NewGuid():N}.txt");
+            tempFiles.Add(todoFile);
+            await File.WriteAllTextAsync(todoFile, todo.ToString());
+
+            // git runs "$GIT_SEQUENCE_EDITOR <todoPath>" through sh, so a plain `cp` copies our
+            // prepared list over the one git generated — on Windows, macOS and Linux alike.
+            var forward = Path.GetFullPath(todoFile).Replace('\\', '/');
+            var environment = new Dictionary<string, string>
+            {
+                ["GIT_SEQUENCE_EDITOR"] = $"cp \"{forward}\"",
+                ["GIT_EDITOR"] = "true",
+            };
+
+            var args = $"rebase -i {Q(onto)}";
+            var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir, args, 240, environment);
+            if (timedOut) return new { error = "git rebase -i timed out (resolve conflicts, then action=continue)." };
+
+            var conflicts = await UnmergedPathsAsync(repoDir);
+            var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 4000);
+
+            if (exitCode != 0)
+                return new
+                {
+                    rebased = false,
+                    action = "plan",
+                    command = $"git {args}",
+                    plan = steps.Select((s, i) => new { step = i + 1, commit = s.Commit, action = s.Action }).ToList(),
+                    conflicts,
+                    error = conflicts.Count > 0
+                        ? $"The plan stopped with {conflicts.Count} conflict(s). Resolve them with git_conflicts, then call action=continue; or action=abort."
+                        : $"git rebase -i failed: {stderr.Trim()}",
+                    output,
+                };
+
+            var (_, _, branch, _, _) = await GitCli.RunAsync(repoDir, "rev-parse --abbrev-ref HEAD", 20);
+            var (_, _, head, _, _) = await GitCli.RunAsync(repoDir, "rev-parse --short HEAD", 20);
+            var (_, _, subjects, _, _) = await GitCli.RunAsync(repoDir, "log -n 15 --pretty=%h %s", 20);
+
+            return new
+            {
+                rebased = true,
+                action = "plan",
+                onto,
+                branch = branch.Trim(),
+                head = head.Trim(),
+                steps = steps.Count,
+                dropped = steps.Count(s => string.Equals(s.Action, "drop", StringComparison.OrdinalIgnoreCase)),
+                command = $"git {args}",
+                history = subjects.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToList(),
+                output,
+            };
+        }
+        finally
+        {
+            foreach (var file in tempFiles) { try { File.Delete(file); } catch { /* best effort */ } }
+        }
+    }
+
+    /// <summary>`exec git commit --amend -F "…"` for one prepared message file.</summary>
+    private string ExecCommitMessage(string repoDir, string message, List<string> tempFiles)
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"{_options.TempFilePrefix}-msg-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(file, message);
+        tempFiles.Add(file);
+        var forward = Path.GetFullPath(file).Replace('\\', '/');
+        return $"exec git commit --amend -F \"{forward}\"";
+    }
+
+    /// <summary>One step of a rebase plan; the JSON shape of <c>git_rebase</c> action=plan.</summary>
+    public sealed class RebaseStep
+    {
+        public string? Commit { get; set; }
+        public string? Action { get; set; }
+        public string? Message { get; set; }
     }
 
     public async Task<object> CherryPickAsync(string[] commits, string action, string? repoPath)
@@ -687,7 +848,7 @@ public sealed class GitService : IGitService
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 180);
         if (timedOut) return new { error = "git cherry-pick timed out." };
 
-        var conflicts = await ConflictsAsync(repoDir!);
+        var conflicts = await UnmergedPathsAsync(repoDir!);
         var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 4000);
 
         if (exitCode != 0)
@@ -717,7 +878,7 @@ public sealed class GitService : IGitService
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 180);
         if (timedOut) return new { error = "git revert timed out." };
 
-        var conflicts = await ConflictsAsync(repoDir!);
+        var conflicts = await UnmergedPathsAsync(repoDir!);
         var output = ProcessRunner.Truncate((stdout + stderr).Trim(), 4000);
 
         if (exitCode != 0)
@@ -1146,8 +1307,475 @@ public sealed class GitService : IGitService
         return exitCode == 0 && int.TryParse(stdout.Trim(), out var count) ? count : 0;
     }
 
+    // ── conflicts ────────────────────────────────────────────────────────────
+    public async Task<object> ConflictsAsync(string action, string? path, string strategy, int? hunkIndex,
+        string? content, bool stage, string? repoPath)
+    {
+        var verb = (action ?? "list").Trim().ToLowerInvariant();
+        var (repoDir, error) = await ResolveAsync(repoPath);
+        if (error is not null) return error;
+
+        if (verb == "list")
+        {
+            var files = new List<object>();
+            foreach (var relative in await UnmergedFileListAsync(repoDir!))
+                files.Add(Summarize(await ParseConflictFileAsync(repoDir!, relative)));
+
+            return new
+            {
+                repoDir,
+                operation = await OperationInProgressAsync(repoDir!),
+                conflictCount = files.Count,
+                files,
+                note = files.Count == 0
+                    ? "No conflicted files: there is no merge, rebase, cherry-pick or revert waiting for a resolution."
+                    : "Resolve a whole file or one hunk with action=resolve, then commit (merge) or action=continue (rebase/cherry-pick).",
+            };
+        }
+
+        if (verb == "show")
+        {
+            if (string.IsNullOrWhiteSpace(path)) return new { error = "A file path is required for show." };
+            var (full, relative, pathError) = ResolveInsideRepo(repoDir!, path!);
+            if (pathError is not null) return pathError;
+            if (!File.Exists(full)) return new { error = $"File not found in the working tree: {relative}" };
+
+            var parsed = await ParseConflictFileAsync(repoDir!, relative);
+            return new
+            {
+                repoDir,
+                path = relative,
+                parsed.Binary,
+                parsed.TooLarge,
+                parsed.LineCount,
+                conflictCount = parsed.Hunks.Count,
+                hunks = parsed.Hunks.Select(hunk => new
+                {
+                    index = hunk.Index,
+                    startLine = hunk.StartLine,
+                    endLine = hunk.EndLine,
+                    oursLabel = hunk.OursLabel,
+                    baseLabel = hunk.BaseLabel,
+                    theirsLabel = hunk.TheirsLabel,
+                    oursLineCount = hunk.OursLineCount,
+                    baseLineCount = hunk.BaseLineCount,
+                    theirsLineCount = hunk.TheirsLineCount,
+                    ours = ProcessRunner.Truncate(string.Join("\n", hunk.Ours), 6000),
+                    baseText = ProcessRunner.Truncate(string.Join("\n", hunk.Base), 6000),
+                    theirs = ProcessRunner.Truncate(string.Join("\n", hunk.Theirs), 6000),
+                    text = ProcessRunner.Truncate(ConflictModel.Render(hunk), 12_000),
+                }).ToList(),
+            };
+        }
+
+        if (verb != "resolve")
+            return new { error = $"Unknown action '{action}'. Use list, show or resolve." };
+
+        if (string.IsNullOrWhiteSpace(path)) return new { error = "A file path is required for resolve." };
+
+        var (targetFile, targetRelative, resolveError) = ResolveInsideRepo(repoDir!, path!);
+        if (resolveError is not null) return resolveError;
+        if (!File.Exists(targetFile)) return new { error = $"File not found in the working tree: {targetRelative}" };
+
+        var (text, encoding) = await ReadTextPreservingBomAsync(targetFile);
+        var (hunks, _, _) = ConflictModel.Parse(text);
+        if (hunks.Count == 0)
+            return new
+            {
+                error = "No conflict markers in this file: it is already resolved. " +
+                        "If git still lists it as unmerged, stage it with git_stage.",
+                path = targetRelative,
+            };
+
+        var chosen = string.IsNullOrEmpty(content)
+            ? (strategy ?? string.Empty).Trim().ToLowerInvariant()
+            : ConflictModel.Custom;
+
+        if (chosen.Length == 0)
+            return new
+            {
+                error = "A strategy is required: ours, theirs, both (ours then theirs), base (needs merge.conflictStyle=diff3) or custom (with content).",
+                path = targetRelative,
+                hunks = hunks.Count,
+            };
+
+        if (!ConflictModel.IsStrategy(chosen))
+            return new { error = $"Unknown strategy '{strategy}'. Use ours, theirs, both, base or custom.", path = targetRelative };
+
+        if (chosen == ConflictModel.Base && hunks.Any(h => !h.HasBase))
+            return new
+            {
+                error = "This file has no ||||||| base section, so 'base' cannot be chosen. " +
+                        "Set merge.conflictStyle=diff3 (or zdiff3) and redo the merge to get one.",
+                path = targetRelative,
+            };
+
+        if (hunkIndex is { } index && (index < 0 || index >= hunks.Count))
+            return new
+            {
+                error = $"There is no hunk {index} in this file: it has {hunks.Count} (0-based).",
+                path = targetRelative,
+                hunks = hunks.Count,
+            };
+
+        var (rewritten, resolved, remaining) = ConflictModel.Resolve(text, hunks, chosen, hunkIndex, content);
+        await File.WriteAllTextAsync(targetFile, rewritten, encoding);
+
+        var staged = false;
+        string? stageError = null;
+        if (remaining == 0 && stage)
+        {
+            var (addExit, _, _, addErr, _) = await GitCli.RunAsync(repoDir!, $"add -- {Q(targetRelative)}", 30);
+            staged = addExit == 0;
+            if (addExit != 0) stageError = addErr.Trim();
+        }
+
+        return new
+        {
+            repoDir,
+            path = targetRelative,
+            strategy = chosen,
+            resolvedHunks = resolved,
+            remainingHunks = remaining,
+            staged,
+            stageError,
+            operation = await OperationInProgressAsync(repoDir!),
+            note = remaining == 0 && !stage
+                ? "The file has no markers left; stage it with git_stage to mark it resolved."
+                : remaining > 0
+                    ? "Other hunks remain in this file: call resolve again (optionally with blockIndex) or resolve the rest at once."
+                    : null,
+        };
+    }
+
+    /// <summary>One file's conflict summary, as <c>git_conflicts action=list</c> reports it.</summary>
+    private static object Summarize(ParsedConflictFile parsed) => new
+    {
+        path = parsed.Path,
+        binary = parsed.Binary,
+        tooLarge = parsed.TooLarge,
+        lineCount = parsed.LineCount,
+        hunks = parsed.Hunks.Count,
+        preview = parsed.Hunks.Count > 0
+            ? parsed.Hunks.Select(h => new
+            {
+                index = h.Index,
+                startLine = h.StartLine,
+                endLine = h.EndLine,
+                oursLabel = h.OursLabel,
+                theirsLabel = h.TheirsLabel,
+                oursLineCount = h.OursLineCount,
+                theirsLineCount = h.TheirsLineCount,
+                oursFirstLine = h.Ours.FirstOrDefault(),
+                theirsFirstLine = h.Theirs.FirstOrDefault(),
+            }).ToList()
+            : null,
+    };
+
+    private static async Task<ParsedConflictFile> ParseConflictFileAsync(string repoDir, string relative)
+    {
+        var full = Path.Combine(repoDir, relative.Replace('/', Path.DirectorySeparatorChar));
+        var info = new FileInfo(full);
+        if (!info.Exists) return new ParsedConflictFile(relative, false, false, 0, []);
+        if (info.Length > ConflictModel.MaxParseBytes) return new ParsedConflictFile(relative, false, true, 0, []);
+
+        var bytes = await File.ReadAllBytesAsync(full);
+        if (Array.IndexOf(bytes, (byte)0) >= 0) return new ParsedConflictFile(relative, true, false, 0, []);
+
+        var text = DecodeText(bytes, out _);
+        var (hunks, lines, _) = ConflictModel.Parse(text);
+        return new ParsedConflictFile(relative, false, false, lines.Length, hunks);
+    }
+
+    /// <summary>Reads a text file and remembers the encoding its BOM asked for, so a rewrite keeps it.</summary>
+    private static async Task<(string Text, Encoding Encoding)> ReadTextPreservingBomAsync(string full)
+    {
+        var bytes = await File.ReadAllBytesAsync(full);
+        var text = DecodeText(bytes, out var encoding);
+        return (text, encoding);
+    }
+
+    private static string DecodeText(byte[] bytes, out Encoding encoding)
+    {
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        {
+            encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        }
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+        {
+            encoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: true);
+            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+        {
+            encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true);
+            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+        }
+
+        encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    /// <summary>Paths the user gives are always relative to (or inside) the repository being acted on.</summary>
+    private static (string Full, string Relative, object? Error) ResolveInsideRepo(string repoDir, string path)
+    {
+        var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(repoDir, path));
+        var relative = Path.GetRelativePath(repoDir, full);
+
+        if (relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            Path.IsPathRooted(relative))
+            return (full, relative, new { error = $"'{path}' is outside the repository ({repoDir})." });
+
+        return (full, relative.Replace('\\', '/'), null);
+    }
+
+    /// <summary>"merge", "rebase", "cherry-pick", "revert" or null — what the repository is in the middle of.</summary>
+    private static async Task<string?> OperationInProgressAsync(string repoDir)
+    {
+        var (exitCode, _, stdout, _, _) = await GitCli.RunAsync(repoDir, "rev-parse --absolute-git-dir", 20);
+        if (exitCode != 0) return null;
+
+        var gitDir = stdout.Trim();
+        if (gitDir.Length == 0) return null;
+
+        if (File.Exists(Path.Combine(gitDir, "MERGE_HEAD"))) return "merge";
+        if (Directory.Exists(Path.Combine(gitDir, "rebase-merge")) ||
+            Directory.Exists(Path.Combine(gitDir, "rebase-apply"))) return "rebase";
+        if (File.Exists(Path.Combine(gitDir, "CHERRY_PICK_HEAD"))) return "cherry-pick";
+        if (File.Exists(Path.Combine(gitDir, "REVERT_HEAD"))) return "revert";
+        return null;
+    }
+
+    // ── patches ──────────────────────────────────────────────────────────────
+    public async Task<object> PatchAsync(string action, string? name, string? target, string? path,
+        bool reverse, bool check, bool confirm, string? directory, string? repoPath)
+    {
+        var verb = (action ?? "list").Trim().ToLowerInvariant();
+        var (repoDir, error) = await ResolveAsync(repoPath);
+        if (error is not null) return error;
+
+        var patches = await PatchDirectoryAsync(repoDir!, directory);
+        if (patches.Error is not null) return patches.Error;
+
+        switch (verb)
+        {
+            case "create":
+            {
+                var source = (target ?? "working").Trim();
+                var args = "diff";
+                if (string.Equals(source, "staged", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(source, "cached", StringComparison.OrdinalIgnoreCase))
+                    args += " --cached";
+                else if (!string.Equals(source, "working", StringComparison.OrdinalIgnoreCase) && source.Length > 0)
+                {
+                    if (LooksLikeFlag(source)) return new { error = $"'{source}' is not a revision or range." };
+                    args += $" {source}";
+                }
+
+                if (!string.IsNullOrWhiteSpace(path)) args += $" -- {Q(path!)}";
+
+                var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 60);
+                if (timedOut) return new { error = "git diff timed out." };
+                if (exitCode != 0) return new { error = $"git diff failed: {stderr.Trim()}", command = $"git {args}" };
+                if (string.IsNullOrWhiteSpace(stdout)) return new { error = "There is no diff to capture: the tree (or the range) is empty.", source, command = $"git {args}" };
+
+                var (fileName, nameError) = PatchFileName(name);
+                if (nameError is not null) return nameError;
+
+                var full = Path.Combine(patches.Directory!, fileName);
+                await File.WriteAllTextAsync(full, stdout, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+                return new
+                {
+                    repoDir,
+                    action = "create",
+                    name = fileName,
+                    path = full,
+                    source,
+                    bytes = new FileInfo(full).Length,
+                    files = PatchFiles(stdout),
+                    command = $"git {args}",
+                    note = "Apply it later with git_patch action=apply (and reverse=true to undo it).",
+                };
+            }
+
+            case "list":
+            {
+                var entries = new DirectoryInfo(patches.Directory!)
+                    .EnumerateFiles()
+                    .Where(f => f.Extension is ".patch" or ".diff")
+                    .OrderByDescending(f => f.LastWriteTimeUtc)
+                    .Select(f => (object)new
+                    {
+                        name = f.Name,
+                        path = f.FullName,
+                        bytes = f.Length,
+                        modified = f.LastWriteTimeUtc.ToString("u"),
+                        files = CountPatchFiles(f.FullName),
+                    })
+                    .ToList();
+
+                return new { repoDir, directory = patches.Directory, count = entries.Count, patches = entries };
+            }
+
+            case "show":
+            {
+                var (full, fileError) = ResolvePatch(patches.Directory!, name);
+                if (fileError is not null) return fileError;
+                if (!File.Exists(full)) return new { error = $"Patch not found: {name}", directory = patches.Directory };
+
+                var text = await File.ReadAllTextAsync(full);
+                return new
+                {
+                    path = full,
+                    name = Path.GetFileName(full),
+                    bytes = new FileInfo(full).Length,
+                    files = PatchFiles(text),
+                    text = ProcessRunner.Truncate(text, 32_000),
+                };
+            }
+
+            case "apply":
+            {
+                var (full, fileError) = ResolvePatch(patches.Directory!, name);
+                if (fileError is not null) return fileError;
+                if (!File.Exists(full)) return new { error = $"Patch not found: {name}", directory = patches.Directory };
+
+                var baseArgs = "apply" + (check ? " --check" : "") + (reverse ? " --reverse" : "");
+                var first = await GitCli.RunAsync(repoDir!, $"{baseArgs} {Q(full)}", 120);
+                if (first.timedOut) return new { error = "git apply timed out." };
+
+                var usedThreeWay = false;
+                var result = first;
+
+                // A plain apply is all-or-nothing; --3way merges the patch when the context moved.
+                if (first.exitCode != 0 && !check)
+                {
+                    var retry = await GitCli.RunAsync(repoDir!, $"{baseArgs} --3way {Q(full)}", 120);
+                    if (retry.timedOut) return new { error = "git apply --3way timed out." };
+                    if (retry.exitCode == 0) { usedThreeWay = true; result = retry; }
+                }
+
+                var output = ProcessRunner.Truncate((result.stdout + result.stderr).Trim(), 4000);
+                if (result.exitCode != 0)
+                {
+                    var conflicts = await UnmergedPathsAsync(repoDir!);
+                    return new
+                    {
+                        applied = false,
+                        checkOnly = check,
+                        reversed = reverse,
+                        name = Path.GetFileName(full),
+                        command = $"git {baseArgs} {Q(full)}",
+                        conflicts,
+                        error = conflicts.Count > 0
+                            ? $"The 3-way apply stopped with {conflicts.Count} conflict(s). Resolve them with git_conflicts."
+                            : $"git apply failed: {result.stderr.Trim()}",
+                        hint = reverse ? null : "The tree may already contain this change (try reverse=true) or hold conflicting edits.",
+                        output,
+                    };
+                }
+
+                return new
+                {
+                    applied = !check,
+                    checkOnly = check,
+                    reversed = reverse,
+                    threeWay = usedThreeWay,
+                    name = Path.GetFileName(full),
+                    files = PatchFiles(await File.ReadAllTextAsync(full)),
+                    command = $"git {baseArgs}{(usedThreeWay ? " --3way" : "")} {Q(full)}",
+                    firstAttempt = usedThreeWay ? ProcessRunner.Truncate((first.stdout + first.stderr).Trim(), 2000) : null,
+                    output,
+                };
+            }
+
+            case "delete":
+            {
+                var (full, fileError) = ResolvePatch(patches.Directory!, name);
+                if (fileError is not null) return fileError;
+                if (!File.Exists(full)) return new { error = $"Patch not found: {name}", directory = patches.Directory };
+                if (!confirm) return new { error = "Deleting a patch is irreversible. Pass confirm=true to proceed.", name = Path.GetFileName(full) };
+
+                File.Delete(full);
+                return new { deleted = true, name = Path.GetFileName(full), directory = patches.Directory };
+            }
+
+            default:
+                return new { error = $"Unknown action '{action}'. Use create, list, show, apply or delete." };
+        }
+    }
+
+    /// <summary>The patch folder: <paramref name="directory"/> when given, else <c>&lt;git-dir&gt;/visualmcp-patches</c>.</summary>
+    private static async Task<(string? Directory, object? Error)> PatchDirectoryAsync(string repoDir, string? directory)
+    {
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            var full = Path.GetFullPath(directory!);
+            Directory.CreateDirectory(full);
+            return (full, null);
+        }
+
+        var (exitCode, _, stdout, stderr, _) = await GitCli.RunAsync(repoDir, "rev-parse --absolute-git-dir", 20);
+        if (exitCode != 0) return (null, new { error = $"Could not locate the git directory: {stderr.Trim()}" });
+
+        var dir = Path.Combine(stdout.Trim(), "visualmcp-patches");
+        Directory.CreateDirectory(dir);
+        return (dir, null);
+    }
+
+    private static (string Name, object? Error) PatchFileName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return ($"patch-{DateTime.UtcNow:yyyyMMdd-HHmmss}.patch", null);
+
+        var trimmed = name!.Trim();
+        if (trimmed.Contains('/') || trimmed.Contains('\\') || trimmed.Contains("..") || Path.IsPathRooted(trimmed))
+            return (trimmed, new { error = "A patch name is a file name, not a path: no separators and no '..'." });
+
+        if (!trimmed.EndsWith(".patch", StringComparison.OrdinalIgnoreCase) &&
+            !trimmed.EndsWith(".diff", StringComparison.OrdinalIgnoreCase))
+            trimmed += ".patch";
+
+        return (trimmed, null);
+    }
+
+    private static (string Full, object? Error) ResolvePatch(string directory, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return ("", new { error = "A patch name is required (see action=list)." });
+
+        var (fileName, nameError) = PatchFileName(name);
+        if (nameError is not null) return ("", nameError);
+
+        return (Path.Combine(directory, fileName), null);
+    }
+
+    /// <summary>The files a patch touches, read from its <c>diff --git</c> headers.</summary>
+    private static List<string> PatchFiles(string patchText) =>
+        patchText.Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => line.StartsWith("diff --git ", StringComparison.Ordinal))
+            .Select(line =>
+            {
+                var parts = line["diff --git ".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) return line;
+                var first = parts[0];
+                return first.StartsWith("a/", StringComparison.Ordinal) ? first[2..] : first;
+            })
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    private static int CountPatchFiles(string full)
+    {
+        try { return PatchFiles(File.ReadAllText(full)).Count; }
+        catch (IOException) { return 0; }
+    }
+
     /// <summary>The files git reports as conflicted right now (empty when the tree is fine).</summary>
-    private static async Task<List<object>> ConflictsAsync(string repoDir)
+    private static async Task<List<object>> UnmergedPathsAsync(string repoDir)
     {
         var (exitCode, _, stdout, _, _) = await GitCli.RunAsync(repoDir, "diff --name-only --diff-filter=U", 20);
         if (exitCode != 0) return [];
@@ -1155,6 +1783,17 @@ public sealed class GitService : IGitService
         return stdout
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => (object)new { path = line.TrimEnd('\r') })
+            .ToList();
+    }
+
+    private static async Task<List<string>> UnmergedFileListAsync(string repoDir)
+    {
+        var (exitCode, _, stdout, _, _) = await GitCli.RunAsync(repoDir, "diff --name-only --diff-filter=U", 20);
+        if (exitCode != 0) return [];
+
+        return stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
             .ToList();
     }
 

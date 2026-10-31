@@ -39,6 +39,7 @@ public static class GitCli
     }
 
     public static Task<(int exitCode, bool timedOut, string stdout, string stderr, TimeSpan elapsed)>
-        RunAsync(string repoDir, string gitArgs, int timeoutSeconds = 30) =>
-        ProcessRunner.RunAsync("git", $"-C \"{repoDir}\" {gitArgs}", repoDir, timeoutSeconds);
+        RunAsync(string repoDir, string gitArgs, int timeoutSeconds = 30,
+            IReadOnlyDictionary<string, string>? environment = null) =>
+        ProcessRunner.RunAsync("git", $"-C \"{repoDir}\" {gitArgs}", repoDir, timeoutSeconds, environment);
 }

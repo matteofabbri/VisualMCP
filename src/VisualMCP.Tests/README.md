@@ -22,15 +22,18 @@ dotnet test src/VisualMCP.Tests/VisualMCP.Tests.csproj --filter "FullyQualifiedN
 |---|---|
 | `FakeWorkspace.cs` | a real `IRoslynWorkspace` over real files in a temp folder (`AdhocWorkspace` + files on disk), so services write through their normal path and the test reads the result from disk; variants add metadata references and an `.editorconfig` |
 | `TestBootstrap.cs` | a `[ModuleInitializer]` that initialises SQLite once, removing the native-library extraction race between parallel classes |
+| `TestGitRepo.cs` | a throwaway git repository in a temp folder (real `git`, commits, branches, `Run` for commands expected to fail), shared by the git, conflict, rebase-plan, patch and review tests |
 | `StyleRewriteDiagnostics.cs` | rule-case helper: runs a `StyleRewrite` matcher over a snippet and fails with the rule id and the source instead of a generic "filesChanged was 0" |
 
 ## Layout
 
 The files are grouped by area, not by layer: `Refactoring*`, `SimplifyCode*`, `VbStyleTests`,
 `Metacode*`, `Profiling*`, `Razor*`, `XamlTests`, `Navigation*`, `Complexity*`, `Inspection*`,
-`GitServiceTests`, `BoardTests`, `PlanExecutionTests`, `DashboardTests`, `OneTypePerFileTests`,
-`ProductSurfaceTests`, and so on. When you add a rule, a refactoring or a tool with behaviour
-beyond argument forwarding, add a row to the matching file rather than a new catch-all file.
+`GitServiceTests`, `GitConflictTests`, `GitRebasePlanTests`, `GitPatchTests`, `RemoteHostTests`,
+`GitHubReviewPayloadTests`, `ChangeReviewTests`, `BoardTests`, `PlanExecutionTests`,
+`DashboardTests`, `OneTypePerFileTests`, `ProductSurfaceTests`, and so on. When you add a rule, a
+refactoring or a tool with behaviour beyond argument forwarding, add a row to the matching file rather
+than a new catch-all file.
 
 ## Conventions
 

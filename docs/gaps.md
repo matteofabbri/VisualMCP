@@ -37,7 +37,7 @@ style counts (97 C# ids, 15 VB ids) are read from the catalogues; the inspection
 | [Context actions and templates](#6-context-actions-templates-and-generation) | ⚠️ | Medium | 26 action ids now (guards incl. dictionary/enum/index, wrap, braces, loops incl. invert, if→switch, both interpolation directions, digit separators, argument name); the long tail is still the long tail |
 | [Refactoring gaps](#7-refactoring-gaps) | ⚠️ | Low | 41 of Rider's main set are there (`remove_params` and bidirectional call hierarchy arrived); the remaining names are listed |
 | [Diagrams and exploration](#8-architecture-diagrams-and-exploration) | ✅ | — | Graph artifacts (project/namespace/type, call, sequence, control flow), value tracking, localization and the explorers exist as data; drawing them is the client's |
-| [Version control and collaboration](#9-version-control-and-collaboration) | ⚠️ | Low | Git (including worktrees, bisect and submodules) and GitHub are covered; the rest of the VCS ecosystem is not |
+| [Version control and collaboration](#9-version-control-and-collaboration) | ✅ | — | Git, the conflict model, plan rebase, patches, all four hosting providers and the review workflow exist; only real-time co-editing is out of scope by design |
 | [Build, run, packaging](#10-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish exist; package search is covered; installers and deployment targets do not |
 | [UI-bound features](#11-ui-bound-features--not-applicable-by-design) | 💀 | — | Deliberately out of scope for an MCP server |
 
@@ -425,21 +425,36 @@ graph — `impact` counts plus `export_dependency_graph` are the data behind one
 
 Git has a complete local surface (`git_*`: status, diff, log, blame, stage, commit, amend, branch, tag,
 stash, reset, merge, rebase, cherry-pick, revert, squash, remote, sync, show, run — plus the structured
-`git_worktree`, `git_bisect` and `git_submodule` since 2026-10-31) and GitHub has a
-structured surface (`gh_repo`, `gh_pr`, `gh_issue`, `gh_release`, `gh_actions`, `gh_secret`).
+`git_worktree`, `git_bisect` and `git_submodule` since 2026-10-31) and the hosting side covers all four
+providers a .NET team uses: GitHub through the authenticated `gh` CLI (`gh_repo`, `gh_pr`, `gh_issue`,
+`gh_release`, `gh_actions`, `gh_secret`, `gh_branch_protection`) and GitLab, Azure DevOps and Bitbucket
+Cloud through `git_host` (merge/pull requests, their comments and merges, issues/work items and
+pipelines/builds, with credentials read from `GITLAB_TOKEN`, `AZURE_DEVOPS_EXT_PAT` and `BITBUCKET_*`).
+The provider, host, project and repository are parsed from the git remote.
 
-Missing:
+Conflicts have a **model**, not just a report: `git_conflicts` parses the `<<<<<<<` blocks of every
+unmerged file into hunks with all three sides (`ours`, `theirs`, and the `|||||||` base when
+`merge.conflictStyle=diff3` is on), rewrites a chosen strategy over one hunk or the whole file
+(`ours`, `theirs`, `both`, `base`, or `custom` text), and stages the file once no marker remains. The
+merge/rebase/cherry-pick tools report the same conflict set and the operation the repository is in.
 
-- **3-way merge assistant**: conflicts are reported by merge/rebase/cherry-pick and resolved by editing
-  the files; there is no merge editor or conflict model;
-- **interactive rebase** (the squash tool covers the common case; `git_run` can do the rest, without a
-  structured result);
-- **patch/shelve** beyond `git_stash`;
-- **GitLab, Azure DevOps, Bitbucket** — only GitHub is integrated;
-- **line-anchored PR review comments** (`gh_pr` posts comments; it does not build an inline review with
-  comments on specific diff lines);
-- code review workflow, pull-request check annotations, branch protection inspection;
-- real-time collaborative editing (Rider's Code With Me) — there is no shared session, only files on disk.
+**Interactive rebase** is data: `git_rebase action=plan` takes the base revision and a JSON todo list
+of `pick`/`reword`/`squash`/`fixup`/`drop` steps with their messages, hands it to git through
+`GIT_SEQUENCE_EDITOR`, and never opens an editor. **Patches** are named shelves on disk: `git_patch`
+creates from the working tree, the index or any revision/range, lists and shows them, applies with
+`--check`, `--3way` or `--reverse`, and deletes them — the shareable counterpart of the anonymous
+`git_stash`.
+
+The **review workflow** is assembled from data the server already has: `gh_pr action=review` posts a
+GitHub review with line-anchored comments (`path`/`line`/`side`), `action=review-comments` lists them,
+`action=checks` returns the check runs on the PR head, `gh_branch_protection` inspects protection rules,
+required status checks and repository rulesets, and `code_review` builds the review brief for any diff:
+changed files by kind, the risk signals a reviewer looks for first, the new TODO markers with their
+line, the worst methods of each changed C# file, and (opt-in) the inspection findings inside them.
+
+**Real-time collaborative editing** (Rider's Code With Me) is not a gap to close: it is a shared
+transport and an editor surface, not a tool a local stdio server can offer. It belongs with the
+not-applicable-by-design rows in [section 11](#11-ui-bound-features--not-applicable-by-design).
 
 ---
 

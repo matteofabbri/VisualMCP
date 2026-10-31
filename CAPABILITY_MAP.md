@@ -646,7 +646,7 @@ Conteggio: una riga ✅ e una riga ❌ per ciascuna tabella di sezione; le righe
 | Build & Esecuzione | 8 | 3 | 73% |
 | Decompilazione | 7 | 2 | 78% |
 | Documentazione | 3 | 3 | 50% |
-| Git & GitHub | 26 | 2 | 93% |
+| Git & GitHub | 36 | 1 | 97% |
 | Benchmarking | 21 | 0 | 100% |
 | Piattaforma & manutenzione | 5 | 0 | 100% |
 | Runtime & Infrastruttura | 13 | 3 | 81% |
@@ -656,7 +656,7 @@ Conteggio: una riga ✅ e una riga ❌ per ciascuna tabella di sezione; le righe
 | Self-Management | 4 | 0 | 100% |
 | Metacode (pseudocodice) | 12 | 0 | 100% |
 | Modernizzazione & upgrade | 6 | 0 | 100% |
-| **TOTALE** | **202** | **42** | **83%** |
+| **TOTALE** | **212** | **41** | **84%** |
 
 Le tabelle delle sezioni non contengono ancora i **14 tool aggiunti il 2026-10-30** — SSR, cleanup e
 formattazione, famiglia "create" (`implement_members`, `create_from_usage`, `generate_docs`), baseline
@@ -685,7 +685,7 @@ Restano, in ordine di impatto:
 | Diagrammi ed esplorazione: grafo tipi/progetti interattivo, sequence diagram, structure view, code vision, TODO explorer | 🟢 Bassa | ⚠️ `export_dependency_graph` esporta DOT/Mermaid; il resto è assente |
 | Resto della famiglia "create/generate" e context action: long tail (if→switch, pattern merging, LINQ shape, loop, interpolazione, nullable migration) e template live/postfix/file | 🟡 Media | ⚠️ `context_action` copre 13 id (import_type, guardie, wrap in try/catch/finally/if/using, string_to_raw/verbatim/regular); `implement_members`, `create_from_usage`, `generate_docs` coprono i casi frequenti |
 | Amministrazione delle ispezioni (severità per scope, soppressioni, `.DotSettings`, daemon con compilazione calda) | 🟡 Media | ⚠️ `inspection_baseline` dà il gate CI, non la configurazione |
-| Local history, merge assistito a 3 vie, GitLab/Azure DevOps | 🟢 Bassa | ⚠️ `local_history` copre la cronologia per file (`snapshot`/`history`/`diff`/`restore`); restano merge a 3 vie e gli altri host Git |
+| Local history, merge assistito a 3 vie, GitLab/Azure DevOps | 🟢 Bassa | ✅ chiusa il 2026-10-31: `local_history`, `git_conflicts` (modello dei conflitti), `git_rebase action=plan`, `git_patch`, `git_host` (GitLab/Azure DevOps/Bitbucket), review inline e `code_review` |
 | Refactoring minori: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Bassa | ❌ |
 
 L'inventario completo — linguaggio per linguaggio e area per area, con cosa esiste oggi, cosa manca

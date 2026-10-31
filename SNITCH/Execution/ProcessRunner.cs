@@ -7,7 +7,8 @@ namespace Snitch.Execution;
 public static class ProcessRunner
 {
     public static async Task<(int exitCode, bool timedOut, string stdout, string stderr, TimeSpan elapsed)>
-        RunAsync(string exe, string args, string workingDir, int timeoutSeconds)
+        RunAsync(string exe, string args, string workingDir, int timeoutSeconds,
+            IReadOnlyDictionary<string, string>? environment = null)
     {
         var psi = new ProcessStartInfo(exe, args)
         {
@@ -18,6 +19,9 @@ public static class ProcessRunner
             CreateNoWindow         = true,
             WorkingDirectory       = workingDir,
         };
+
+        if (environment is not null)
+            foreach (var (name, value) in environment) psi.Environment[name] = value;
 
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();

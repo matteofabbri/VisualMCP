@@ -37,6 +37,12 @@ public static class SnitchServiceCollectionExtensions
 
         // Feature services.
         services.AddSingleton<Git.IGitService, Git.GitService>();
+        // The hosting services other than GitHub: merge/pull requests, comments, merges, issues and
+        // pipelines over the GitLab, Azure DevOps and Bitbucket HTTP APIs.
+        services.AddSingleton<Collaboration.IRemoteHostService, Collaboration.RemoteHostService>();
+        // The review workflow: a structured brief for a diff (signals, new TODOs, worst methods in the
+        // changed files, optional inspection findings on them).
+        services.AddSingleton<Collaboration.IChangeReviewService, Collaboration.ChangeReviewService>();
         services.AddSingleton<Docker.IDockerService, Docker.DockerService>();
         services.AddSingleton<Search.ISearchTextService, Search.SearchTextService>();
         // Full-text index: FTS5 tables in the same solution store, one row per line of every source,

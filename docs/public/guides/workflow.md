@@ -105,7 +105,7 @@ automatically when the solution opens.
 
 ## Git
 
-21 tools, covering the daily flow and the history operations that usually need a terminal.
+27 tools, covering the daily flow, the history operations that usually need a terminal, and the hosting services other than GitHub.
 
 | Task | Tools |
 |---|---|
@@ -113,8 +113,10 @@ automatically when the solution opens.
 | Stage and commit | `git_stage`, `git_commit` |
 | Branches | `git_create_branch`, `git_branch` (list/create/delete/rename/switch) |
 | Rewrite local history | `git_squash`, `git_amend`, `git_reset` (soft/mixed/hard) |
+| Interactive rebase as data | `git_rebase action=plan` — a JSON list of pick/reword/squash/fixup/drop steps, no editor |
 | Integrate | `git_merge`, `git_rebase`, `git_cherry_pick`, `git_revert` |
-| Park work | `git_stash` (push/list/pop/apply/drop/show/clear) |
+| Resolve a conflict | `git_conflicts` — hunks with ours/theirs/base, resolve per hunk (ours/theirs/both/base/custom), stages the file |
+| Park work | `git_stash` (push/list/pop/apply/drop/show/clear), `git_patch` (named patches: create/list/show/apply/reverse/delete) |
 | Remotes and tags | `git_remote`, `git_tag`, `git_sync` |
 | Anything else | `git_run` — any git command, verbatim, with exit code and output |
 
@@ -124,25 +126,31 @@ Safety details:
 - `git_sync` with `force=true` requires `confirm=true` and uses `--force-with-lease`.
 - `git_squash` refuses on a dirty working tree, because its changes would be folded into the squashed
   commit.
-- `git_merge`, `git_rebase` and `git_cherry_pick` report the conflicted files; resolve them and continue
-  or abort through the same tool.
-- Interactive commands (`git rebase -i`, `git add -i`) are not supported; use `git_run` for anything the
-  structured tools do not cover.
+- `git_merge`, `git_rebase` and `git_cherry_pick` report the conflicted files; `git_conflicts` resolves
+  them hunk by hunk, then continue or abort through the same tool.
+- A history rewrite as a todo list (`git_rebase action=plan`) never opens an editor: `reword` and
+  `squash` take their message from the step, and a conflict stops the plan like any other rebase.
 
 ## GitHub
 
-Seven tools over the authenticated [`gh` CLI](https://cli.github.com/). Run `gh auth login` once; the
+Eight tools over the authenticated [`gh` CLI](https://cli.github.com/). Run `gh auth login` once; the
 server does not manage credentials.
 
 | Tool | Actions |
 |---|---|
 | `gh_repo` | list, view, create, fork, clone, edit, delete |
-| `gh_pr` | list, view, create, merge, close, reopen, comment, diff, checkout, ready |
+| `gh_pr` | list, view, create, merge, close, reopen, comment, review (line-anchored comments), review-comments, checks, diff, checkout, ready |
 | `gh_issue` | list, view, create, close, reopen, comment |
 | `gh_release` | list, view, create, upload assets, delete |
 | `gh_actions` | runs list/view/logs, rerun, cancel, workflows, dispatch |
 | `gh_secret` | list, set, delete repository Actions secrets |
+| `gh_branch_protection` | get, checks, rules — branch protection and rulesets, read-only |
 | `github` | Any `gh` command, verbatim |
+
+GitLab, Azure DevOps and Bitbucket Cloud are `git_host`: the provider, host, project and repository are
+read from the git remote (`action=detect` reports them), and the write actions require `confirm=true`.
+Tokens come from the server's environment (`GITLAB_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `BITBUCKET_*`).
+Before reviewing a change, `code_review` returns the brief the review starts from.
 
 Destructive actions (`merge`, `close`, `delete`, `set`/`delete` secret, `rerun`/`cancel`/`dispatch`) require
 `confirm=true` where the tool defines it. Secrets are sent to GitHub and never echoed back.

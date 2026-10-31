@@ -32,6 +32,7 @@ service declared here. The library has no dependency on MCP, on a client, or on 
 | `Execution/` | build, publish, pack, run, EF migrations, environment info, `run_command`, `stop_server` |
 | `Debugging/` | DAP client, netcoredbg discovery and installation, breakpoints, sessions |
 | `Git/`, `GitHub/`, `Docker/` | CLI wrappers that return structured results |
+| `Collaboration/` | the hosting services other than GitHub (`git_host`: GitLab, Azure DevOps, Bitbucket) and the review brief (`code_review`) |
 | `Planning/` | the kanban board and the task checklist, stored in the solution store |
 | `Platform/` | host system facts, line endings, text diff |
 | `Runtime/` | HTTP invoke and SignalR sessions |

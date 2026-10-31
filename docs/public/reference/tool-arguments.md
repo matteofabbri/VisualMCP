@@ -258,3 +258,67 @@ update_solution(targetFramework?, projectNames[]?, includePrerelease=false,
                   (project files or Directory.Packages.props), then one build
                   gate with a full rollback
 ```
+
+## Version control and collaboration
+
+```
+git_conflicts(action=list|show|resolve, path?, strategy=ours|theirs|both|base|custom,
+              blockIndex?, content?, stage=true, repoPath?)
+                → list: the operation in progress (merge/rebase/cherry-pick/revert)
+                  and every conflicted file with its hunks (labels, line counts,
+                  first lines)
+                → show: one file's hunks with all three sides and the diff3 text
+                → resolve: rewrite the chosen side over one hunk or the whole file;
+                  stage it when no marker remains
+
+git_rebase(action=start|continue|abort|skip|plan, onto?, plan?, repoPath?)
+                → plan: onto is the commit BEFORE the first step and plan is
+                  [{"commit":"abc1234","action":"pick|reword|squash|fixup|drop",
+                    "message":"…"}] — reword and squash take their message from the
+                  step (squash without one keeps the previous message); applied
+                  through GIT_SEQUENCE_EDITOR, no editor is opened
+
+git_patch(action=create|list|show|apply|delete, name?, target?, path?,
+          reverse=false, check=false, confirm=false, directory?, repoPath?)
+                → create: target = working (default) | staged | a revision/range;
+                  patches live in <git-dir>/visualmcp-patches unless directory is set
+                → apply: check=true only validates, reverse=true undoes it, and a
+                  plain apply that fails is retried with --3way
+
+git_host(action=detect|list-prs|view-pr|create-pr|comment-pr|merge-pr|
+                list-issues|create-issue|pipelines,
+         provider=auto|gitlab|azuredevops|bitbucket, hostUrl?, project?,
+         repository?, number?, title?, body?, sourceBranch?, targetBranch?,
+         state?, limit=20, confirm=false, repoPath?, timeoutSeconds=60)
+                → detect: provider/host/project/repository parsed from the remote
+                  and whether a credential is in the environment
+                → project = GitLab group/project path, Azure DevOps project,
+                  Bitbucket workspace; Azure self-hosted form:
+                  hostUrl=https://dev.azure.com/{organization}
+                → credentials: GITLAB_TOKEN; AZURE_DEVOPS_EXT_PAT (or
+                  AZURE_DEVOPS_TOKEN); BITBUCKET_TOKEN, or BITBUCKET_USERNAME +
+                  BITBUCKET_APP_PASSWORD
+
+gh_pr(action=…|review|review-comments|checks, comments?, reviewEvent?)
+                → review: comments is a JSON array
+                  [{"path":"src/A.cs","line":42,"side":"RIGHT","body":"…"}];
+                  reviewEvent = comment (default) | approve | request-changes;
+                  line is a line of the diff, side RIGHT = the new file
+
+gh_branch_protection(action=get|checks|rules, branch?, repo?)
+                → get: protected flag plus the rules when the token has admin;
+                  checks: strict mode and the required contexts/checks;
+                  rules: the repository rulesets that apply (public API)
+
+code_review(baseRef=HEAD, path?, maxFiles=100, includeInspections=false,
+            repoPath?, timeoutSeconds=120)
+                → changed files by kind, additions/deletions, the risk checklist,
+                  new TODO/FIXME markers with their new-file line, the worst
+                  methods of each changed C# file and, with includeInspections,
+                  the inspection findings inside the changed files
+```
+
+`code_review` is the brief, not the review: `run_affected_tests` runs the tests the change reaches,
+`find_breaking_changes` compares the public surface, and `gh_pr action=review` posts the review with
+its line comments. GitHub is served by the `gh` CLI; `git_host` covers GitLab, Azure DevOps and
+Bitbucket over their HTTP APIs, and both are read-only until `confirm=true`.
