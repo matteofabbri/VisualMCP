@@ -201,8 +201,10 @@ PublishScripts/
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
 # …and except the C# source folder under Languages, which is code, not NuGet's restore folder.
-!Languages/CSharp/Packages/
-!Languages/CSharp/Packages/**
+# The path follows Languages/Implementations/: a stale exception here silently untracked six
+# service files when that tree was renamed, and a clean clone then did not compile.
+!**/Languages/Implementations/CSharp/Packages/
+!**/Languages/Implementations/CSharp/Packages/**
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files

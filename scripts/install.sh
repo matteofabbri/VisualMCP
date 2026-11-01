@@ -15,8 +15,9 @@
 #   project  Claude Code, a .mcp.json in the target project (shareable/committable)
 #   local    Claude Code, private to you, tied to the target project folder
 #
-# The routing guard (hooks/pre-tool-use.py + the AGENTS.md block) is installed for
-# the zcode and user scopes when Python 3 is available; --no-hooks skips it and
+# Nothing here needs an interpreter of its own: the published binary edits the client
+# configuration (`--config`) and answers the routing guard (`--hook pre-tool-use`), so the
+# .NET SDK this install already requires is enough. --no-hooks skips the guard and
 # --hooks-only refreshes it without publishing.
 #
 # PublishSingleFile must stay OFF: MSBuildWorkspace locates its out-of-process
@@ -71,7 +72,6 @@ esac
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(dirname -- "$SCRIPT_DIR")
 CSPROJ="$REPO_ROOT/src/VisualMCP/VisualMCP.csproj"
-HOOK_SOURCE="$REPO_ROOT/hooks/pre-tool-use.py"
 BLOCK_SOURCE="$REPO_ROOT/hooks/agents-block.md"
 
 HOME_DIR=${HOME:?HOME is not set}
@@ -104,201 +104,98 @@ ok()   { printf '    OK  %s\n' "$*"; }
 skip() { printf '    --  %s\n' "$*"; }
 warn() { printf '    !!  %s\n' "$*" >&2; }
 
-# --- Python 3: JSON editing and the routing hook ----------------------------
-PYTHON=""
-for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 &&
-       "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)' >/dev/null 2>&1; then
-        PYTHON=$(command -v "$candidate")
-        break
-    fi
-done
+# --- Configuration edits and the guard, through the published binary --------
+# The server binary owns both: --config edits a client's configuration and --hook answers the
+# PreToolUse payload, so installing needs nothing but the .NET SDK. Neither mode loads MSBuild.
 
-# Applies one JSON edit. Modes:
+SETUP_COMMAND=""
+SETUP_ARGUMENT=""
+SETUP_FRESH=0
+SETUP_MODES=""
+
+# The command that runs this executable, whichever shape the publish produced (apphost or dll).
+setup_invocation() {
+    if [ -n "$SETUP_ARGUMENT" ]; then
+        printf '"%s" "%s"' "$SETUP_COMMAND" "$SETUP_ARGUMENT"
+    else
+        printf '"%s"' "$SETUP_COMMAND"
+    fi
+}
+
+# True when the resolved binary has --config/--hook. A build from before those modes starts the
+# server instead and exits on the closed stdin; it answers 2 only when the mode is understood.
+supports_install_modes() {
+    if [ "$SETUP_FRESH" -eq 1 ]; then
+        SETUP_MODES=1
+        return 0
+    fi
+    case "$SETUP_MODES" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+
+    status=0
+    if [ -n "$SETUP_ARGUMENT" ]; then
+        "$SETUP_COMMAND" "$SETUP_ARGUMENT" --config </dev/null >/dev/null 2>&1 || status=$?
+    else
+        "$SETUP_COMMAND" --config </dev/null >/dev/null 2>&1 || status=$?
+    fi
+    if [ "$status" -eq 2 ]; then
+        SETUP_MODES=1
+        return 0
+    fi
+    SETUP_MODES=0
+    return 1
+}
+
+# Applies one configuration edit. Modes:
 #   zcode-set|zcode-remove <config> [command] [arg]
 #   mcpservers-set|mcpservers-remove <config> [command] [arg]
 #   zcode-hook-set|zcode-hook-remove <config> <command>
 #   claude-hook-set|claude-hook-remove <config> <command>
-#   agents-block-set|agents-block-remove <file>
+#   agents-block-set <file> <blockSource> | agents-block-remove <file>
 json_edit() {
-    if [ -z "$PYTHON" ]; then
+    if [ -z "$SETUP_COMMAND" ] || ! supports_install_modes; then
         return 1
     fi
-    "$PYTHON" - "$@" "$BLOCK_SOURCE" <<'PY'
-import json
-import os
-import re
-import sys
-import tempfile
-
-MODE = sys.argv[1]
-PATH = sys.argv[2]
-EXTRA = sys.argv[3] if len(sys.argv) > 3 else None
-EXTRA2 = sys.argv[4] if len(sys.argv) > 4 else None
-BLOCK_SOURCE = sys.argv[-1] if MODE.startswith("agents-block") else None
-
-SERVER = "VisualMCP"
-OURS = re.compile(r"pre-tool-use\.(py|ps1)", re.IGNORECASE)
-
-
-def load(path):
-    try:
-        with open(path, "r", encoding="utf-8-sig") as handle:
-            raw = handle.read()
-    except FileNotFoundError:
-        return {}
-    if not raw.strip():
-        return {}
-    return json.loads(raw)
-
-
-def save(path, data):
-    folder = os.path.dirname(path)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(dir=folder or ".", prefix=".visualmcp-", suffix=".json")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(data, stream, indent=2, ensure_ascii=False)
-            stream.write("\n")
-        os.replace(temporary, path)
-    except BaseException:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
-
-
-def child(parent, name):
-    value = parent.get(name)
-    if not isinstance(value, dict):
-        value = {}
-        parent[name] = value
-    return value
-
-
-def server_entry(command, argument=None):
-    entry = {"type": "stdio", "command": command, "args": [], "timeoutMs": 60000}
-    if argument:
-        entry["args"] = [argument]
-    return entry
-
-
-def hook_entry(command):
-    return {
-        "type": "command",
-        "command": command,
-        "timeout": 15,
-        "statusMessage": "VisualMCP: checking for a shell probe...",
-    }
-
-
-def is_ours(matcher):
-    hooks = matcher.get("hooks") if isinstance(matcher, dict) else None
-    for hook in hooks or []:
-        if isinstance(hook, dict) and OURS.search(str(hook.get("command", ""))):
-            return True
-    return False
-
-
-def keep_foreign(entries):
-    return [entry for entry in entries or [] if not is_ours(entry)]
-
-
-if MODE == "zcode-set":
-    config = load(PATH)
-    child(child(config, "mcp"), "servers")[SERVER] = server_entry(EXTRA, EXTRA2)
-    save(PATH, config)
-elif MODE == "zcode-remove":
-    config = load(PATH)
-    servers = config.get("mcp", {}).get("servers")
-    if isinstance(servers, dict):
-        servers.pop(SERVER, None)
-        save(PATH, config)
-elif MODE == "mcpservers-set":
-    config = load(PATH)
-    child(config, "mcpServers")[SERVER] = server_entry(EXTRA, EXTRA2)
-    save(PATH, config)
-elif MODE == "mcpservers-remove":
-    config = load(PATH)
-    servers = config.get("mcpServers")
-    if isinstance(servers, dict) and SERVER in servers:
-        servers.pop(SERVER, None)
-        save(PATH, config)
-elif MODE == "zcode-hook-set":
-    config = load(PATH)
-    hooks = child(config, "hooks")
-    hooks["enabled"] = True
-    events = child(hooks, "events")
-    events["PreToolUse"] = keep_foreign(events.get("PreToolUse")) + [
-        {"matcher": "Bash", "hooks": [hook_entry(EXTRA)]}
-    ]
-    save(PATH, config)
-elif MODE == "zcode-hook-remove":
-    config = load(PATH)
-    hooks = config.get("hooks")
-    if isinstance(hooks, dict):
-        events = hooks.get("events")
-        if isinstance(events, dict) and "PreToolUse" in events:
-            kept = keep_foreign(events.get("PreToolUse"))
-            if kept:
-                events["PreToolUse"] = kept
-            else:
-                events.pop("PreToolUse", None)
-            if not events:
-                hooks.pop("events", None)
-        if not hooks:
-            config.pop("hooks", None)
-        save(PATH, config)
-elif MODE == "claude-hook-set":
-    config = load(PATH)
-    hooks = child(config, "hooks")
-    hooks["PreToolUse"] = keep_foreign(hooks.get("PreToolUse")) + [
-        {"matcher": "Bash", "hooks": [hook_entry(EXTRA)]}
-    ]
-    save(PATH, config)
-elif MODE == "claude-hook-remove":
-    config = load(PATH)
-    hooks = config.get("hooks")
-    if isinstance(hooks, dict) and "PreToolUse" in hooks:
-        kept = keep_foreign(hooks.get("PreToolUse"))
-        if kept:
-            hooks["PreToolUse"] = kept
-        else:
-            hooks.pop("PreToolUse", None)
-        if not hooks:
-            config.pop("hooks", None)
-        save(PATH, config)
-elif MODE in ("agents-block-set", "agents-block-remove"):
-    marker = re.compile(r"\r?\n?<!-- VisualMCP:begin.*?<!-- VisualMCP:end -->\r?\n?", re.DOTALL)
-    try:
-        with open(PATH, "r", encoding="utf-8-sig") as handle:
-            text = handle.read()
-    except FileNotFoundError:
-        text = ""
-    cleaned = marker.sub("", text).strip()
-
-    if MODE == "agents-block-remove":
-        if not cleaned:
-            try:
-                os.unlink(PATH)
-            except FileNotFoundError:
-                pass
-        else:
-            with open(PATH, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(cleaned + "\n")
-    else:
-        with open(BLOCK_SOURCE, "r", encoding="utf-8") as handle:
-            block = handle.read().strip()
-        content = (cleaned + "\n\n" + block + "\n") if cleaned else (block + "\n")
-        os.makedirs(os.path.dirname(PATH), exist_ok=True)
-        with open(PATH, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
-else:
-    sys.exit(f"unknown mode {MODE}")
-PY
+    if [ -n "$SETUP_ARGUMENT" ]; then
+        "$SETUP_COMMAND" "$SETUP_ARGUMENT" --config "$@"
+    else
+        "$SETUP_COMMAND" --config "$@"
+    fi
 }
+
+# Uses an installed binary when this run did not publish one (--uninstall, --hooks-only).
+resolve_setup() {
+    for candidate in "$ZCODE_APP" "$CLAUDE_APP"; do
+        if [ -x "$candidate/VisualMCP" ]; then
+            SETUP_COMMAND="$candidate/VisualMCP"; SETUP_ARGUMENT=""; return 0
+        fi
+        if [ -x "$candidate/VisualMCP.exe" ]; then
+            SETUP_COMMAND="$candidate/VisualMCP.exe"; SETUP_ARGUMENT=""; return 0
+        fi
+        if [ -f "$candidate/VisualMCP.dll" ] && command -v dotnet >/dev/null 2>&1; then
+            SETUP_COMMAND="dotnet"; SETUP_ARGUMENT="$candidate/VisualMCP.dll"; return 0
+        fi
+    done
+    return 1
+}
+
+# The command line a client runs for the guard, through this host's own install.
+hook_command() {
+    hook_dir=$1
+    if [ -x "$hook_dir/VisualMCP" ]; then
+        printf '"%s" --hook pre-tool-use' "$hook_dir/VisualMCP"
+    elif [ -x "$hook_dir/VisualMCP.exe" ]; then
+        printf '"%s" --hook pre-tool-use' "$hook_dir/VisualMCP.exe"
+    elif [ -f "$hook_dir/VisualMCP.dll" ]; then
+        printf 'dotnet "%s" --hook pre-tool-use' "$hook_dir/VisualMCP.dll"
+    else
+        printf '%s --hook pre-tool-use' "$(setup_invocation)"
+    fi
+}
+
+resolve_setup || true
 
 # --- Routing guard ----------------------------------------------------------
 install_hooks() {
@@ -307,25 +204,24 @@ install_hooks() {
         skip "hooks ~ skipped: hooks and AGENTS.md are machine-level"
         return 0
     }
-    if [ -z "$PYTHON" ]; then
-        skip "hooks ~ skipped: no Python 3 found (the routing hook reads a JSON payload)"
+    if [ -z "$SETUP_COMMAND" ] || ! supports_install_modes; then
+        skip "hooks ~ skipped: no installed binary with the built-in guard (run the installer without --hooks-only)"
         return 0
     fi
-    if [ ! -f "$HOOK_SOURCE" ]; then
-        skip "hooks ~ skipped: $HOOK_SOURCE not found"
+    if [ ! -f "$BLOCK_SOURCE" ]; then
+        skip "hooks ~ skipped: $BLOCK_SOURCE not found"
         return 0
     fi
 
     if [ "$WANTS_ZCODE" -eq 1 ] && [ -d "$ZCODE_CONFIG_DIR" ]; then
-        mkdir -p "$ZCODE_HOOK_DIR"
-        cp "$HOOK_SOURCE" "$ZCODE_HOOK_DIR/pre-tool-use.py"
-        if json_edit zcode-hook-set "$ZCODE_CONFIG" "$PYTHON \"$ZCODE_HOOK_DIR/pre-tool-use.py\""; then
-            ok "ZCode   -> $ZCODE_CONFIG (hooks.events.PreToolUse, matcher 'Bash')"
-            ok "ZCode   -> $ZCODE_HOOK_DIR/pre-tool-use.py"
+        zcode_hook=$(hook_command "$ZCODE_APP")
+        if json_edit zcode-hook-set "$ZCODE_CONFIG" "$zcode_hook"; then
+            ok "ZCode   -> $ZCODE_CONFIG (hooks.events.PreToolUse, matcher 'Bash|Write|Edit|MultiEdit|NotebookEdit')"
+            ok "ZCode   -> $zcode_hook"
         else
             warn "ZCode   ~ could not update $ZCODE_CONFIG"
         fi
-        if json_edit agents-block-set "$ZCODE_AGENTS"; then
+        if json_edit agents-block-set "$ZCODE_AGENTS" "$BLOCK_SOURCE"; then
             ok "ZCode   -> $ZCODE_AGENTS (routing block)"
         else
             warn "ZCode   ~ could not update $ZCODE_AGENTS"
@@ -335,11 +231,10 @@ install_hooks() {
     fi
 
     if [ "$WANTS_CLAUDE" -eq 1 ] && [ -d "$HOME_DIR/.claude" ]; then
-        mkdir -p "$CLAUDE_HOOK_DIR"
-        cp "$HOOK_SOURCE" "$CLAUDE_HOOK_DIR/pre-tool-use.py"
-        if json_edit claude-hook-set "$CLAUDE_SETTINGS" "$PYTHON \"$CLAUDE_HOOK_DIR/pre-tool-use.py\""; then
-            ok "Claude  -> $CLAUDE_SETTINGS (hooks.PreToolUse, matcher 'Bash')"
-            ok "Claude  -> $CLAUDE_HOOK_DIR/pre-tool-use.py"
+        claude_hook=$(hook_command "$CLAUDE_APP")
+        if json_edit claude-hook-set "$CLAUDE_SETTINGS" "$claude_hook"; then
+            ok "Claude  -> $CLAUDE_SETTINGS (hooks.PreToolUse, matcher 'Bash|Write|Edit|MultiEdit|NotebookEdit')"
+            ok "Claude  -> $claude_hook"
         else
             warn "Claude  ~ could not update $CLAUDE_SETTINGS"
         fi
@@ -347,8 +242,15 @@ install_hooks() {
 }
 
 remove_hooks() {
-    [ -f "$ZCODE_HOOK_DIR/pre-tool-use.py" ] && rm -f "$ZCODE_HOOK_DIR/pre-tool-use.py" && ok "ZCode   <- removed $ZCODE_HOOK_DIR/pre-tool-use.py"
-    [ -f "$CLAUDE_HOOK_DIR/pre-tool-use.py" ] && rm -f "$CLAUDE_HOOK_DIR/pre-tool-use.py" && ok "Claude  <- removed $CLAUDE_HOOK_DIR/pre-tool-use.py"
+    # An install from before the guard moved into the binary left a script copy here.
+    if [ -f "$ZCODE_HOOK_DIR/pre-tool-use.py" ]; then
+        rm -f "$ZCODE_HOOK_DIR/pre-tool-use.py"
+        ok "ZCode   <- removed $ZCODE_HOOK_DIR/pre-tool-use.py"
+    fi
+    if [ -f "$CLAUDE_HOOK_DIR/pre-tool-use.py" ]; then
+        rm -f "$CLAUDE_HOOK_DIR/pre-tool-use.py"
+        ok "Claude  <- removed $CLAUDE_HOOK_DIR/pre-tool-use.py"
+    fi
     if [ "$WANTS_ZCODE" -eq 1 ] && [ -f "$ZCODE_CONFIG" ]; then
         json_edit zcode-hook-remove "$ZCODE_CONFIG" || warn "ZCode   ~ could not update $ZCODE_CONFIG"
         json_edit agents-block-remove "$ZCODE_AGENTS" || warn "ZCode   ~ could not update $ZCODE_AGENTS"
@@ -461,6 +363,12 @@ elif [ ! -f "$COMMAND" ]; then
 fi
 [ -f "$PRIMARY_DIR/VisualMCP.dll" ] || { echo "Expected build output not produced in $PRIMARY_DIR" >&2; exit 1; }
 
+# From here the freshly published binary is what edits the configuration and runs the guard.
+SETUP_COMMAND="$COMMAND"
+SETUP_ARGUMENT="$ARGUMENT"
+SETUP_FRESH=1
+SETUP_MODES=1
+
 if [ "$WANTS_ZCODE" -eq 1 ] && [ "$WANTS_CLAUDE" -eq 1 ]; then
     mkdir -p "$CLAUDE_APP"
     cp -R "$PRIMARY_DIR"/. "$CLAUDE_APP"/
@@ -491,8 +399,8 @@ step "Registering 'VisualMCP' ($SCOPE scope) ..."
 if [ "$WANTS_ZCODE" -eq 1 ]; then
     if [ ! -d "$ZCODE_CONFIG_DIR" ]; then
         skip "ZCode   ~ skipped: $ZCODE_CONFIG_DIR not found (is ZCode installed for this user?)"
-    elif [ -z "$PYTHON" ]; then
-        warn "ZCode   ~ cannot edit $ZCODE_CONFIG without Python 3; register it by hand:"
+    elif [ -z "$SETUP_COMMAND" ]; then
+        warn "ZCode   ~ the published binary could not edit $ZCODE_CONFIG; register it by hand:"
         warn "          mcp.servers.VisualMCP = { type: stdio, command: \"$ZCODE_COMMAND\", args: [$([ -n "$ZCODE_ARGUMENT" ] && printf '"%s"' "$ZCODE_ARGUMENT")] }"
     else
         json_edit zcode-set "$ZCODE_CONFIG" "$ZCODE_COMMAND" "$ZCODE_ARGUMENT" \

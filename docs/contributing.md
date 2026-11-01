@@ -71,7 +71,7 @@ already large, and a clear verb with a mode is easier to route to than two near-
 1. Implement the rewrite (`StyleRewrite`) and register it in the language's rule set.
 2. Remove the id from the `NotRewritten` list, or update its reason.
 3. Add a rule case to the shared test table: one input that must change and one that must not.
-4. Update [Limits](reference/limits.md) if the coverage numbers change.
+4. Update [the language map](gaps.md#1-language-and-platform-scope) if the coverage numbers change.
 
 The rewrite must be verified by the compiler gate and recorded in the edit history. Rules that cannot be
 expressed as a single contiguous region in one document do not belong in `simplify_code`; write a
@@ -103,4 +103,4 @@ If you do not agree, do not submit a contribution. The full text is in
 
 ---
 
-[Docs home](README.md) · [Getting started](getting-started.md) · [Limits](reference/limits.md)
+[Docs home](README.md) · [Getting started](getting-started.md) · [Requirements and guarantees](reference/limits.md)

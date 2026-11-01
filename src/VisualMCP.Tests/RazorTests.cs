@@ -334,6 +334,58 @@ public sealed class RazorTests
         }
     }
 
+    [Fact]
+    public void A_layout_selected_in_ViewStart_is_compared_with_the_page()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vmcp-razor-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "Views", "Home"));
+        Directory.CreateDirectory(Path.Combine(root, "Views", "Shared"));
+
+        var page = Path.Combine(root, "Views", "Home", "Index.cshtml");
+        var viewStart = Path.Combine(root, "Views", "_ViewStart.cshtml");
+        var rootLayout = Path.Combine(root, "Views", "Shared", "_Layout.cshtml");
+        var nestedStart = Path.Combine(root, "Views", "Home", "_ViewStart.cshtml");
+        var homeLayout = Path.Combine(root, "Views", "Shared", "_HomeLayout.cshtml");
+
+        // The page names no layout: MVC takes the nearest _ViewStart, which names one in its code block.
+        File.WriteAllText(page, "<div id=\"main\">page</div>");
+        File.WriteAllText(viewStart, "@{ Layout = \"_Layout\"; }");
+        File.WriteAllText(rootLayout, "<html><body><div id=\"main\">root</div></body></html>");
+        File.WriteAllText(nestedStart, "@{ Layout = \"_HomeLayout\"; }");
+        File.WriteAllText(homeLayout, "<html><body><div id=\"main\">home</div></body></html>");
+
+        try
+        {
+            var collection = new RazorCollection { Root = root };
+            foreach (var path in new[] { page, viewStart, rootLayout, nestedStart, homeLayout })
+                collection.Files.Add(new RazorFileEntry(
+                    path, Path.GetRelativePath(root, path).Replace('\\', '/'), null));
+
+            var partials = RazorAnalysis.CreatePartialResolver(collection);
+            var start = partials.ViewStartFor(page);
+            Assert.NotNull(start);
+            Assert.Equal("_HomeLayout", start!.LayoutDirective);
+
+            // The resolver walks up from the page's own file, which in an analysis run is the absolute path
+            // TryRead produced.
+            var document = Scan(File.ReadAllText(page), page);
+            document.Kind = RazorPageClassifier.Classify(document, page);
+
+            var duplicates = RazorRules.Run(document, partials.For(Path.GetDirectoryName(page)),
+                    path => partials.ViewStartFor(path))
+                .Where(finding => finding.RuleId == "RZ2003").ToList();
+
+            // The nearest _ViewStart wins: the collision is with _HomeLayout, not with the root _Layout.
+            var collision = Assert.Single(duplicates, finding => finding.Snippet.Contains("id=\"main\""));
+            Assert.Equal(homeLayout, collision.FilePath);
+            Assert.DoesNotContain(duplicates, finding => finding.FilePath == rootLayout);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     // ── Security rules ─────────────────────────────────────────────────────────
 
     [Theory]

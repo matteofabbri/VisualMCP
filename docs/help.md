@@ -171,8 +171,8 @@ async/performance, complexity, metrics, clones, Big-O), the refactorings that ar
 `type_to_partial`, `safe_delete`, the extract/inline/move families and the indexer conversions),
 `context_action` (33 of its 41 ids
 have a VB spelling; the C#-only ones are refused with the reason), `simplify_vb_code` (41 ids) and the
-language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only is named in
-[Limits → Language coverage](reference/limits.md#language-and-platform-coverage).
+language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only is named in the
+[Visual Basic row of the language map](gaps.md#1-language-and-platform-scope).
 Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
 Core migrations run through `ef_migrations`. SQL has a scanned layer (`sql_files`, `analyze_sql` with
@@ -186,8 +186,7 @@ diagnostics still come through `build_project`). The JavaScript/TypeScript toolc
 the project's own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and
 `node_typecheck`/`node_lint` interpret `tsc` and `eslint`; Kubernetes and Helm go through `k8s_*`.
 None of these layers replaces a compiler: a scanner proves the shape of a line, never a binding, a type
-or a schema. The full table is
-[Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage). C#,
+or a schema. The full table is [the language map](gaps.md#1-language-and-platform-scope). C#,
 Razor, decompiled assemblies and Ghidra snapshots are all inputs to metacode.
 
 **Do I need Visual Studio?**
@@ -202,9 +201,8 @@ with the same scopes and config shapes — and the server adapts at runtime: `ru
 default to bash off Windows (`cmd` and Windows PowerShell are refused with a clear error), `self_update`
 downloads the asset for the running platform and swaps it with a POSIX shell helper, `debug_install`
 picks the linux/osx netcoredbg build, Ghidra's `analyzeHeadless` (not the `.bat`) is used, and
-`stop_server` reads `/proc`/`ps` instead of WMI. The routing guard on Linux/macOS is
-`hooks/pre-tool-use.py`, a small Python 3 script; the installer registers it when an interpreter is
-present and skips it with a warning when not.
+`stop_server` reads `/proc`/`ps` instead of WMI. The routing guard on Linux/macOS is a mode of the
+server binary itself (`VisualMCP --hook pre-tool-use`), so it needs no interpreter of its own.
 
 **How many tools are there?**
 

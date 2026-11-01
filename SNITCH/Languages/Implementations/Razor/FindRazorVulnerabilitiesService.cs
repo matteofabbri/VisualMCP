@@ -53,7 +53,10 @@ public sealed class FindRazorVulnerabilitiesService : IFindRazorVulnerabilitiesS
             if (document is null) continue;
 
             pagesAnalyzed++;
-            all.AddRange(RazorRules.Run(document, partials.For(Path.GetDirectoryName(document.FilePath)))
+            all.AddRange(RazorRules.Run(
+                    document,
+                    partials.For(Path.GetDirectoryName(document.FilePath)),
+                    path => partials.ViewStartFor(path))
                 .Where(finding => RazorRuleCatalog.IsSecurity(finding.Category)));
         }
 

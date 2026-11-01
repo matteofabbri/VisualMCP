@@ -19,7 +19,7 @@ Last updated: 2026-11-01 — **420 tools** in the running build (`capability_rep
 count). Version control and collaboration is not on this page: it is a feature section of
 [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md), because none of it is a gap. The
 batches that closed rows here, each with the count it produced, are in
-[§12 Revision log](#12-revision-log); anything older is in `git log`.
+[§13 Revision log](#13-revision-log); anything older is in `git log`.
 
 ---
 
@@ -28,7 +28,7 @@ batches that closed rows here, each with the count it produced, are in
 | Area | State | Priority | Why this priority |
 |---|---|:---:|---|
 | [Language and platform scope](#1-language-and-platform-scope) | ⚠️ | Low if your solution uses them | C#, VB, XAML, Razor, EF Core, Kubernetes and the Node toolchain are covered semantically or by a wrapper; SQL, JS/TS, HTML/CSS, YAML and F# each have a **scanned** layer with an inventory and a rule set, and JS/TS and F# also have a **lexical symbol table** (`js_symbols`, `fsharp_symbols`: declarations, the declaration a name resolves to, its references). What none of the scanners does is type-check an expression |
-| [Debugger](#2-debugger) | ✅ | — | Implemented: 20 `debug_*` tools over netcoredbg (DAP) — line, function and data breakpoints, per-exception-type filters, value editing and restart. Edit-and-continue is the one thing the adapter exposes only over GDB/MI, so it is an engine limit ([reference/limits.md](reference/limits.md#debugger)) rather than a missing tool |
+| [Debugger](#2-debugger) | ✅ | — | Implemented: 20 `debug_*` tools over netcoredbg (DAP) — line, function and data breakpoints, per-exception-type filters, value editing and restart. Edit-and-continue is the one thing the adapter exposes only over GDB/MI, so it is an engine limit ([§2](#2-debugger)) rather than a missing tool |
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ✅ | — | Severity, suppression, custom rules, `.DotSettings` reading, naming rules, spelling and a warm analysis loop exist; only the proprietary ReSharper id set is absent |
 | [Decompiled code as a workspace](#4-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
 | [Context actions and templates](#5-context-actions-templates-and-generation) | ⚠️ | Low | 41 action ids and the template family (18 live, 10 postfix, 8 file) exist, including LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block; what remains is the proprietary tail whose condition is a type-system fact rather than a shape |
@@ -69,7 +69,7 @@ that is the distinction this section keeps.
 
 | Language / platform | What works today | What is missing |
 |---|---|---|
-| **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
+| **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | The general boundaries in [§11](#11-boundaries-that-are-not-gaps): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
 | **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup` including member reordering); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`, `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`); **refactorings and generation** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `generate_docs`, `implement_members`, `reduce_complexity`/`fix_complexity`); `simplify_vb_code` (**41 of the 49 VB ids**, the other 8 refused by id with a reason); `context_action` on a `.vb` document (**33 ids** with a VB spelling) and `apply_code_fix` with the analyzers' VB fixers; `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static, the pattern combinators) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; the declaration-shape refactoring tail listed in §1.2 (`extract_class`/`extract_superclass`, `inline_class`/`inline_parameter`/`inline_symbol`, `move_instance_method`/`move_static_members`, `move_type_to_nested_scope`/`move_type_to_outer_scope`, `function_to_indexer`/`indexer_to_function`); `reduce_complexity` reports extract-method as a hand edit |
 | **F#** | `fsharp_files` — the declaration inventory (modules, types, top-level functions, opens); **`fsharp_symbols`** — the lexical symbol table: the declarations a file makes (modules, namespaces, types, union cases, record fields, `let` bindings and members, with their positions), the declaration a name resolves to (before it in the same file, or in a file that `open`s its module), every reference, and the declarations nothing reads; `analyze_fsharp` — FS0001–FS0010 over masked source (tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open`); `build_project` returns the F# compiler's own diagnostics (FS####); `run_tests` runs F# tests | No semantic model: F# is not a Roslyn language, so there is no type checking, no refactoring, no inspection and no complexity; a lexical `rename` exists in `fsharp_symbols`. The symbol table is lexical — shadowing inside a match arm, a module abbreviation and a name the compiled assembly exports are outside it — and the compiler's FS#### diagnostics remain the authority |
 | **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `xaml_pages` (inventory + the project's dialect and target frameworks), `analyze_xaml` (XAML0001–XAML0015, binding paths validated against the data type), `xaml_bindings` (the binding inspector), `xaml_tree` (the element tree), `xaml_navigate`; verified edits `xaml_rename`, `xaml_extract_style`, `xaml_promote_resource`, `format_xaml`; the C# code-behind is fully analysed. The data type comes from `x:DataType`/`DataType` in scope, a code-behind `DataContext = …`/`BindingContext = …`, a design-time `d:DataContext`, or a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element | No compiled XAML: a binding whose data type none of those names is `not-checked` rather than guessed, and a key from a referenced assembly's theme dictionary is invisible |
@@ -87,8 +87,8 @@ that is the distinction this section keeps.
 ### 1.1 C#
 
 C# is the only language with a complete tool surface, and it is where every other documentation page
-applies. Its own limits are not language gaps and live in the general list,
-[Limits → Static analysis](reference/limits.md#static-analysis): a reflective name built at run time is
+applies. Its own boundaries are not language gaps and are recorded in
+[§11](#11-boundaries-that-are-not-gaps): a reflective name built at run time is
 not guessed (so what that lookup reaches can still look dead), the trees a source generator emits are
 reachable by `find_symbol`, `read_symbol` and `list_generated_sources` but are not documents (the editors,
 the symbol index, `inspect_code` and `text_index` still do not see them; a text scan of the folder reaches
@@ -218,7 +218,7 @@ What is still missing:
 A VB project keeps the symbol index, the inspections and their fixes, the analysis, the metrics, the
 generation tools, the context actions, the style ids and **every refactoring in the catalogue except the
 three VB cannot express** — a record, a primary constructor, a nullable reference type. Those three are
-named in [reference/limits.md](reference/limits.md#language-and-platform-coverage).
+named in the [Visual Basic row of §1](#12-visual-basic).
 
 
 ### 1.3 F#
@@ -455,10 +455,26 @@ the whole surface the adapter exposes over DAP, plus one Roslyn capability on to
 
 Sessions survive across tool calls, so a stop that happened between two calls is still there.
 
-One thing stays outside, and it is not a missing tool. **Edit-and-continue and hot reload** need the
-metadata deltas the adapter applies only over GDB/MI; the substitute — `debug_restart rebuild=true`
-plus value editing — and the exact reason are in
-[reference/limits.md](reference/limits.md#debugger).
+What the adapter does not expose, and what stands in for it:
+
+- **Edit-and-continue and hot reload.** netcoredbg applies metadata deltas only over GDB/MI
+  (`-apply-deltas`, `--hot-reload`), and its DAP mode — the one this server speaks — has no request for
+  them; the .NET hot-reload agent is a separate protocol. The substitutes are `debug_restart rebuild=true`
+  (edit → build → relaunch with the same breakpoints) and `debug_evaluate newValue` (change a value while
+  stopped, then continue).
+- **A memory watchpoint.** There is no `dataBreakpointInfo`/`setDataBreakpoints`, so
+  `debug_data_breakpoints` breaks where the **source** writes the member — assignment, compound
+  assignment, `++`/`--`, a `ref`/`out` argument or an initializer. A write from code the solution does
+  not contain (a framework setter, reflection, a serialiser) does not stop, and a local variable is
+  refused because it lives in one frame.
+- **Hit and exception conditions are counted here, not by the adapter.** A stop that does not satisfy
+  one is resumed transparently, so `debug_continue` can absorb several hits before it returns
+  (`hitConditionSkips` says how many); the walk gives up after 500 absorbed hits and returns the stop it
+  has. The stop is matched to its breakpoint by file and line, because the adapter reports no breakpoint
+  id — a breakpoint the runtime moved to a different line is not counted. An exception type condition is
+  matched against the thrown type's hierarchy; `exceptionTypeSkips` counts the stops absorbed the same
+  way (500 maximum), and a type the model cannot resolve is matched by name only, which is also the
+  fallback when no solution is loaded.
 
 ---
 
@@ -682,7 +698,27 @@ the second says which call answers it or where the answer stops and why.
 
 ---
 
-## 11. How this inventory is maintained
+## 11. Boundaries that are not gaps
+
+Everything here is a property of the analysis, of the platform or of the tool it wraps — it is not a
+missing feature, and it is written down so a result is read for what it proves. The per-language map is
+§1; the debugger adapter's own surface is §2.
+
+| Boundary | What it means |
+|---|---|
+| What a rewrite gate proves | The compiler gate proves that a change compiles, never that it is correct. Behaviour is measured by `verify_change`, which compares two runs test by test; code the suite does not cover comes back `unverified` instead of being called safe |
+| What a scanner proves | `analyze_complexity`, the Razor rules and security scanning report patterns with their confidence: a green run means "no pattern matched", and `inspection_baseline` is what turns that into a statement about a change rather than about a moment |
+| Source-generated code | A generator's tree belongs to the compilation, not to a project document. `list_generated_sources` names the generators and the trees (and with `symbol=` the declarations inside them), and `find_symbol`/`read_symbol` read those trees. Every document-based tool works on documents, so the editors and refactorings, `reference_index`, `inspect_code` and `text_index` do not see them; `search_text`/`search_code` reach an emitted `.g.cs` file on disk when the glob covers it — the file, not its symbols |
+| Reflection and framework conventions | `find_unused_symbols` reports `frameworkInvoked` (classified by `framework_entry_points`) and `reflectionInvoked` (the symbols a reflective lookup names — a literal, `nameof`, `typeof` or a compile-time concatenation, resolved by simple or metadata name, the full list in `find_reflection_usage`) apart from `unused`. A name that is not a compile-time constant, such as `Type.GetType(assembledName)`, is not guessed |
+| Referenced assemblies | `find_external_usages` reports the surface the solution uses, with call sites and the assembly's version and path; `decompile_type` and `assembly_workspace` read its internals from that path. What the used surface does not state is what the assembly does internally, and no call graph crosses that boundary |
+| Razor and Blazor | A heuristic markup scanner (28 rules): markup inside `@{ … }`/`@code { … }` is C# and is not descended. The anti-forgery rule resolves the partials a form renders and searches their text, so a token built by a helper it does not name is a false positive to review and an unresolved partial counts as having no token. Duplicate ids are compared across the rendered composition — the page, the layout it declares or the one the nearest `_ViewStart.cshtml` selects, and the partials either renders. A rule whose answer depends on a runtime value stays silent, files over 2 MB and unreadable folders are reported as skipped, and `.cshtml`/`.razor` are not Roslyn documents: `razor_*` reads them from disk |
+| Metacode readers | The pseudocode model is a syntax model, not a language service: no type checking, no symbol navigation, no editing. Python and C++ are read from AST dumps — `translate_python_file`/`translate_cpp_file` produce one when CPython's `ast` or `clang` is on the machine, and a dump you supply is taken as it is; Java and Rust have a source frontend, and Go has a label in the model only. A construct the model has no node for stays `RAW[lang] … // reason` with a diagnostic, so a translation can be incomplete and says where. Ghidra and JADX are external tools with a real runtime cost: downloaded on first use, a JDK, a timeout |
+| Profiling | The target must expose a diagnostics IPC endpoint. Sampling is statistical, so short captures are noisy and the verdict tools refuse windows they cannot judge. Allocation sites need stack walks (`profile=gc`/`diagnose`). `file:line` needs PDBs (`profile_symbols` fetches them). ClrMD cannot attach to the server's own process. Inlining and async state machines hide user frames. `profile_async` and `profile_database` need their EventSource presets, and `profile_root_cause` needs PDBs plus a source file. Instrumentation writes a rewritten copy that must run beside the probe DLL. `profile_file_io` uses the Windows kernel ETW provider, so it is Windows-only and privileged. The native monitor answers bounded requests on loopback and is unauthenticated: do not expose its port |
+| Automation and safety | `run_command` is not sandboxed and runs with the server's privileges; `run_plan` can call any tool and any shell command, and its validation prevents broken plans, not dangerous ones; `confirm=true` is a guardrail, not authorization. The edit history records what this server wrote, per solution and per file, not what an IDE or a script wrote. The store is a cache: indexes are snapshots keyed on content hashes, so after large external changes rebuild them or reload the solution |
+
+---
+
+## 12. How this inventory is maintained
 
 - The ✅ side lives in [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md). This page is the
   ❌/⚠️ side and the reasons behind them.
@@ -693,7 +729,7 @@ the second says which call answers it or where the answer stops and why.
 
 ---
 
-## 12. Revision log
+## 13. Revision log
 
 The batches that closed rows on this page, newest first. A count is the live inventory at the end of the
 batch (`capability_report` prints the current one); the per-feature record of each batch is in
@@ -701,6 +737,8 @@ batch (`capability_report` prints the current one); the per-feature record of ea
 
 | # | Date | What closed | Tools |
 |---:|---|---|---|
+| 43 | 2026-11-01 | **The limits page stops being a second inventory.** Every boundary it listed now lives where it is checked against this build — the properties of the analysis, the Razor scanner, the metacode readers, profiling and the safety facts in [§11](#11-boundaries-that-are-not-gaps), the debugger adapter's own surface in §2, the language map in §1 — and `docs/reference/limits.md` states only requirements, what a result proves, the scope of the product and the license, with links to those sections. Nothing was dropped: the old page also claimed Java and Rust had no frontend, which stopped being true when `JavaFrontend`/`RustFrontend` shipped, and that stale row is gone with the table. Code in the same change: duplicate ids now follow a layout chosen in `_ViewStart.cshtml` — the nearest file to the page, and not applied to the layout or a partial, which select their own — through `RazorPartialResolver.ViewStartFor`; the test builds a page with two `_ViewStart` files and asserts the nearest layout is the one compared. 67/67 in the Razor suite | 420 (unchanged) |
+| 42 | 2026-11-01 | **The install needs nothing but the .NET SDK**: the POSIX routing guard and the installer's configuration edit are now modes of the published binary — `VisualMCP --hook pre-tool-use` answers the `PreToolUse` payload on stdin, `VisualMCP --config <mode> …` edits a client's JSON (server entry, hook matcher, AGENTS.md block) — so `hooks/pre-tool-use.py` and the Python program embedded in `scripts/install.sh` are gone, and `install.sh` no longer looks for an interpreter: it registers the guard unconditionally, and before using either mode it checks the resolved binary answers `--config` (a build from before this change would start the server instead). Both modes are ported rule for rule from the Python guard and covered by 32 tests (the decisions, the exact three-key payload, the JSON shapes, a foreign hook kept, an old Python hook replaced, the AGENTS block written once and removed). Same change: `SNITCH/.gitignore`'s exception for the C# source folder `Languages/**/Packages` still named the pre-`Implementations` path, so six NuGet service files were untracked and a clean clone did not compile — the exception follows the tree now and the files are back in git. The Windows guard stays `hooks/pre-tool-use.ps1` (PowerShell ships with the OS) | 420 (unchanged) |
 | 41 | 2026-11-01 | **The JavaScript/TypeScript module-resolution boundary of §10 narrows to what a static reader can prove**: one resolver (`JavaScriptPaths.Resolve`) now answers a specifier the way the project's tools do — a relative path (with the compiled-to-source extension and a directory `index`), a **`tsconfig.json`** `compilerOptions.baseUrl`/`paths` alias (the nearest config, read as TypeScript reads its own JSON: comments and a trailing comma allowed, one wildcard in pattern and target, the first existing target wins), or a **package** through the `node_modules` folders above the file (`types`/`typings`/`module`/`main`, a subpath, a scoped name, a directory index). `js_files` builds the module graph from it, so an alias-based application is no longer a set of unrelated files: an edge links two **scanned** scripts, a resolved dependency outside the scan is counted per file as `externalImports`, and `resolvedImports` counts every specifier that points at a file; JS0017 stays relative-only, because a package nothing installed is not a defect a scanner can prove. `js_symbols` resolves through the same function, so `refs` crosses a `@/…` import and `outline` reports a package import as resolved. What stays outside: a runtime alias neither `tsconfig.json` nor `node_modules` declares (a bundler plugin, an import map), a package `exports` condition map, and the type model itself. Three tests — the alias edge, a package counted and not walked, and the alias/package paths through `js_symbols`; 39/39 in the JavaScript suite | 420 (unchanged) |
 | 40 | 2026-11-01 | **The last VB refactoring paths close §10's VB row**: `generify` (a method or a type — the concrete type becomes `(Of T)`, constraints are written in VB's `As { … }` vocabulary, and a type parameter that cannot be inferred from the parameters is supplied as an explicit `(Of Concrete)` at every call site or reference; a self-referential type and an existing type-parameter list are refused), `global_usings` (every file's plain `Imports` becomes a project-level `<Import Include="…" />` item and the statement goes; the gate compiles the edited project with the new global imports applied to its options, then the solution reloads) and `transform_parameters` completes with `wrap` (a parameter object with a constructor and a property per parameter, call sites building it) and `replace-with-property` (a property on the receiver, the declaration and body rewritten, an assignment inserted before each call; a Shared method, a lambda call and a named-argument call are refused). Seven tests (4 generify, 2 new transform, 1 global usings); 10/10 across the three classes | 420 (unchanged) |
 | 39 | 2026-11-01 | **The CSS boundary of §10 is closed at the cascade**: `analyze_markup` gains **CSS0010** — every rule's declarations and its specificity are parsed (ids, then classes/attributes/pseudo-classes, then tags/pseudo-elements), the rule is matched against each page's element index, and a declaration that is overridden on **every** element it matches is reported (higher specificity, `!important`, or the same specificity and a later rule in the same file; equal specificity across two different files is treated as unknown because the link order is not in the scan). The rule/declaration parser is exposed as `MarkupAnalyzer.CssRules`, and `MarkupAnalysis` carries the rules. Three tests — the parser and specificity, the dead declaration, and a declaration that wins on some element and is not reported — 31/31 in the markup suite | 420 (unchanged) |

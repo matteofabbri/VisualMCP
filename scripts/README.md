@@ -73,10 +73,10 @@ The POSIX counterpart: same scopes, same config shapes, same routing guard.
 | `--no-hooks` | skips the routing guard |
 | `--hooks-only` | installs or removes only the guard |
 
-It needs `dotnet` (to publish) and, for the ZCode configuration and the routing hook, Python 3: the
-config is edited with `json`/`json.dump` so every existing key survives, and the POSIX hook
-(`hooks/pre-tool-use.py`) parses the JSON payload it receives. Claude Code is registered through its
-own CLI (`claude mcp add`), so that half needs no JSON editing.
+It needs `dotnet` to publish, and nothing else: the published binary edits the ZCode configuration
+(`--config`) and answers the routing guard (`--hook pre-tool-use`), both of which used to be a small
+Python program. The POSIX installer is a shell script around those two modes, and Claude Code is
+registered through its own CLI (`claude mcp add`).
 
 **Restart the client after any install or uninstall.** Hooks are read at session start, and the
 tool list is cached for the session — a client relaunches the server on the next tool call, but a

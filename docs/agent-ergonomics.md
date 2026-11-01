@@ -192,7 +192,7 @@ analysis, and `find_implementations`/`reference_index` use rises above zero.
 | Language | Area | State | Proof | Documented in |
 |---|---|---|---|---|
 | C# | style | 97 ids, 29 explained by category | `StyleRewriteCatalog` | guides/refactoring.md |
-| Visual Basic | style | 15 ids, 34 with a reason | `VbStyleRewriteCatalog` | reference/limits.md |
+| Visual Basic | style | 41 of the 49 ids, 8 refused by id with a reason | `VbStyleRewriteCatalog` | gaps.md §1.2 |
 | Visual Basic | the rest of the language | symbol index, structural search, format/usings/cleanup, VB-capable inspection packs and their fixers, dead code / smells / async / performance / complexity / metrics / clones / Big-O, rename + encapsulate_field + ParamArray, the 33 context actions with a VB spelling | `VisualBasicSymbolIndexFrontend`, `*.VisualBasic.cs`, `VbContextActionService` | gaps.md §1.2 |
 | Razor | markup analysis | 28 rules | `RazorRuleCatalog` | razor.md |
 | … | … | … | … | … |
@@ -217,7 +217,7 @@ carries the symbol that proves each row.
 ### W8 — Coverage numbers in the docs generated from W7
 
 **Change.** The counts in [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md),
-[reference/limits.md](reference/limits.md), [gaps.md](gaps.md) and
+[gaps.md](gaps.md) and
 [CAPABILITY_MAP.md](../CAPABILITY_MAP.md) are generated from W7 instead of typed. The corrections
 already made to those pages were made by hand, one line at a time, and nothing keeps them in step
 with the catalogues: the next rule added to `StyleRewriteCatalog` re-opens the same drift.

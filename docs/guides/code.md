@@ -187,7 +187,8 @@ run_tests
 
 - [Refactoring and style](refactoring.md) — how to change the code once you understand it
 - [Tool catalogue: analysis](../tools.md#analysis) — every analysis tool at a glance
-- [Limits](../reference/limits.md) — what static analysis cannot tell you
+- [Requirements and guarantees](../reference/limits.md) — what a result proves, and what it does not
+- [The gap inventory](../gaps.md) — every boundary, per language and per area
 
 ---
 

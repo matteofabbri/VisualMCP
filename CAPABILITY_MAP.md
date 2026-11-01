@@ -767,7 +767,7 @@ checklist tools stop writing a Markdown file.
 | Durable project memory | ✅ | `board_remember` / `board_recall` / `board_forget` — a topic has one current version; a new body supersedes the previous one (kept as history) instead of duplicating it, an identical body is a no-op, `forget` retires a topic without losing its versions. `pinned` notes ride along in `board_brief` and in the `board` block of `read_project_docs` |
 | The plan is a card | ✅ | `create_task_checklist{title, steps}` creates ONE card whose description holds the steps as a GFM checklist — no file is written; `update_task_checklist{id, done: [...]}` ticks them, `board_add{title, steps: [...]}` does the same on a card described by hand. `TaskChecklistService` no longer touches the disk |
 | The existing file notes migrate | ✅ | `MemoryImporter` reads `~/.claude/projects/<slug>/memory` and `~/.zcode/cli/memories/projects/<name>-*/memory`, then writes each note through `board_remember` (`topic = imported-<type>-<name>`, kind mapped from the frontmatter `type`), keyed on the body so a second pass imports nothing; the files stay where they are, they simply stop being the source |
-| The file route is refused | ✅ | both routing hooks (`hooks/pre-tool-use.py` for POSIX, `.ps1` for Windows) deny a `Write`/`Edit` into a memory store (`MEMORY.md`, `~/.zcode/.../memories`, `~/.claude/projects/<slug>/memory`) and the CREATION of a plan-like `.md` at the repository root or in `docs/`, naming `board_remember` / `create_task_checklist`; editing a document that already exists is never refused |
+| The file route is refused | ✅ | the routing guard (`VisualMCP --hook pre-tool-use` on Linux/macOS, `hooks/pre-tool-use.ps1` on Windows) denies a `Write`/`Edit` into a memory store (`MEMORY.md`, `~/.zcode/.../memories`, `~/.claude/projects/<slug>/memory`) and the CREATION of a plan-like `.md` at the repository root or in `docs/`, naming `board_remember` / `create_task_checklist`; editing a document that already exists is never refused |
 
 ---
 
@@ -802,9 +802,9 @@ push across a hierarchy.
 
 ---
 
-## 26. The last implementable §12 boundaries (2026-11-01)
+## 26. The last implementable boundaries of the gap inventory (2026-11-01)
 
-Four tools, each closing a boundary that section 12 of the gap inventory had stated with a reason.
+Four tools, each closing a boundary that the gap inventory had stated with a reason.
 **416 → 420 tools.**
 
 | Feature | Implemented | Notes |
@@ -876,7 +876,7 @@ What remains, in order of impact:
 
 | ReSharper / Rider feature | Priority | State |
 |---------------------------|:---:|-------|
-| Interactive debugger (breakpoints, stepping, watch, evaluate, debugging a test) | 🔴 High | ✅ closed on 2026-11-01: 20 `debug_*` tools on netcoredbg (DAP), `debug_test` included — line, function and data breakpoints, per-exception-type filters with the stopped exception's details, Set Value through `debug_evaluate newValue`, hit conditions counted by the server, and `debug_restart` with a rebuild. Edit-and-continue/hot reload is the one boundary: the adapter applies metadata deltas only over GDB/MI ([limits](docs/reference/limits.md#debugger)) |
+| Interactive debugger (breakpoints, stepping, watch, evaluate, debugging a test) | 🔴 High | ✅ closed on 2026-11-01: 20 `debug_*` tools on netcoredbg (DAP), `debug_test` included — line, function and data breakpoints, per-exception-type filters with the stopped exception's details, Set Value through `debug_evaluate newValue`, hit conditions counted by the server, and `debug_restart` with a rebuild. Edit-and-continue/hot reload is the one boundary: the adapter applies metadata deltas only over GDB/MI ([gaps §2](docs/gaps.md#2-debugger)) |
 | Language/platform scope: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Medium | ⚠️ closed on 2026-10-31 for XAML (dialect detection, inventory, XAML0001–0015 with the binding paths validated against their data type — including a root `<Root.DataContext>` element — the binding inspector, the element tree, navigation and four verified edits), Razor, SQL (SQL0001–SQL0012 scanner, with the DDL the scan reads as its schema model since 2026-11-01), EF migrations (`ef_migrations`, with `diff` between two migrations and `model-diff` against the snapshot since 2026-11-01), Kubernetes/Helm (`k8s_*`, with an offline kustomize render, a confirmed exec and offline chart lint since 2026-11-01) and the Node toolchain (npm/pnpm/yarn, tsc, eslint). **JS/TS** (toolchain only) and **F#** (build/test only: it is not a Roslyn language) remain without a semantic model |
 | Test flow: debugging a test, continuous testing, "which tests cover this symbol", scaffolding, mutation testing | 🟡 Medium | ✅ closed: `run_test`, `rerun_failed`, `debug_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `run_affected_tests`, `find_flaky_tests` |
 | Decompiled code as a workspace (go-to-definition, find usages) and IL view | 🟡 Medium | ✅ closed for navigation: `assembly_workspace` (search/source/il/references/outline over a Roslyn workspace per MVID) + `disassemble` for IL; `action=il` links the decompiled symbol and its IL. Rename and debugging in decompiled code remain impossible (there is no source to write) |

@@ -147,8 +147,9 @@ and F# get a scanner (they are not compilers), each with a rule set that states 
 JavaScript/TypeScript and F# also get a **lexical** symbol table (`js_symbols`, `fsharp_symbols`: names,
 the declaration a name resolves to, its references, no type model); the Node, Docker and Kubernetes
 toolchains are wrapped rather than reimplemented, with an offline manifest validator (`k8s_validate`).
-HTML and CSS are scanned, not rendered, and F# has no semantic model — on purpose, and stated in the
-[limits](docs/reference/limits.md). Everything is static analysis or process instrumentation: no
+HTML and CSS are scanned, not rendered, and F# has no semantic model — on purpose, and stated with the
+other boundaries in the [gap inventory](docs/gaps.md). Everything is static analysis or process
+instrumentation: no
 tool proves a change preserves behaviour, and none replaces your test suite.
 And it runs on your machine, locally — no hosted service, no account, no daemon. Your code leaves the
 box only in the conversation your client already sends to its model provider.
@@ -167,7 +168,7 @@ box only in the conversation your client already sends to its model provider.
 | profile a live process | [Profiling](docs/guides/profiling.md) |
 | use `run_plan`, planning, Git, GitHub, Docker | [Workflow and integrations](docs/guides/workflow.md) |
 | configure ports, paths and environment variables | [Configuration reference](docs/reference/configuration.md) |
-| know what it does **not** do | [Limits](docs/reference/limits.md) |
+| know what it does **not** do | [The gap inventory](docs/gaps.md) and [requirements/guarantees](docs/reference/limits.md) |
 | troubleshoot | [Help and FAQ](docs/help.md) |
 | contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 

@@ -85,7 +85,7 @@ walkthrough: [Getting started](getting-started.md).
 | [Profiling](guides/profiling.md) | Native CPU/GC/heap/I/O profiling, the verdict tools, artifacts and limits |
 | [Workflow and integrations](guides/workflow.md) | `run_plan`, planning, memory, Git, GitHub, Docker, files, HTTP and SignalR |
 | [Configuration reference](reference/configuration.md) | Environment variables, paths, ports, store tables, dashboard API |
-| [Limits](reference/limits.md) | The honest list of what the product does not do, and why |
+| [Requirements and guarantees](reference/limits.md) | What the server needs, what a result proves, and the scope of the product |
 | [Help and FAQ](help.md) | Troubleshooting, common questions, how to get support |
 | [Contributing](contributing.md) | Build, test, architecture rules, CLA |
 
@@ -168,10 +168,11 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   is checked by `k8s_validate` against the built-in kinds unless `server=true` asks the cluster for its
   OpenAPI and admission answer), and F# has no semantic
   layer (its compiler's diagnostics come through `build_project`). See
-  [Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage).
+  [the language map](gaps.md#1-language-and-platform-scope).
 - **Scope:** everything is static analysis or process instrumentation. No tool proves that a change
   preserves behaviour in general — the style rules that claim equivalence are checked operation by
-  operation — and no tool replaces your test suite. See [Limits](reference/limits.md).
+  operation — and no tool replaces your test suite. See
+  [Requirements and guarantees](reference/limits.md).
 
 ## License
 

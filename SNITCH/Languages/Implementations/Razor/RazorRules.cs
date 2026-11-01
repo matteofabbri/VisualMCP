@@ -65,9 +65,14 @@ public static class RazorRules
     /// Runs every rule over one document. <paramref name="resolvePartial"/> is what lets a rule look
     /// inside what a page renders: the anti-forgery check sees a token that lives in the partial a form
     /// includes, and the duplicate-id check compares the page with its declared layout and the partials
-    /// either renders. Without it the rules stay per file.
+    /// either renders. <paramref name="resolveViewStart"/> hands the rule the <c>_ViewStart.cshtml</c> that
+    /// applies to a page, so a view whose layout is selected there is compared with that layout too.
+    /// Without the resolvers the rules stay per file.
     /// </summary>
-    public static List<RazorFinding> Run(RazorDocument document, Func<string, RazorDocument?>? resolvePartial = null)
+    public static List<RazorFinding> Run(
+        RazorDocument document,
+        Func<string, RazorDocument?>? resolvePartial = null,
+        Func<string, RazorDocument?>? resolveViewStart = null)
     {
         var findings = new List<RazorFinding>();
 
@@ -83,7 +88,7 @@ public static class RazorRules
         CheckCleartextResources(document, findings);
         CheckDynamicIframe(document, findings);
         CheckInlineContent(document, findings);
-        CheckDuplicateIds(document, findings, resolvePartial);
+        CheckDuplicateIds(document, findings, resolvePartial, resolveViewStart);
         CheckImages(document, findings);
         CheckLabels(document, findings);
         CheckButtons(document, findings);
@@ -420,7 +425,8 @@ public static class RazorRules
     /// includes it.
     /// </summary>
     private static void CheckDuplicateIds(
-        RazorDocument document, List<RazorFinding> findings, Func<string, RazorDocument?>? resolvePartial)
+        RazorDocument document, List<RazorFinding> findings, Func<string, RazorDocument?>? resolvePartial,
+        Func<string, RazorDocument?>? resolveViewStart)
     {
         var own = IdsIn(document);
         var seen = new Dictionary<string, DocumentId>(StringComparer.Ordinal);
@@ -437,7 +443,7 @@ public static class RazorRules
 
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { document.FilePath };
         var composition = new List<RazorDocument>();
-        CollectComposition(document, resolvePartial, visited, depth: 0, composition);
+        CollectComposition(document, resolvePartial, resolveViewStart, visited, depth: 0, composition);
 
         var first = new Dictionary<string, DocumentId>(StringComparer.Ordinal);
         foreach (var id in own) first.TryAdd(id.Id, id);
@@ -473,22 +479,30 @@ public static class RazorRules
     }
 
     /// <summary>
-    /// The documents rendered into the same DOM as <paramref name="document"/>: the layout it declares
-    /// (and that layout's own layout), then every partial each renders. A cycle, a name that resolves to
+    /// The documents rendered into the same DOM as <paramref name="document"/>: the layout it declares —
+    /// or, for the page itself, the layout the nearest <c>_ViewStart.cshtml</c> selects for it — then
+    /// that layout's own layout, then every partial each renders. A cycle, a name that resolves to
     /// nothing and a nesting deeper than eight levels all stop the walk.
     /// </summary>
     private static void CollectComposition(
-        RazorDocument document, Func<string, RazorDocument?> resolvePartial, HashSet<string> visited,
-        int depth, List<RazorDocument> into)
+        RazorDocument document, Func<string, RazorDocument?> resolvePartial,
+        Func<string, RazorDocument?>? resolveViewStart, HashSet<string> visited, int depth,
+        List<RazorDocument> into)
     {
         if (depth >= 8) return;
 
-        if (!string.IsNullOrWhiteSpace(document.LayoutDirective))
+        // MVC runs the nearest _ViewStart.cshtml for the page being rendered, not for the layout or a
+        // partial it renders: those select their own layout with @layout or Layout = ….
+        var layoutName = document.LayoutDirective;
+        if (string.IsNullOrWhiteSpace(layoutName) && depth == 0 && resolveViewStart is not null)
+            layoutName = resolveViewStart(document.FilePath)?.LayoutDirective;
+
+        if (!string.IsNullOrWhiteSpace(layoutName))
         {
-            var layout = resolvePartial(document.LayoutDirective.Trim());
+            var layout = resolvePartial(layoutName.Trim());
             if (layout is not null && visited.Add(layout.FilePath))
             {
-                CollectComposition(layout, resolvePartial, visited, depth + 1, into);
+                CollectComposition(layout, resolvePartial, resolveViewStart, visited, depth + 1, into);
                 into.Add(layout);
             }
         }
@@ -498,7 +512,7 @@ public static class RazorRules
             var partial = resolvePartial(name);
             if (partial is null || !visited.Add(partial.FilePath)) continue;
 
-            CollectComposition(partial, resolvePartial, visited, depth + 1, into);
+            CollectComposition(partial, resolvePartial, resolveViewStart, visited, depth + 1, into);
             into.Add(partial);
         }
     }

@@ -20,9 +20,12 @@ powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1 -Uninstall
 
 | File | What it is | Where it is registered |
 |---|---|---|
-| `pre-tool-use.ps1` | Windows: a `PreToolUse` hook on the `Bash` tool. It reads the payload from stdin and answers with a deny decision naming the MCP tool that does the job | ZCode: `~/.zcode/cli/config.json` → `hooks.events.PreToolUse` + `hooks.enabled: true`. Claude Code: `~/.claude/settings.json` → `hooks.PreToolUse` |
-| `pre-tool-use.py` | Linux/macOS: the same hook in Python 3 (the payload is JSON), registered as `python3 "<path>"` and only when an interpreter is found | the same two places |
+| `pre-tool-use.ps1` | Windows: a `PreToolUse` hook on the `Bash` and `Write`/`Edit` tools (matcher `Bash\|Write\|Edit\|MultiEdit\|NotebookEdit`). It reads the payload from stdin and answers with a deny decision naming the MCP tool that does the job | ZCode: `~/.zcode/cli/config.json` → `hooks.events.PreToolUse` + `hooks.enabled: true`. Claude Code: `~/.claude/settings.json` → `hooks.PreToolUse` |
+| `the server binary` | Linux/macOS: the same guard, built in (`VisualMCP --hook pre-tool-use`, `src/VisualMCP/Install/RoutingGuard.cs`), registered with the same matcher. It needs no interpreter: the .NET runtime the server already needs is enough | the same two places |
 | `agents-block.md` | The same routing rules stated up front, as a managed block for an instruction file | `~/.zcode/AGENTS.md` (user scope, loaded in every workspace). Claude Code does not need it: it receives the server's `instructions` |
+
+The POSIX guard and the Windows script are two spellings of one decision, so a change to the rules
+goes in both (the C# one has unit tests in `RoutingGuardTests`).
 
 ## What is denied, and when
 

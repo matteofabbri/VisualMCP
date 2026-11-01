@@ -12,7 +12,7 @@ families of tools.
 |---|---|
 | **.NET 10 SDK** | The server targets `net10.0` and uses MSBuild/Roslyn to load solutions. |
 | **Windows 10/11, Linux or macOS** | The server and its installers run on all three: `scripts/install.ps1` on Windows, `scripts/install.sh` on Linux/macOS. |
-| **PowerShell 5.1+** (Windows) or **POSIX sh + Python 3** (Linux/macOS) | Runs the installer; on Linux/macOS Python 3 is also what the routing hook uses. |
+| **PowerShell 5.1+** (Windows) or **POSIX sh** (Linux/macOS) | Runs the installer. The routing guard runs from the installed server binary, so no other interpreter is needed. |
 | An AI client with MCP support | ZCode, Claude Code, or any client that can start a stdio MCP server. |
 
 Visual Studio is **not** required. Optional integrations light up only when their tool is present:
@@ -96,11 +96,11 @@ that close that gap:
 
 | Piece | What it does | Where it goes |
 |---|---|---|
-| `hooks\pre-tool-use.ps1` (Windows) / `hooks/pre-tool-use.py` (Linux/macOS) | Denies read-only shell probes (`grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `Select-String`, `Get-Content`, `Get-ChildItem`) and shell file writes in a folder with a visible `.sln`/`.slnx`. Replies with the tool to use instead. | ZCode `hooks.events.PreToolUse`; Claude Code `hooks.PreToolUse` |
+| `hooks\pre-tool-use.ps1` (Windows) / `VisualMCP --hook pre-tool-use` (Linux/macOS) | Denies read-only shell probes (`grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `Select-String`, `Get-Content`, `Get-ChildItem`) and shell file writes in a folder with a visible `.sln`/`.slnx`. Replies with the tool to use instead. | ZCode `hooks.events.PreToolUse`; Claude Code `hooks.PreToolUse` |
 | `hooks\agents-block.md` | States the routing rules up front, and why C# semantics need Roslyn rather than text matching. | `~/.zcode/AGENTS.md` (user scope) |
 
-The POSIX hook is a small Python 3 script (it reads a JSON payload); the installer registers it only
-when an interpreter is found. Build, test, git and non-.NET trees are never touched. Two escape hatches
+The POSIX guard is a mode of the server binary (`src/VisualMCP/Install/RoutingGuard.cs`), so it reads the
+JSON payload with no interpreter of its own. Build, test, git and non-.NET trees are never touched. Two escape hatches
 exist for genuine shell cases: the MCP tool `run_command` (same command, still logged) and the literal
 token `vmcp-allow` in the command.
 

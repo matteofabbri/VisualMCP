@@ -120,7 +120,7 @@ and branch rates per class and per method.
 The debug tools drive a real netcoredbg session over the Debug Adapter Protocol. A session id comes
 from `debug_launch` or `debug_attach` and stays valid across calls; `debug_sessions` lists the live
 ones. The engine notes — what the adapter cannot do and what stands in — are in
-[limits.md](limits.md#debugger).
+[gaps §2](../gaps.md#2-debugger).
 
 ```
 debug_launch(program?, projectName?, programArgs?, workingDirectory?, environmentJson?,

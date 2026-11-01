@@ -10,6 +10,16 @@ using Snitch;
 using Snitch.Languages.VB;
 using Snitch.Platform;
 
+// The routing guard and the installer's configuration edit run from this same executable and touch
+// neither MSBuild nor a workspace: --hook answers the PreToolUse payload on stdin, --config edits an
+// installed client's configuration. Handling them first is what lets an install need no interpreter
+// beyond the .NET SDK it already requires.
+if (VisualMCP.Install.InstallCommandLine.TryRun(args, out var installExitCode))
+{
+    Environment.ExitCode = installExitCode;
+    return;
+}
+
 // Redirect stdout to null immediately: the MCP stdio transport uses the raw
 // stdout stream directly, so Console.SetOut does not affect it, but it does
 // prevent any stray text (host startup banners, log lines) from corrupting

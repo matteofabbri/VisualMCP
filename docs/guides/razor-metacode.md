@@ -107,8 +107,8 @@ Safety:
   `RenderPartial` family) and looks for the token inside them, nested includes included. The search is
   textual, so a token built by a helper the rule does not name can still be reported, and a partial it
   cannot resolve counts as having no token. Duplicate ids (`RZ2003`) are compared across the rendered
-  composition: the page, the layout it declares (`@layout` or `Layout = "…"`) and the partials either
-  renders. A layout selected in `_ViewStart` is not followed.
+  composition: the page, the layout it declares (`@layout` or `Layout = "…"`) or the one the nearest
+  `_ViewStart.cshtml` selects for it, and the partials either renders.
 - Dynamic values (`method="@Model.Method"`) are not guessed: rules that depend on them stay silent.
 - Files over 2 MB and unreadable folders are reported as `skipped`/`unreadable`, not analysed.
 

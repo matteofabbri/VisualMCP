@@ -105,7 +105,8 @@ being the source. The first `read_project_docs` of a session returns a `memoryIm
 moved. Set `VISUALMCP_MEMORY_IMPORT=off` to skip the pass.
 
 `docs/gaps.md`, a backlog file and a `MEMORY.md` are historical records; the board is the plan and the
-memory. The routing hooks (`hooks/pre-tool-use.py`, `hooks/pre-tool-use.ps1`) enforce it: they deny a
+memory. The routing guard (`VisualMCP --hook pre-tool-use` on Linux/macOS, `hooks/pre-tool-use.ps1` on
+Windows) enforces it: it denies a
 `Write`/`Edit` into a memory store and the creation of a plan-like `.md` at the repository root or in
 `docs/`, naming the tool that does the job instead. Editing a document that already exists is never
 refused.

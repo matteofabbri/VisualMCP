@@ -254,7 +254,7 @@ and, in the last column, exactly where it stops.
 
 The batches that changed this page or the count it quotes, newest first. A count is the live inventory at
 the end of the batch (`capability_report` prints the current one); the product-wide numbered log, with
-every batch and the rows it closed, is [gaps.md §12](gaps.md#12-revision-log).
+every batch and the rows it closed, is [gaps.md §13](gaps.md#13-revision-log).
 
 | Date | What changed | Tools |
 |---|---|---|

@@ -363,6 +363,24 @@ public sealed class RazorPartialResolver
     public Func<string, RazorDocument?> For(string? fromDirectory) =>
         name => Resolve(name, fromDirectory);
 
+    /// <summary>
+    /// The <c>_ViewStart.cshtml</c> that applies to a page: the nearest one in its folder or above it, which
+    /// is MVC's own rule (a nested file overrides the one at the root). Null when the page has none, and
+    /// never more than 16 levels up, so a page outside the tree does not walk the disk.
+    /// </summary>
+    public RazorDocument? ViewStartFor(string pagePath)
+    {
+        var directory = Path.GetDirectoryName(pagePath);
+        for (var depth = 0; directory is not null && depth < 16; depth++)
+        {
+            var candidate = Path.Combine(directory, "_ViewStart.cshtml");
+            if (File.Exists(candidate)) return Resolve(candidate, fromDirectory: null);
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return null;
+    }
+
     private RazorDocument? Resolve(string name, string? fromDirectory)
     {
         var relative = Normalise(name);

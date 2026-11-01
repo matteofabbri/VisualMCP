@@ -179,4 +179,4 @@ copy. Set `VisualMCPInstallOnBuild=false` in the project or the environment to o
 
 ---
 
-Next: [Limits](limits.md) · [Help and FAQ](../help.md)
+Next: [Requirements and guarantees](limits.md) · [Help and FAQ](../help.md)

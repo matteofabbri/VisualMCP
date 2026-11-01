@@ -127,7 +127,8 @@ Three further mechanisms make writes auditable and reversible:
 - **The compiler gate.** Risky refactorings and `simplify_code` compile the project after the change
   and refuse it if it would add errors; the file is left untouched. Style rules that claim equivalence
   are also compared operation-by-operation against the code they replace; for every other rewrite the
-  gate proves *compilation*, not behavioural equivalence — see [Limits](reference/limits.md).
+  gate proves *compilation*, not behavioural equivalence — see
+  [Requirements and guarantees](reference/limits.md).
 - **The edit history.** Every write goes through the same file writer, which preserves the file's BOM
   and line endings and records the previous text (compressed) in `applied_edit`. `edit_history` lists
   each write with the tool that made it and whether it is still revertible; `revert_edit(id)` restores
