@@ -482,8 +482,8 @@ compiler's own `FS####` diagnostics.
 
 | Tool | What it does |
 |---|---|
-| `metacode_translate` | Lower C#, Visual Basic, Java, JavaScript, Rust, Python, C/C++, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed; a `.py`/`.cpp` path is put through its dumper first, a `.rs` path is read directly with no toolchain |
-| `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check, Python, C++ and Rust included |
+| `metacode_translate` | Lower C#, Visual Basic, Java, JavaScript, Rust, Python, C/C++, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed; a `.py`/`.cpp` path is put through its dumper first (a C++ one with `filter`/`clangArgs`), a `.rs` path is read directly with no toolchain |
+| `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check, Python, C++ and Rust included; leading indentation is ignored when aligning, so a C# method compares with the C++ function it ports |
 | `metacode_index` | The solution's metacode persisted in `.visualMCP/visualmcp.db`: status, build, model-level cyclomatic/cognitive complexity, stored trees, and the complete AST (`ast`: every node with parent link, property slot, position, depth, span and payload) |
 | `metacode_generate` | Generate C# from pseudocode, a stored tree or a file; what C# cannot express is lowered with a diagnostic |
 | `translate_python_file` | Translate a `.py` file into canonical pseudocode (runs CPython's `ast` dumper, or accepts a supplied dump) |

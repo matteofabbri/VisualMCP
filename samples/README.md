@@ -8,6 +8,7 @@ directory (the root solution stays active until you call `load_solution`).
 | Sample | Language | What it demonstrates |
 |---|---|---|
 | [VbDemo](VbDemo/README.md) | Visual Basic | the whole VB surface: load, build, test, run, navigation, text index, and the 15 `simplify_vb_code` rules on a deliberately unidiomatic `StyleGallery.vb` |
+| [Cpp](Cpp/README.md) | C++ | the C++ metacode reader on real code: `metacode_translate` with `filter`/`clangArgs` (classes, templates, exceptions, operators, range-for — 0 diagnostics), `metacode_compare` against a C# port, and the `RAW[cpp]` list for what the model deliberately does not have |
 
 ## VbDemo
 

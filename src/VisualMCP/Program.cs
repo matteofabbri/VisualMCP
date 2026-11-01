@@ -212,8 +212,11 @@ static async Task RunServerAsync(string[] args)
         "sides, then diffs the canonical text line by line; any mix of C#/VB/Java/JS/Rust/Razor/Ghidra/pseudocode).\n" +
         "- Read a PYTHON or C/C++ file in that same pseudocode: metacode_translate / metacode_compare take a .py or " +
         ".cpp/.h path, or language=python|cpp with source text, and run the dumper for you (CPython's ast, clang " +
-        "-ast-dump=json); pass the dump itself to skip that step. The dedicated translate_python_file / " +
-        "translate_cpp_file return the dump as a step of their own.\n" +
+        "-ast-dump=json); pass the dump itself to skip that step. A real C++ file needs two arguments: filter=<a " +
+        "namespace or type in it> (clang's -ast-dump-filter; without it the dump is the whole standard library, " +
+        "hundreds of MB) and clangArgs=\"-std=c++20 -I../include\" (the project's own flags, resolved from the " +
+        "file's folder). The dedicated translate_python_file / translate_cpp_file return the dump as a step of " +
+        "their own.\n" +
         "- Read a RUST file in that same pseudocode -> metacode_translate / metacode_compare on a .rs path (or " +
         "language=rust): the Rust reader parses the source itself, so no cargo, rustc or nightly toolchain is involved. " +
         "An impl block prints as a CLASS named after the type it implements, and a macro or the ? operator stays RAW[rs] " +

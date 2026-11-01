@@ -119,18 +119,26 @@ internal sealed class CppLowering
 
     private IEnumerable<MetacodeDeclaration> Declarations(JsonElement node, CppAccess access)
     {
+        // clang materializes what the source did not write: the injected class name, the copy/move
+        // constructor and assignment, the destructor. They are the compiler's members, not the program's.
+        if (IsImplicit(node))
+            yield break;
+
+        // `final`, `override`, `nodiscard` … arrive as attribute declarations next to the member they
+        // qualify; the modifier they mean is already on the member, so the attribute is not noise to keep.
+        if (Kind(node).EndsWith("Attr", StringComparison.Ordinal))
+            yield break;
+
         switch (Kind(node))
         {
             case "CXXRecordDecl":
             case "RecordDecl":
-                if (IsImplicit(node) || !IsCompleteDefinition(node))
+                if (!IsCompleteDefinition(node))
                     yield break;
                 yield return Type(node);
                 break;
 
             case "EnumDecl":
-                if (IsImplicit(node))
-                    yield break;
                 yield return Enumeration(node);
                 break;
 
@@ -165,10 +173,6 @@ internal sealed class CppLowering
 
             case "TypeAliasDecl":
             case "TypedefDecl":
-                // A translation unit carries implicit typedefs (__int128_t and friends) that no source
-                // wrote; they are the compiler's, not the program's.
-                if (IsImplicit(node))
-                    yield break;
                 yield return new MetacodeTypeAlias(Text(node, "name") ?? "?", TypeRef(node)) { Origin = Origin(node) };
                 break;
 
@@ -321,31 +325,21 @@ internal sealed class CppLowering
             .Select(child => new MetacodeTypeParameter(Text(child, "name") ?? "?"))
             .ToList();
 
-    private MetacodeExpression? DefaultValue(JsonElement node)
+    private MetacodeExpression? DefaultValue(JsonElement node) => FirstExpression(node);
+
+    private MetacodeExpression? Initializer(JsonElement node) => FirstExpression(node);
+
+    /// <summary>
+    /// The first child that is an expression. The kind list an initializer can hold is not a list worth
+    /// keeping: clang wraps a plain <c>0</c> in an <c>ImplicitCastExpr</c>, so filtering by kind loses the
+    /// initializer of <c>Money sum = 0;</c> — the wrapper is unwrapped by <see cref="Expression"/> instead.
+    /// </summary>
+    private MetacodeExpression? FirstExpression(JsonElement node)
     {
         foreach (var child in Items(Field(node, "inner")))
         {
-            if (Kind(child) is "IntegerLiteral" or "FloatingLiteral" or "StringLiteral" or "CXXBoolLiteralExpr"
-                or "UnaryOperator" or "BinaryOperator" or "DeclRefExpr" or "CXXNullPtrLiteralExpr")
-            {
+            if (IsExpression(child))
                 return Expression(child);
-            }
-        }
-
-        return null;
-    }
-
-    private MetacodeExpression? Initializer(JsonElement node)
-    {
-        foreach (var child in Items(Field(node, "inner")))
-        {
-            if (Kind(child) is "IntegerLiteral" or "FloatingLiteral" or "StringLiteral" or "CXXBoolLiteralExpr"
-                or "CXXConstructExpr" or "InitListExpr" or "CallExpr" or "CXXNewExpr" or "BinaryOperator"
-                or "UnaryOperator" or "DeclRefExpr" or "CXXNullPtrLiteralExpr" or "ConditionalOperator"
-                or "LambdaExpr")
-            {
-                return Expression(child);
-            }
         }
 
         return null;
@@ -478,6 +472,9 @@ internal sealed class CppLowering
                 return new MetacodeThrow(value.ValueKind == JsonValueKind.Object ? Expression(value) : null) { Origin = origin };
             }
 
+            case "CXXDeleteExpr":
+                return OpaqueStatement(node, "delete has no node yet");
+
             case "CaseStmt":
             case "DefaultStmt":
                 return OpaqueStatement(node, "a case outside a switch body");
@@ -489,6 +486,16 @@ internal sealed class CppLowering
 
     private MetacodeStatement? ExpressionOrStatement(JsonElement node, MetacodeOrigin origin)
     {
+        // A throw or a delete whose operand is a temporary arrives inside a cleanup wrapper:
+        // `throw std::invalid_argument("…")` is ExprWithCleanups(CXXThrowExpr(…)). Unwrapping here keeps
+        // it a statement instead of an opaque expression.
+        if (Kind(node) is "ExprWithCleanups" or "CXXBindTemporaryExpr" or "MaterializeTemporaryExpr" or "ConstantExpr")
+        {
+            var inner = Items(Field(node, "inner")).FirstOrDefault();
+            if (inner.ValueKind == JsonValueKind.Object && Kind(inner) is "CXXThrowExpr" or "CXXDeleteExpr")
+                return Statement(inner);
+        }
+
         if (!IsExpression(node))
             return OpaqueStatement(node, "unmodelled statement: " + Kind(node));
 
@@ -564,20 +571,22 @@ internal sealed class CppLowering
         var body = children.LastOrDefault(child => Kind(child) == "CompoundStmt");
         var declarations = children.Where(child => Kind(child) == "DeclStmt").ToList();
 
-        // Two declarations: __range first, the loop variable second.
+        // clang desugars the loop into `__range`, `__begin`, `__end` and the loop variable, each in its own
+        // DeclStmt: the range is the FIRST declaration and the loop variable the LAST, whatever clang puts
+        // between them in this version.
         if (body.ValueKind != JsonValueKind.Object || declarations.Count < 2)
             return OpaqueStatement(node, "range-based for without a loop variable or a body");
 
-        var variable = Items(Field(declarations[1], "inner")).FirstOrDefault(child => Kind(child) == "VarDecl");
+        var variable = Items(Field(declarations[^1], "inner")).FirstOrDefault(child => Kind(child) == "VarDecl");
         var range = Items(Field(declarations[0], "inner")).FirstOrDefault(child => Kind(child) == "VarDecl");
-        var source = Items(Field(range, "inner")).FirstOrDefault(child => child.ValueKind == JsonValueKind.Object);
-        if (variable.ValueKind != JsonValueKind.Object || source.ValueKind != JsonValueKind.Object)
+        var source = range.ValueKind == JsonValueKind.Object ? FirstExpression(range) : null;
+        if (variable.ValueKind != JsonValueKind.Object || source is null)
             return OpaqueStatement(node, "range-based for without a range expression");
 
         return new MetacodeForEach(
             Text(variable, "name") ?? "?",
             TypeRef(variable),
-            Expression(source),
+            source,
             Block(body)) { Origin = Origin(node) };
     }
 
@@ -639,7 +648,7 @@ internal sealed class CppLowering
                 return new MetacodeLiteral(MetacodeLiteralKind.Number, Scalar(node, "value") ?? "?") { Origin = origin };
 
             case "StringLiteral":
-                return new MetacodeLiteral(MetacodeLiteralKind.String, Quote(Scalar(node, "value") ?? string.Empty)) { Origin = origin };
+                return new MetacodeLiteral(MetacodeLiteralKind.String, Quoted(Scalar(node, "value") ?? string.Empty)) { Origin = origin };
 
             case "CharacterLiteral":
                 return new MetacodeLiteral(
@@ -829,10 +838,14 @@ internal sealed class CppLowering
 
     private MetacodeExpression OperatorCall(JsonElement node)
     {
-        var name = ReferencedName(node) ?? string.Empty;
         var children = Items(Field(node, "inner")).ToList();
         if (children.Count == 0)
             return Opaque(node);
+
+        // The operator's declaration is behind the callee, which clang wraps in an
+        // ImplicitCastExpr(FunctionToPointerDecay) around the DeclRefExpr — reading the call node's own
+        // referencedDecl finds nothing, which made every overloaded operator opaque.
+        var name = CalledName(children[0]) ?? CalledName(node) ?? string.Empty;
 
         var arguments = children.Skip(1).Select(Expression).ToList();
         switch (name)
@@ -1039,10 +1052,35 @@ internal sealed class CppLowering
     private static string Quote(string value) =>
         "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", string.Empty) + "\"";
 
+    /// <summary>clang's <c>StringLiteral</c> value already carries its quotes (<c>"draft"</c>, with the escapes the source wrote).</summary>
+    private static string Quoted(string value) =>
+        value.Length >= 2 && value[0] == '"' && value[^1] == '"' ? value : Quote(value);
+
     private static string? ReferencedName(JsonElement node) =>
         node.TryGetProperty("referencedDecl", out var referenced) && referenced.ValueKind == JsonValueKind.Object
             ? Text(referenced, "name")
             : null;
+
+    /// <summary>
+    /// The name a callee calls: clang wraps the <c>DeclRefExpr</c> of an overloaded operator in
+    /// <c>ImplicitCastExpr(FunctionToPointerDecay)</c>, and a member operator is a <c>MemberExpr</c>, so the
+    /// name is found by following the single-child wrappers.
+    /// </summary>
+    private static string? CalledName(JsonElement node)
+    {
+        var current = node;
+        for (var depth = 0; depth < 8 && current.ValueKind == JsonValueKind.Object; depth++)
+        {
+            var name = ReferencedName(current) ?? Text(current, "name");
+            if (!string.IsNullOrEmpty(name)) return name;
+
+            var inner = Items(Field(current, "inner")).FirstOrDefault();
+            if (inner.ValueKind != JsonValueKind.Object) break;
+            current = inner;
+        }
+
+        return null;
+    }
 
     private static string Kind(JsonElement node) => Text(node, "kind") ?? string.Empty;
 
@@ -1094,10 +1132,26 @@ internal sealed class CppLowering
         return new MetacodeOrigin(
             MetacodeLanguage.Cpp,
             null,
-            Integer(node, "loc.line"),
+            Line(node),
             Integer(node, "loc.col"),
             Integer(node, "range.end.line"),
             Integer(node, "range.end.col"));
+    }
+
+    /// <summary>
+    /// clang's JSON omits a location when it repeats the previous one, so a node may carry only its range
+    /// and an expression may carry only an offset. The first line that is there is the one to report;
+    /// where none is, the origin stays unknown rather than guessed.
+    /// </summary>
+    private static int Line(JsonElement node)
+    {
+        foreach (var path in new[] { "loc.line", "loc.spellingLoc.line", "loc.expansionLoc.line", "range.begin.line", "range.end.line" })
+        {
+            var line = Integer(node, path);
+            if (line > 0) return line;
+        }
+
+        return 0;
     }
 
     private static int Integer(JsonElement node, string path)

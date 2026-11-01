@@ -157,19 +157,23 @@ public sealed class CppMetacodeTests
     }
 
     [Fact]
-    public async Task metacode_translate_runs_the_dumper_for_a_cpp_path()
+    public async Task metacode_translate_runs_the_dumper_for_a_cpp_path_or_says_what_is_missing()
     {
-        if (!CompilerIsPresent("clang++") && !CompilerIsPresent("clang"))
-            return; // no clang on this machine: the dump paths above are the ones under test.
-
         var path = TempFile("sample.cpp", "int add(int a)\n{\n    return 1;\n}\n");
         try
         {
             var result = Assert.IsType<CallToolResult>(
-                await MetacodeTranslateTool.Translate(new SourceDumpTranslationService(), path: path, timeoutSeconds: 120));
+                await MetacodeTranslateTool.Translate(new SourceDumpTranslationService(), path: path, timeoutSeconds: 180));
 
-            Assert.NotEqual(true, result.IsError);
             var text = Text(result);
+            if (result.IsError == true)
+            {
+                // No clang on PATH, none in an LLVM folder and none in the Visual Studio toolset.
+                Assert.Contains("No Clang compiler could produce the AST dump", text);
+                Assert.Contains("Install Clang", text);
+                return;
+            }
+
             Assert.Contains("add(a", text);
             Assert.Contains("RETURN 1", text);
             Assert.Contains(" · cpp · ", text); // the header line names the language
@@ -181,26 +185,65 @@ public sealed class CppMetacodeTests
     }
 
     [Fact]
-    public async Task metacode_translate_says_how_to_install_the_dumper_when_it_is_missing()
+    public async Task A_real_cpp_file_is_dumped_with_clang_and_filtered_to_its_own_namespace()
     {
-        if (CompilerIsPresent("clang++") || CompilerIsPresent("clang"))
-            return; // clang is here: the path above exercises the real dump instead.
+        var path = TempFile("sample.cpp", """
+            #include <vector>
 
-        var path = TempFile("sample.cpp", "int add(int a)\n{\n    return 1;\n}\n");
+            namespace aggregator
+            {
+                int total(const std::vector<int>& values)
+                {
+                    int sum = 0;
+                    for (int value : values)
+                    {
+                        sum += value;
+                    }
+                    return sum;
+                }
+            }
+            """);
         try
         {
-            var result = Assert.IsType<CallToolResult>(
-                await MetacodeTranslateTool.Translate(new SourceDumpTranslationService(), path: path));
+            // The filter is a substring of the qualified name, so it has to be a name nothing else
+            // contains ("demo" also matches the _cldemote intrinsic, for instance).
+            var dump = await new SourceDumpTranslationService().ProduceDumpAsync("cpp", path, null, 180, "aggregator");
+            if (dump.Error is not null && dump.Error.Contains("No Clang compiler", StringComparison.Ordinal))
+                return; // no clang anywhere on this machine: the dump paths above are the ones under test.
 
-            Assert.True(result.IsError);
-            var text = Text(result);
-            Assert.Contains("No Clang compiler could produce the AST dump", text);
-            Assert.Contains("Install Clang", text);
+            Assert.Null(dump.Error);
+            Assert.True(
+                dump.Json!.Length < 1_000_000,
+                $"the filter has to keep the standard library out; the dump is {dump.Json.Length} chars");
+
+            var document = MetacodeTranslator.Default.Translate(MetacodeSource.FromCppAst(dump.Json, "sample.cpp"));
+            Assert.Equal(MetacodeLanguage.Cpp, document.Language);
+
+            var pseudocode = new PseudocodeRenderer().Render(document);
+            Assert.Contains("NAMESPACE aggregator", pseudocode);
+            Assert.Contains("FUNCTION total", pseudocode);
+            Assert.Contains("FOREACH", pseudocode);
         }
         finally
         {
             Delete(path);
         }
+    }
+
+    [Fact]
+    public void A_filtered_dump_is_collected_under_one_translation_unit()
+    {
+        var combined = SourceDumpTranslationService.CombineFilteredDump(
+            "{ \"kind\": \"FunctionDecl\", \"name\": \"a\" }\n{ \"kind\": \"FunctionDecl\", \"name\": \"b\" }\n");
+
+        Assert.NotNull(combined);
+        using var document = System.Text.Json.JsonDocument.Parse(combined!);
+        var root = document.RootElement;
+        Assert.Equal("TranslationUnitDecl", root.GetProperty("kind").GetString());
+        Assert.Equal(2, root.GetProperty("inner").GetArrayLength());
+        Assert.Equal("b", root.GetProperty("inner")[1].GetProperty("name").GetString());
+
+        Assert.Null(SourceDumpTranslationService.CombineFilteredDump("   \n"));
     }
 
     [Fact]
@@ -244,27 +287,6 @@ public sealed class CppMetacodeTests
         catch
         {
             // best-effort: a locked temp folder is not a test failure
-        }
-    }
-
-    private static bool CompilerIsPresent(string name)
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(name, "--version")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            });
-            if (process is null) return false;
-            process.WaitForExit(5000);
-            return process.HasExited && process.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
         }
     }
 }

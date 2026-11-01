@@ -27,11 +27,16 @@ internal static class MetacodeToolHelpers
         string? language,
         string side,
         ISourceDumpTranslationService dumps,
-        int timeoutSeconds)
+        int timeoutSeconds,
+        string? filter = null,
+        string? clangArgs = null)
     {
         var tag = Normalize(language) ?? InferDumpTag(path);
         if (tag is "cpp" or "python")
-            return await LoadDumpAsync(path, text, tag, side, dumps, timeoutSeconds);
+            return await LoadDumpAsync(path, text, tag, side, dumps, timeoutSeconds, filter, clangArgs);
+
+        if (!string.IsNullOrWhiteSpace(filter) || !string.IsNullOrWhiteSpace(clangArgs))
+            return (null, $"{side}: filter and clangArgs apply to C++ only (language='cpp' on a .cpp/.h path).");
 
         if (!string.IsNullOrWhiteSpace(path))
         {
@@ -61,7 +66,7 @@ internal static class MetacodeToolHelpers
     /// </summary>
     private static async Task<(MetacodeSource? Source, string? Error)> LoadDumpAsync(
         string? path, string? text, string tag, string side,
-        ISourceDumpTranslationService dumps, int timeoutSeconds)
+        ISourceDumpTranslationService dumps, int timeoutSeconds, string? filter, string? clangArgs)
     {
         if (!string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith('{'))
         {
@@ -87,7 +92,9 @@ internal static class MetacodeToolHelpers
             tag,
             string.IsNullOrWhiteSpace(text) ? path : null,
             string.IsNullOrWhiteSpace(text) ? null : text,
-            timeoutSeconds);
+            timeoutSeconds,
+            filter,
+            clangArgs);
 
         if (dump.Error is not null)
         {

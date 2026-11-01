@@ -179,10 +179,28 @@ options every other language goes through. A dump produced elsewhere is accepted
 with the language, or save it as a `.json`, which `MetacodeSource.FromFile` recognises by content (a clang
 root `TranslationUnitDecl`, a CPython root `_type: Module`, alongside the Ghidra snapshot it already
 sniffed). Source text given with `language='cpp'`/`'python'` is written to a temporary file for the dumper, so
-a C++ translation unit that includes a header next to it has to be passed as a path. The two dedicated tools
-remain the shorter road when the dump is the deliverable: `translate_python_file` runs the dumper below,
-`translate_cpp_file` runs `clang -ast-dump=json`; both accept a ready-made dump (`dumpJson`). The Python
-dumper, if you want to run it by hand — one file, no dependencies:
+a C++ translation unit that includes a header next to it has to be passed as a path.
+
+Two C++ arguments make a real translation unit usable, and they apply to C++ only:
+
+- **`filter`** is clang's `-ast-dump-filter`: keep the declarations whose qualified name contains the text.
+  A dump is the whole translation unit, standard library included — a three-line file that includes
+  `<vector>` dumps 304 MB of JSON — and a namespace takes it to kilobytes. The match is a **substring** of
+  the qualified name, so pick a namespace that does not occur elsewhere (`demo` also matches the `_cldemote`
+  intrinsic). The filtered dump is a sequence of JSON documents, which the reader collects under one
+  translation unit.
+- **`clangArgs`** is the project's own configuration — `-std=c++20`, `-I../include`, `-DFOO=1` — passed
+  verbatim and resolved from the file's folder, which is the working directory of the run.
+
+Clang itself is looked for on `PATH` first and then in the LLVM toolset Visual Studio ships
+(`VC\Tools\Llvm\x64\bin\clang.exe`, found through `vswhere`), or at `VISUALMCP_CLANG`; a machine with the
+C++ workload therefore needs no separate compiler install. A **non-zero clang exit is reported as an
+error**, even though clang still prints a tree: that tree is its recovery (`RecoveryExpr`), not the program.
+
+The two dedicated tools remain the shorter road when the dump is the deliverable: `translate_python_file`
+runs the dumper below, `translate_cpp_file` runs `clang -ast-dump=json`; both accept a ready-made dump
+(`dumpJson`) and `translate_cpp_file` takes `filter`/`clangArgs` too. The Python dumper, if you want to run
+it by hand — one file, no dependencies:
 
 ```python
 import ast, json, sys

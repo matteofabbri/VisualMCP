@@ -286,7 +286,7 @@ text with `language=python|cpp`, is put through the dumper first (CPython's `ast
 metacode_translate(path? | text+language=cs|vb|java|js|rust|py|cpp|razor|ghidra|pseudo,
                    showOrigin=false, includeComments=true,
                    normalizeControlFlow=true, flattenNestedBlocks=true,
-                   timeoutSeconds=120)
+                   filter?, clangArgs?, timeoutSeconds=120)
                 → the canonical pseudocode, then `// diagnostics (n)` with one line
                   per RAW construct (MC0001–MC0008)
 
@@ -294,9 +294,21 @@ metacode_compare(leftPath? | leftText+leftLanguage?,
                  rightPath? | rightText+rightLanguage?,
                  showOrigin=false, includeComments=true,
                  normalizeControlFlow=true, flattenNestedBlocks=true,
-                 timeoutSeconds=120)
+                 leftFilter?, rightFilter?, clangArgs?, timeoutSeconds=120)
                 → header per side, `-`/`+`/` ` diff of the canonical text with
                   long unchanged runs collapsed, per-side diagnostics after it
+
+translate_cpp_file(path? | dumpJson?, filter?, clangArgs?, timeoutSeconds=120)
+                → the same translation of one C++ file, when the dump is the step
+                  you want back; `filter` is clang's -ast-dump-filter and `clangArgs`
+                  carries -std=/-I/-D, resolved from the file's folder
+```
+
+`filter` and `clangArgs` apply to C++. `filter` keeps only the declarations whose **qualified name contains**
+the text — a substring, so pick a namespace that occurs nowhere else; without it a file that includes
+`<vector>` dumps the whole standard library (304 MB of JSON for a three-line program). `clangArgs` is the
+project's own configuration, passed verbatim to clang, whose working directory is the file's folder. Clang is
+found on `PATH`, then in the LLVM toolset inside Visual Studio, then at `VISUALMCP_CLANG`.
 
 decompile_to_metacode(assemblyPath, typeFullName?, nameFilter?, namespaceFilter?,
                       skip=0, maxTypes=0, showOrigin=false)

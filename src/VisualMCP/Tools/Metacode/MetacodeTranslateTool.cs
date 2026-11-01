@@ -50,11 +50,18 @@ public static class MetacodeTranslateTool
         bool normalizeControlFlow = true,
         [Description("Fold a block whose only statement is a block into its parent (default true).")]
         bool flattenNestedBlocks = true,
+        [Description("C++ only: keep just the declarations whose qualified name contains this text (clang " +
+                     "-ast-dump-filter). A file that includes <vector>/<string> dumps the whole standard library " +
+                     "without it — pass your namespace or type name.")]
+        string? filter = null,
+        [Description("C++ only: extra clang arguments for this project, passed verbatim and resolved from the " +
+                     "file's folder — '-std=c++20 -I../include -DFOO=1'.")]
+        string? clangArgs = null,
         [Description("Timeout in seconds for the Python/C++ dumper when a path or source text needs one (default 120, max 900).")]
         int timeoutSeconds = 120)
     {
         var (source, loadError) = await MetacodeToolHelpers.LoadAsync(
-            path, text, language, "metacode_translate", dumps, timeoutSeconds);
+            path, text, language, "metacode_translate", dumps, timeoutSeconds, filter, clangArgs);
         if (source is null) return ToolText.Fail(loadError!);
 
         var (document, rendered, renderError) = MetacodeToolHelpers.Render(
