@@ -921,6 +921,13 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         }
 
         var row = pool[0];
+
+        // The emitter produces C#, so the edit can only land in a C# file. The declaration may have come
+        // from any language the model reads — a page, a .vb file, a JavaScript module — and says so here
+        // instead of failing later on a document the solution does not have.
+        if (MetacodeEmission.Refusal(row.Path) is { } refusal)
+            return MetacodeCodingResult.Failed("rewrite", symbol, refusal);
+
         var document = FindDocument(solution, row.Path);
         if (document is null)
             return MetacodeCodingResult.Failed("rewrite", symbol, $"{row.Path} is not part of the loaded solution.");
@@ -1005,6 +1012,11 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         bool dryRun,
         CancellationToken cancellationToken)
     {
+        // The last line of defence, so no future caller of the shared edit path can write a language the
+        // emitter does not produce either.
+        if (MetacodeEmission.Refusal(document.FilePath) is { } refusal)
+            return MetacodeCodingResult.Failed(operation, target, refusal);
+
         var oldText = (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString();
         var newText = newRoot.ToFullString();
         var file = document.FilePath;

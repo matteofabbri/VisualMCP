@@ -1602,9 +1602,10 @@ internal sealed class RustParser
             throw new RustParseException("an 'if' whose else arm is not a single expression has no node");
         }
 
-        return SingleExpression(then) is { } whenTrue
-            ? new MetacodeConditional(condition, whenTrue, whenFalse) { Origin = Origin(start) }
-            : throw new RustParseException("an 'if' used as a value whose then arm is not a single expression has no node");
+        if (SingleExpression(then) is not { } whenTrue)
+            throw new RustParseException("an 'if' used as a value whose then arm is not a single expression has no node");
+
+        return new MetacodeConditional(condition, whenTrue, whenFalse) { Origin = Origin(start) };
     }
 
     private MetacodeExpression ParseMatchExpression(RustToken start)

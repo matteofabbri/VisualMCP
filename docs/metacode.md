@@ -315,6 +315,13 @@ that has no frontend: just produce this text.
   A `case`/`default` is recognised at the start of a line, and only the `break;` that closes a section is
   read as a statement of its own. A construct whose header cannot be lowered by the C# frontend stays one
   `RAW[razor]` with a diagnostic.
+- **Every language is an input; only C# is an output.** The model is stored as its own AST — the canonical
+  pseudocode in the solution store — not in the shape of the source it came from. Producing source again is
+  a separate, on-demand step (`CSharpEmitter`), so it exists for the one language an emitter was written
+  for. Razor is not a special case in this: it is one input among Java, JavaScript, Visual Basic and Rust,
+  and none of them has an emitter. `MetacodeEmission` states the rule once, and `metacoding` refuses an
+  edit to any file that is not C# — writing generated C# into a page, a `.vb` or a module would produce a
+  file its own compiler rejects.
 - **Pseudocode parser**: a block-bodied lambda is read back, and the lines following an open parenthesis or
   brace belong to the same statement. Two things stay out: a `RAW[…]` line with unbalanced parentheses is
   not reassembled (a `RAW` line is always a single line), and a comment with unbalanced parentheses inside a

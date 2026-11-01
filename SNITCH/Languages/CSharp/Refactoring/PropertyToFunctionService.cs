@@ -43,6 +43,10 @@ public sealed class PropertyToFunctionService : IPropertyToFunctionService
         if (string.IsNullOrWhiteSpace(filePath)) return new { error = "A file path is required." };
         if (string.IsNullOrWhiteSpace(propertyName)) return new { error = "A property name is required." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.PropertyToFunctionAsync(
+                _workspace, filePath, propertyName, containingType, getterName, setterName, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

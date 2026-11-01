@@ -30,6 +30,10 @@ public sealed class InlineFieldService : IInlineFieldService
         if (string.IsNullOrWhiteSpace(filePath)) return new { error = "A file path is required." };
         if (string.IsNullOrWhiteSpace(fieldName)) return new { error = "A field name is required." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.InlineFieldAsync(
+                _workspace, filePath, fieldName, containingType, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null) return new { error = "No C# solution could be auto-located from the working directory." };
 

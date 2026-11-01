@@ -194,7 +194,8 @@ public static class XamlAnalysis
         // ROOT names the type directly. A nested one applies to a subtree, which the file-wide data
         // context this scanner reports cannot express, so it is not taken as the file's type.
         var rootDataContext = root?.Elements()
-            .FirstOrDefault(element => element.Name.LocalName == "DataContext");
+            .FirstOrDefault(element => element.Name.LocalName == "DataContext" ||
+                                       element.Name.LocalName.EndsWith(".DataContext", StringComparison.Ordinal));
         if (rootDataContext is not null)
         {
             var value = rootDataContext.Elements().FirstOrDefault();

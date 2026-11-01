@@ -217,7 +217,7 @@ public sealed class SqlAnalyzerTests
         Assert.Contains("SQL0012", Rules(
             SqlAnalyzer.AnalyzeText("SELECT Id, Nickname FROM dbo.Users", "probe.sql", schema)));
         Assert.Contains("SQL0012", Rules(
-            SqlAnalyzer.AnalyzeText("INSERT INTO dbo.Users (Id, Nickname) VALUES (1, 'a')", "probe.sql", schema)));
+            SqlAnalyzer.AnalyzeText("INSERT INTO dbo.Users (Id, Nickname) VALUES (1, 2)", "probe.sql", schema)));
         Assert.Contains("SQL0012", Rules(
             SqlAnalyzer.AnalyzeText("UPDATE dbo.Users SET Nickname = 'a' WHERE Id = 1", "probe.sql", schema)));
 

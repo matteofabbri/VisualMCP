@@ -44,6 +44,9 @@ public static class SqlAnalyzer
     private static readonly Regex AlterNotNull = new(@"\bALTER\s+TABLE\b[^;]*\bADD\b[^;]*\bNOT\s+NULL\b", Options);
     private static readonly Regex HasDefault = new(@"\bDEFAULT\b", Options);
     private static readonly Regex InsertInto = new(@"\bINSERT\s+INTO\b", Options);
+    private static readonly Regex InsertTarget = new(
+        @"^\s*(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*)" +
+        @"(?:\.(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*))*\s*$", Options);
     private static readonly Regex BeginTransaction = new(@"\bBEGIN\s+(?:TRAN|TRANSACTION)\b", Options);
     private static readonly Regex EndTransaction = new(@"\b(?:COMMIT|ROLLBACK)\b", Options);
     private static readonly Regex LeadingWildcardLike = new(@"\b(?:I?LIKE)\s*$", Options);
@@ -513,7 +516,7 @@ public static class SqlAnalyzer
 
                 var open = statement.IndexOf('(', insert.Index + insert.Length);
                 if (open < 0) yield break;
-                if (statement[(insert.Index + insert.Length)..open].Trim().Length != 0) yield break;
+                if (!InsertTarget.IsMatch(statement[(insert.Index + insert.Length)..open])) yield break;
 
                 var close = MatchingClose(statement, open);
                 if (close < 0) yield break;

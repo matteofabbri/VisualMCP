@@ -31,9 +31,11 @@ public static class MetacodingTool
         "archive — so one call fills the AST with the whole folder instead of one file. This is the only decompile call " +
         "that PERSISTS its output; decompile_type / decompile_assembly return text and keep nothing.\n" +
         "• action=rewrite — replace the code of an existing declaration with what 'source' describes, emit it as C#, and " +
-        "write it back to the file the declaration came from. 'source' is metacode pseudocode by default (language=pseudo) " +
-        "or C# (language=cs). Previewed unless dryRun=false; every write is compiler-gated (refused when it would add an " +
-        "error) and refreshes the stored tree.\n" +
+        "write it back to the file the declaration came from. The model keeps its own AST and produces source only where " +
+        "an emitter exists — C# today — so the edit must land in a .cs file: a declaration read from a page, a .vb file or " +
+        "a JavaScript module is refused, because writing C# into it would produce a file its own compiler rejects. " +
+        "'source' is metacode pseudocode by default (language=pseudo) or C# (language=cs). Previewed unless dryRun=false; " +
+        "every write is compiler-gated (refused when it would add an error) and refreshes the stored tree.\n" +
         "• action=insert — append a NEW member, generated the same way, to an existing type. Same gate and preview.\n" +
         "A rewrite/insert answers with the generated C#, the line diff and the compiler verdict.")]
     public static async Task<object> Metacoding(

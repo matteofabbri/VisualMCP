@@ -377,7 +377,7 @@ dotnet-stack or dotnet-monitor. Full workflows in [Profiling](guides/profiling.m
 
 | Tool | What it does |
 |---|---|
-| `ef_migrations` | ✎ Run the project's own `dotnet ef`: `list`, `add`, `script`, `diff` (the SQL between `fromMigration` and `toMigration`), `remove`, `update`, `info`, `dbcontext-list`, `pending-model-changes` (model vs migration snapshot), with the exact command, exit code, stdout and stderr as structured data |
+| `ef_migrations` | ✎ Run the project's own `dotnet ef`: `list`, `add`, `script`, `diff` (the SQL between `fromMigration` and `toMigration`), `model-diff` (the `ModelSnapshot` against the entity classes, property by property: added in the model, shadow properties, type changes), `remove`, `update`, `info`, `dbcontext-list`, `pending-model-changes` (model vs migration snapshot), with the exact command, exit code, stdout and stderr as structured data |
 
 ## Razor and Blazor
 
@@ -419,7 +419,7 @@ claims that a database accepts a statement.
 | Tool | What it does |
 |---|---|
 | `sql_files` | Inventory of the solution's `.sql` files: lines, statements, verbs, tables named, finding count per file; `bin`, `obj`, `node_modules` and VCS folders are skipped |
-| `analyze_sql` | Findings `SQL0001`–`SQL0010` with `file:line:column`, the source line and a fix: unterminated literal/comment/bracket, unbalanced parentheses, `SELECT *`, `UPDATE`/`DELETE` without `WHERE`, `DROP` without `IF EXISTS`, dynamic SQL by concatenation, an unclosed transaction, a leading-wildcard `LIKE`, `ADD … NOT NULL` without `DEFAULT`, an `INSERT` column/value count mismatch |
+| `analyze_sql` | Findings `SQL0001`–`SQL0012` with `file:line:column`, the source line and a fix: unterminated literal/comment/bracket, unbalanced parentheses, `SELECT *`, `UPDATE`/`DELETE` without `WHERE`, `DROP` without `IF EXISTS`, dynamic SQL by concatenation, an unclosed transaction, a leading-wildcard `LIKE`, `ADD … NOT NULL` without `DEFAULT`, an `INSERT` column/value count mismatch, and — against the DDL the scanned files declare — an undeclared table (`SQL0011`) or a column its table does not have (`SQL0012`); `schema=off` disables the last two |
 
 ## JavaScript / TypeScript
 

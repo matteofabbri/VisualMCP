@@ -164,7 +164,8 @@ The model is also an **output**: any language can join by emitting canonical pse
 contains Python and C++ AST-JSON readers, and they are part of the default pipeline: `metacode_translate`
 / `metacode_compare` put a `.py`/`.cpp` path through the dumper themselves (CPython's `ast` module,
 `clang -ast-dump=json`), and `translate_python_file` / `translate_cpp_file` do the same when the dump is
-what you want back; all of them also take a dump you supply.
+what you want back; all of them also take a dump you supply. Rust joins the other way round: its reader
+parses the source itself, so a `.rs` path (or `language=rust`) is lowered with no toolchain at all.
 
 ### Decompiling managed assemblies
 
@@ -221,6 +222,10 @@ object with the counts and the reasons anything was skipped.
 
 - Normalization is declarative, not an interpreter: constructs the C reader does not model (the comma
   operator, multi-level pointers, calling conventions) stay `RAW` with a diagnostic.
+- **Razor is an input, like every other language.** The model keeps its own AST and produces source only
+  where an emitter exists — C# today — so an edit can only be written back to a `.cs` file. That holds for
+  a page, a `.vb` file and a JavaScript module alike; none of them is a special case, and none of them has
+  an emitter to write it back with. Put the C# in a class or in the page's code-behind model.
 - JavaScript is read as ECMAScript, so JSX and TypeScript annotations stop the parse (one `MC0001` naming
   the line). Inside the language, `with`, `debugger`, a labeled `break`/`continue`, the comma operator, a
   tagged template, a dynamic `import()` and an object literal with a spread or an accessor stay `RAW[js]`;

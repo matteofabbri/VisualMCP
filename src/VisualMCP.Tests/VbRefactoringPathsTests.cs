@@ -203,4 +203,125 @@ public sealed class VbRefactoringPathsTests
         Assert.True(File.Exists(Path.Combine(workspace.PathOf("Model"), "Widget.vb")));
         Assert.False(File.Exists(workspace.PathOf("Widget.vb")));
     }
+
+    [Fact]
+    public async Task InlineField_SubstitutesTheInitializerAndRemovesTheField()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("Config.vb", """
+            Public Class Config
+                Private _retries As Integer = 3
+
+                Public Function Run() As Integer
+                    Return _retries + _retries
+                End Function
+            End Class
+            """);
+
+        var result = await new InlineFieldService(workspace)
+            .InlineField(workspace.PathOf("Config.vb"), "_retries");
+        ResultAssert.Succeeded(result);
+
+        var text = workspace.Read("Config.vb");
+        Assert.DoesNotContain("_retries", text);
+        Assert.Contains("Return (3) + (3)", text);
+    }
+
+    [Fact]
+    public async Task InlineField_RefusesAFieldThatIsWritten()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("Config.vb", """
+            Public Class Config
+                Private _retries As Integer = 3
+
+                Public Sub Run()
+                    _retries = 4
+                End Sub
+            End Class
+            """);
+
+        var result = await new InlineFieldService(workspace)
+            .InlineField(workspace.PathOf("Config.vb"), "_retries");
+
+        Assert.Contains("written", ResultAssert.Error(result));
+    }
+
+    [Fact]
+    public async Task MoveToNamespace_RenamesTheBlockAndAddsTheImportTheReferencesNeed()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("Model.vb", """
+            Namespace ProbeVb.Old
+                Public Class Widget
+                End Class
+            End Namespace
+            """);
+
+        var project = workspace.CurrentSolution!.Projects.Single();
+        var consumerPath = workspace.PathOf("Consumer.vb");
+        const string consumer = """
+            Imports ProbeVb.Old
+
+            Namespace ProbeVb.App
+                Public Class Consumer
+                    Public Function Make() As Widget
+                        Return New Widget()
+                    End Function
+                End Class
+            End Namespace
+            """;
+        File.WriteAllText(consumerPath, consumer);
+        workspace.TryAddDocument(project.Id, "Consumer.vb", consumerPath, Microsoft.CodeAnalysis.Text.SourceText.From(consumer));
+
+        var result = await new MoveToNamespaceService(workspace)
+            .MoveToNamespace(workspace.PathOf("Model.vb"), "ProbeVb.New");
+        ResultAssert.Succeeded(result);
+
+        Assert.Contains("Namespace ProbeVb.New", workspace.Read("Model.vb"));
+
+        var rewritten = workspace.Read("Consumer.vb");
+        Assert.Contains("Imports ProbeVb.New", rewritten);
+        Assert.DoesNotContain("Imports ProbeVb.Old", rewritten);
+    }
+
+    [Fact]
+    public async Task PropertyToFunction_TurnsAVisualBasicPropertyIntoReadMethods()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("Person.vb", """
+            Public Class Person
+                Public Property Name As String
+
+                Public Function Greet() As String
+                    Return "Hello " & Name
+                End Function
+            End Class
+            """);
+
+        var result = await new PropertyToFunctionService(workspace)
+            .PropertyToFunction(workspace.PathOf("Person.vb"), "Name");
+        ResultAssert.Succeeded(result);
+
+        var text = workspace.Read("Person.vb");
+        Assert.Contains("Public Function GetName() As String", text);
+        Assert.Contains("Public Sub SetName(value As String)", text);
+        Assert.Contains("Return \"Hello \" & GetName()", text);
+        Assert.DoesNotContain("Property Name", text);
+    }
+
+    [Fact]
+    public async Task PropertyToFunction_RefusesAPropertyThatIsAssigned()
+    {
+        using var workspace = VbStyleTests.VisualBasicWorkspace.Create("Person.vb", """
+            Public Class Person
+                Public Property Name As String
+
+                Public Sub Rename()
+                    Name = "other"
+                End Sub
+            End Class
+            """);
+
+        var result = await new PropertyToFunctionService(workspace)
+            .PropertyToFunction(workspace.PathOf("Person.vb"), "Name");
+
+        Assert.Contains("assigned", ResultAssert.Error(result));
+    }
 }

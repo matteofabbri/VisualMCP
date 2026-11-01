@@ -747,10 +747,13 @@ sql_files(path?, maxFiles=500)
                 → per file: lines, statements, verbs, tables, finding count;
                   bin/obj/node_modules/.git are skipped
 
-analyze_sql(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
-                → SQL0001-SQL0010, each with rule, severity, file:line:column,
+analyze_sql(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200, schema=auto)
+                → SQL0001-SQL0012, each with rule, severity, file:line:column,
                   the source line and a fix; unknown rule ids are refused with
-                  the catalogue. A pattern scan, not a dialect parser.
+                  the catalogue. schema=auto reads the CREATE TABLE/ALTER TABLE
+                  DDL the scanned files carry and checks table and column names
+                  against it (SQL0011/SQL0012); schema=off runs only the shape rules.
+                  A pattern scan, not a dialect parser: never a live database.
 
 js_files(path?, maxFiles=500)
                 → per file: lines, typeScript, jsx, import count and modules,

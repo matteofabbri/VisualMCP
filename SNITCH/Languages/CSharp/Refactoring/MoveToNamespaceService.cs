@@ -36,6 +36,11 @@ public sealed class MoveToNamespaceService : IMoveToNamespaceService
     {
         if (string.IsNullOrWhiteSpace(filePath)) return new { error = "A file path is required." };
         if (string.IsNullOrWhiteSpace(targetNamespace)) return new { error = "The target namespace is required." };
+
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.MoveToNamespaceAsync(
+                _workspace, filePath, targetNamespace, dryRun, cancellationToken);
+
         if (!targetNamespace.Split('.').All(part => part.Length > 0 && SyntaxFacts.IsValidIdentifier(part)))
             return new { error = $"'{targetNamespace}' is not a valid namespace name." };
 
