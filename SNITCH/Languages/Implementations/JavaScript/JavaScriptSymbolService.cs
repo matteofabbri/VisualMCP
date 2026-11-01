@@ -1,3 +1,4 @@
+using Snitch.Languages.CSharp.Refactoring;
 using Snitch.Workspace;
 
 namespace Snitch.Languages.JavaScript;
@@ -5,12 +6,14 @@ namespace Snitch.Languages.JavaScript;
 /// <summary>
 /// Symbol navigation over the solution's JavaScript and TypeScript: the declarations a file makes, the
 /// declaration a name resolves to, the references to it (inside its module and through the imports other
-/// modules take from it), and the declarations nothing reads.
+/// modules take from it), the declarations nothing reads, and a lexical rename of one declaration with
+/// every reference the scan resolved to it.
 /// </summary>
 public interface IJavaScriptSymbolService
 {
-    /// <summary>outline | find | refs | unused.</summary>
-    Task<object> SymbolsAsync(string action, string? name, string? file, string? path, bool partial, int maxResults);
+    /// <summary>outline | find | refs | unused | rename.</summary>
+    Task<object> SymbolsAsync(string action, string? name, string? file, string? path, bool partial, int maxResults,
+        string? newName = null, bool dryRun = true);
 }
 
 public sealed class JavaScriptSymbolService : IJavaScriptSymbolService
@@ -20,11 +23,12 @@ public sealed class JavaScriptSymbolService : IJavaScriptSymbolService
     public JavaScriptSymbolService(IRoslynWorkspace workspace) => _workspace = workspace;
 
     public async Task<object> SymbolsAsync(
-        string action, string? name, string? file, string? path, bool partial, int maxResults)
+        string action, string? name, string? file, string? path, bool partial, int maxResults,
+        string? newName = null, bool dryRun = true)
     {
         action = string.IsNullOrWhiteSpace(action) ? "find" : action.Trim().ToLowerInvariant();
-        if (action is not ("outline" or "find" or "refs" or "unused"))
-            return new { error = "action must be outline, find, refs or unused." };
+        if (action is not ("outline" or "find" or "refs" or "unused" or "rename"))
+            return new { error = "action must be outline, find, refs, unused or rename." };
 
         maxResults = Math.Clamp(maxResults, 1, 5_000);
         var root = ResolveRoot(path);
@@ -36,6 +40,7 @@ public sealed class JavaScriptSymbolService : IJavaScriptSymbolService
             "outline" => Outline(index, file, maxResults),
             "find" => Find(index, name, partial, maxResults),
             "refs" => References(index, name, file, maxResults),
+            "rename" => await RenameAsync(index, name, newName, file, dryRun),
             _ => Unused(index, maxResults),
         };
     }
@@ -289,6 +294,181 @@ public sealed class JavaScriptSymbolService : IJavaScriptSymbolService
         };
     }
 
+    // ── rename ───────────────────────────────────────────────────────────────────────
+    private static readonly HashSet<string> ReservedNames = new(StringComparer.Ordinal)
+    {
+        "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete",
+        "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if",
+        "implements", "import", "in", "instanceof", "interface", "let", "new", "null", "package",
+        "private", "protected", "public", "return", "static", "super", "switch", "this", "throw",
+        "true", "try", "typeof", "var", "void", "while", "with", "yield",
+    };
+
+    private static async Task<object> RenameAsync(Index index, string? name, string? newName, string? file,
+        bool dryRun)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return new { error = "action=rename needs a name." };
+        if (string.IsNullOrWhiteSpace(newName) || !IsIdentifier(newName) || ReservedNames.Contains(newName))
+            return new { error = $"'{newName}' is not a JavaScript identifier." };
+        if (string.Equals(name, newName, StringComparison.Ordinal))
+            return new { error = "The names are identical." };
+
+        var declaringFile = file is null ? null : ResolveFile(index.Root, file);
+        var candidates = new List<(JsFileSymbols Symbols, int Position)>();
+        foreach (var symbols in index.Files.Values)
+        {
+            if (declaringFile is not null &&
+                !string.Equals(symbols.Path, declaringFile, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            for (var position = 0; position < symbols.Declarations.Count; position++)
+                if (string.Equals(symbols.Declarations[position].Name, name, StringComparison.Ordinal))
+                    candidates.Add((symbols, position));
+        }
+
+        if (candidates.Count == 0)
+            return new { error = $"No declaration named '{name}'{(declaringFile is null ? string.Empty : $" in {file}")}." };
+
+        if (candidates.Count > 1 && declaringFile is null)
+        {
+            var nonImports = candidates
+                .Where(candidate => candidate.Symbols.Declarations[candidate.Position].Kind != JsSymbolKind.Import)
+                .ToList();
+            if (nonImports.Count == 1) candidates = nonImports;
+            else
+                return new
+                {
+                    error = $"{candidates.Count} declarations are named '{name}'; pass file to choose one.",
+                    files = candidates.Select(candidate => JavaScriptPaths.Relative(index.Root, candidate.Symbols.Path))
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                };
+        }
+
+        var (owner, declarationPosition) = candidates[0];
+        var declaration = owner.Declarations[declarationPosition];
+        var nameLength = declaration.Name.StartsWith('#') ? declaration.Name.Length - 1 : declaration.Name.Length;
+
+        var edits = new List<(string File, int Offset, int Length, string Text)>
+        {
+            (owner.Path, declaration.Offset, nameLength, newName),
+        };
+
+        foreach (var use in owner.Uses.Where(use => use.Declaration == declarationPosition))
+            edits.Add((owner.Path, use.Offset, nameLength, newName));
+
+        var importLines = new HashSet<(string File, int Line)>();
+        if (declaration.Kind == JsSymbolKind.Import)
+        {
+            var binding = owner.Imports.FirstOrDefault(candidate =>
+                string.Equals(candidate.Local, declaration.Name, StringComparison.Ordinal));
+            if (binding is not null)
+                await AddImportLineAsync(edits, importLines, owner, binding, newName);
+        }
+
+        foreach (var (importing, use, binding) in ExternalReferences(index, owner.Path, declaration))
+        {
+            edits.Add((importing.Path, use.Offset, nameLength, newName));
+            await AddImportLineAsync(edits, importLines, importing, binding, newName);
+        }
+
+        var written = new List<object>();
+        foreach (var group in edits.GroupBy(edit => edit.File, StringComparer.OrdinalIgnoreCase))
+        {
+            var original = await File.ReadAllTextAsync(group.Key);
+            var text = original;
+            foreach (var edit in group.OrderByDescending(edit => edit.Offset))
+                text = text[..edit.Offset] + edit.Text + text[(edit.Offset + edit.Length)..];
+
+            if (!dryRun) await File.WriteAllTextAsync(group.Key, text);
+
+            written.Add(new
+            {
+                file = JavaScriptPaths.Relative(index.Root, group.Key),
+                changes = group.Count(),
+                preview = RefactoringFileWriter.Diff(original, text),
+            });
+        }
+
+        return new
+        {
+            action = "rename",
+            name,
+            newName,
+            symbol = new
+            {
+                kind = declaration.Kind.ToString().ToLowerInvariant(),
+                file = JavaScriptPaths.Relative(index.Root, owner.Path),
+                line = declaration.Line,
+                column = declaration.Column,
+                container = declaration.Container,
+                exportedAs = declaration.ExportedAs,
+            },
+            filesChanged = written.Count,
+            changes = edits.Count,
+            dryRun,
+            applied = !dryRun,
+            files = written,
+            note = "A lexical rename: the declaration and every reference the scan resolved to it — inside " +
+                   "its module, through the import binding in the modules that import it, and the import " +
+                   "clause itself. There is no compiler gate for JavaScript/TypeScript, so a name resolved " +
+                   "through an untyped object, a computed member or eval is not renamed.",
+        };
+    }
+
+    private static async Task AddImportLineAsync(List<(string File, int Offset, int Length, string Text)> edits,
+        HashSet<(string File, int Line)> seen, JsFileSymbols owner, JsImportBinding binding, string newName)
+    {
+        if (!seen.Add((owner.Path, binding.Line))) return;
+
+        var text = await File.ReadAllTextAsync(owner.Path);
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        if (binding.Line < 1 || binding.Line > lines.Length) return;
+
+        var line = lines[binding.Line - 1];
+        var replaced = RenameWord(RenameWord(line, binding.Imported, newName), binding.Local, newName);
+        if (string.Equals(replaced, line, StringComparison.Ordinal)) return;
+
+        var lineStart = 0;
+        for (var index = 0; index < binding.Line - 1; index++)
+            lineStart += lines[index].Length + (text.Contains("\r\n") ? 2 : 1);
+
+        edits.Add((owner.Path, lineStart, line.Length, replaced));
+    }
+
+    /// <summary>Replaces a whole-word occurrence, so `LIMIT` does not touch `LIMITED` and `$` is a name char.</summary>
+    private static string RenameWord(string line, string word, string replacement)
+    {
+        if (string.IsNullOrEmpty(word)) return line;
+
+        var result = new System.Text.StringBuilder(line.Length);
+        var index = 0;
+        while (index < line.Length)
+        {
+            var hit = line.IndexOf(word, index, StringComparison.Ordinal);
+            if (hit < 0)
+            {
+                result.Append(line, index, line.Length - index);
+                break;
+            }
+
+            result.Append(line, index, hit - index);
+            var before = hit > 0 && (char.IsLetterOrDigit(line[hit - 1]) || line[hit - 1] is '_' or '$');
+            var afterIndex = hit + word.Length;
+            var after = afterIndex < line.Length &&
+                        (char.IsLetterOrDigit(line[afterIndex]) || line[afterIndex] is '_' or '$');
+
+            result.Append(before || after ? word : replacement);
+            index = afterIndex;
+        }
+
+        return result.ToString();
+    }
+
+    private static bool IsIdentifier(string text) =>
+        text.Length > 0 &&
+        (char.IsLetter(text[0]) || text[0] is '_' or '$') &&
+        text.All(character => char.IsLetterOrDigit(character) || character is '_' or '$');
+
     // ── the index ────────────────────────────────────────────────────────────────────
 
     private sealed record Index(string Root, Dictionary<string, JsFileSymbols> Files, bool Truncated);
@@ -363,10 +543,13 @@ public sealed class JavaScriptSymbolService : IJavaScriptSymbolService
         return -1;
     }
 
+    /// <summary>
+    /// The module a specifier names, by the same rules the module graph uses: a relative path, a
+    /// <c>tsconfig</c> <c>baseUrl</c>/<c>paths</c> alias, or a package in <c>node_modules</c>. The
+    /// comparison that follows keeps only a target that is one of the scanned files.
+    /// </summary>
     private static string? ResolveModule(string fromFile, string module) =>
-        JavaScriptAnalyzer.IsRelativeSpecifier(module)
-            ? JavaScriptPaths.ResolveRelative(fromFile, module) is { } resolved ? Path.GetFullPath(resolved) : null
-            : null;
+        JavaScriptPaths.Resolve(fromFile, module) is { } resolved ? Path.GetFullPath(resolved) : null;
 
     // ── paths ────────────────────────────────────────────────────────────────────────
 

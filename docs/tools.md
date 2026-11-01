@@ -175,7 +175,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `introduce_parameter` | ✎ Turn a compile-time-fixed expression into a parameter, passing it at every call site |
 | `introduce_part_of_string` | ✎ Lift a substring of a string literal into a private const |
 | `change_signature` | ✎ Reorder, add or remove parameters and update every call site (C# and Visual Basic) |
-| `transform_parameters` | ✎ Wrap parameters in a parameter object, make them optional or required, retype them, or replace one with a property |
+| `transform_parameters` | ✎ Wrap parameters in a parameter object, make them optional or required, retype them, or replace one with a property — on C# and, for all five operations, on Visual Basic |
 | `change_type` | ✎ Replace a declaration's type, only if the project still compiles |
 | `change_nullability` | ✎ Toggle a nullable annotation, refused when it would add nullability diagnostics |
 | `use_base_type` | ✎ Replace a declaration's type with a base type or interface, if it compiles |
@@ -203,10 +203,10 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `generate_docs` | ✎ Write the missing XML `<summary>`/`<param>`/`<typeparam>`/`<returns>` entries from the declaration name |
 | `make_static` | ✎ Make an instance member static and rewrite call sites |
 | `make_non_static` | ✎ Make a static member an instance member, routing each call through an instance already in scope |
-| `generify` | ✎ Turn a concrete type used in a method or type into a type parameter, updating call sites and references |
+| `generify` | ✎ Turn a concrete type used in a method or type declaration into a type parameter, updating call sites and references — on C# and Visual Basic |
 | `static_to_extension` | ✎ Turn a static method into an extension method, rotating the receiver |
 | `type_to_partial` | ✎ Mark every declaration of a type `partial` |
-| `global_usings` | ✎ Move a project's plain usings into `GlobalUsings.cs` |
+| `global_usings` | ✎ Move a project's plain usings into `GlobalUsings.cs`; on a Visual Basic project each plain `Imports` becomes a project-level `<Import Include="…" />` item and the statement goes |
 | `implicit_usings` | ✎ Toggle `<ImplicitUsings>`, writing the explicit usings when disabling |
 | `convert_to_non_global_using` | ✎ Split one `global using` into per-file usings where needed |
 | `optimize_usings` | ✎ Remove unused usings (optionally sort) |
@@ -425,14 +425,15 @@ claims that a database accepts a statement.
 
 `js`, `jsx`, `mjs`, `cjs`, `ts`, `tsx`, `mts` and `cts` files as a scanned language: comments, strings
 and template literals are masked first, and the JSX rules read a tag only where the mask says it is code.
-`node_typecheck`/`node_lint` still run the project's own `tsc`/`eslint`; this layer resolves a relative
-import to a file and no package specifier.
+`node_typecheck`/`node_lint` still run the project's own `tsc`/`eslint`; this layer resolves a specifier
+the way the project's tools do — a relative path, a `tsconfig.json` `baseUrl`/`paths` alias, or a package
+in `node_modules` — and has no type model.
 
 | Tool | What it does |
 |---|---|
-| `js_files` | Inventory: lines, TypeScript and JSX flags, modules imported (including `require` and dynamic `import()`), the relative imports resolved into a module graph with its import cycles and unresolved count, names exported, function and class counts, findings per file |
-| `analyze_js` | Findings `JS0001`–`JS0017`: unterminated string/template/comment, `eval`, `new Function`, `innerHTML`/`outerHTML` from a non-literal, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`/`@ts-nocheck`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")`, a relative import that resolves to no file |
-| `js_symbols` | The lexical symbol table: `outline` a file's declarations (kind, line, container, exports, uses), `find` a name across the tree, `refs` every occurrence — inside the module and through the imports other modules take from it — and `unused` the declarations nothing reads. A scope per brace block; a name resolves to the innermost declaration carrying it; an imported name resolves through its binding to the exporting module when the specifier is relative. JSX component tags are references; a member through an untyped object is not resolved |
+| `js_files` | Inventory: lines, TypeScript and JSX flags, modules imported (including `require` and dynamic `import()`), the specifiers resolved into a module graph with its import cycles, `resolvedImports` (a relative path, a tsconfig alias or a package), `externalImports` (resolved outside the scan) and the relative imports that resolve to nothing, names exported, function and class counts, findings per file |
+| `analyze_js` | Findings `JS0001`–`JS0017`: unterminated string/template/comment, `eval`, `new Function`, `innerHTML`/`outerHTML` from a non-literal, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`/`@ts-nocheck`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")`, a relative import that resolves to no file (a package specifier is not a defect here) |
+| `js_symbols` | The lexical symbol table: `outline` a file's declarations (kind, line, container, exports, uses, whether each import resolves), `find` a name across the tree, `refs` every occurrence — inside the module and through the imports other modules take from it — `unused` the declarations nothing reads, and `rename` one declaration plus every reference the scan resolved, the import binding in each importing module included (lexical, no compiler gate; previews unless `dryRun=false`). A scope per brace block; a name resolves to the innermost declaration carrying it; an imported name resolves through its binding to the exporting module, the specifier followed through a relative path, a tsconfig alias or `node_modules`. JSX component tags are references; a member through an untyped object is not resolved |
 
 ## HTML / CSS
 
@@ -442,7 +443,7 @@ import to a file and no package specifier.
 | Tool | What it does |
 |---|---|
 | `markup_files` | Inventory: lines, element count, distinct classes / selectors, ids (and how many repeat), findings per file; `kind` picks html, css or both |
-| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0009` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a selector that matches no element in the scanned pages); a selector resolves compound parts (tag, classes, id, attribute conditions, structural pseudo-classes) joined by descendant/child/sibling combinators, the CSS rules and selectors are also read from every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` |
+| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0010` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a selector that matches no element in the scanned pages, a declaration overridden on every element it matches); a selector resolves compound parts (tag, classes, id, attribute conditions, structural pseudo-classes) joined by descendant/child/sibling combinators, CSS0010 resolves specificity and source order, the CSS rules and selectors are also read from every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` |
 
 ## YAML
 
@@ -464,7 +465,7 @@ compiler's own `FS####` diagnostics.
 | Tool | What it does |
 |---|---|
 | `fsharp_files` | Inventory: lines, modules and namespaces, types, top-level functions, number of opens, findings per file |
-| `fsharp_symbols` | The lexical symbol table: `outline` a file (modules, namespaces, types, union cases, record fields, `let` bindings and members with their positions), `find` a name, `refs` every occurrence — before it in the same file, and in the files that `open` its module — and `unused` the declarations nothing reads. A name table, not a compiler: shadowing inside a match arm and a module abbreviation are outside it |
+| `fsharp_symbols` | The lexical symbol table: `outline` a file (modules, namespaces, types, union cases, record fields, `let` bindings and members with their positions), `find` a name, `refs` every occurrence — before it in the same file, and in the files that `open` its module — `unused` the declarations nothing reads, and `rename` one declaration plus the references the table resolved (lexical, no compiler gate; previews unless `dryRun=false`). A name table, not a compiler: shadowing inside a match arm and a module abbreviation are outside it |
 | `analyze_fsharp` | Findings `FS0001`–`FS0010`: a tab in the indentation, `Option.get`/`Option.Value`, `List.head`/`Seq.head` and friends, `Unchecked.defaultof`/`unbox`, comparison with `null`, a catch-all `with _ ->`, `let mutable`, `printf`/`printfn`, `failwith`, a duplicated `open` |
 
 ## Decompilation and reflection
@@ -591,7 +592,7 @@ server-side dry run). A missing client or an unreachable cluster is a structured
 | `k8s_describe` | The full `kubectl describe` text: events, conditions, containers, scheduler decisions |
 | `k8s_logs` | A pod's logs with `tail`, `since`, `container` and `previous` |
 | `k8s_kustomize` | Render a kustomization offline (`kubectl kustomize`): the rendered YAML and its document count, with an optional namespace override; no cluster is contacted |
-| `k8s_validate` | Validate a manifest offline — no cluster, no kubectl — from a file, a folder of `.yaml/.yml` or `content`: `K8S001`–`K8S023` (required apiVersion/kind/metadata.name, a pod template with no containers, a container with no image or name, a workload with no selector, a selector that does not match its template's labels, a Service with no ports or no selector, a CronJob with no schedule, an HPA with no target or minReplicas > maxReplicas, a PVC with no storage request, an unpinned image, a duplicate kind/namespace/name, a name that is not a DNS label, a cluster-scoped kind carrying a namespace, an empty ConfigMap/Secret, a dangling volume reference). A table of the built-in kinds, not the OpenAPI schema |
+| `k8s_validate` | Validate a manifest offline — no cluster, no kubectl — from a file, a folder of `.yaml/.yml` or `content`: `K8S001`–`K8S023` (required apiVersion/kind/metadata.name, a pod template with no containers, a container with no image or name, a workload with no selector, a selector that does not match its template's labels, a Service with no ports or no selector, a CronJob with no schedule, an HPA with no target or minReplicas > maxReplicas, a PVC with no storage request, an unpinned image, a duplicate kind/namespace/name, a name that is not a DNS label, a cluster-scoped kind carrying a namespace, an empty ConfigMap/Secret, a dangling volume reference). A table of the built-in kinds, not the OpenAPI schema. `server=true` also sends the same text through `kubectl apply --dry-run=server` — the cluster's own OpenAPI and admission check — and keeps the offline answer beside it |
 | `k8s_port_forward` | ✎ `kubectl port-forward` as a session: `start` (target `pod/name`, `svc/name`, `deployment/name`; ports `8080:80`) launches it detached, waits for its forwarding line and returns the sessionId, local port and pid; `list`, `status`, `stop` (the process tree is killed). The forward ends when the server does |
 | `k8s_exec` | ✎ Run one command inside a pod's container (`kubectl exec`, the part after `--`); requires `confirm=true`; no shell is involved |
 | `k8s_apply` | ✎ Apply a manifest from a file or from `content`; server-side dry run unless `dryRun=false` with `confirm=true` |

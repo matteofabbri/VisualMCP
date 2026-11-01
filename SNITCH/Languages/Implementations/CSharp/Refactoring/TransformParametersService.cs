@@ -73,6 +73,11 @@ public sealed class TransformParametersService : ITransformParametersService
         var names = (parameters ?? []).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal).ToList();
         if (names.Count == 0) return new { error = "Name at least one parameter in 'parameters'." };
 
+        var vb = await Snitch.Languages.VB.Refactoring.VbRefactoringTail.TransformParametersAsync(
+            _workspace, methodName, normalized, names.ToArray(), containingType, typeName, newType, defaultValue, defaults,
+            dryRun, cancellationToken);
+        if (vb is not null) return vb;
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

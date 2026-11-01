@@ -14,12 +14,6 @@ public interface IJavaScriptService
 
 public sealed class JavaScriptService : IJavaScriptService
 {
-    private static readonly string[] ExcludedDirectories =
-    [
-        "bin", "obj", ".git", ".vs", ".idea", ".visualMCP", "node_modules", "dist", "build", "out",
-        "coverage", ".next", ".nuxt", ".svelte-kit", "target", "vendor",
-    ];
-
     private readonly IRoslynWorkspace _workspace;
 
     public JavaScriptService(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -28,12 +22,14 @@ public sealed class JavaScriptService : IJavaScriptService
     {
         maxFiles = Math.Clamp(maxFiles, 1, 20_000);
         var (root, files, truncated) = Discover(path, maxFiles);
+        var scanned = files.Select(file => Path.GetFullPath(file)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var entries = new List<object>();
         var edges = new List<(string From, string To)>();
         var totalImports = 0;
         var totalFindings = 0;
         var totalUnresolvedImports = 0;
+        var totalExternalImports = 0;
 
         foreach (var file in files)
         {
@@ -44,15 +40,22 @@ public sealed class JavaScriptService : IJavaScriptService
             totalFindings += analysis.Findings.Count;
 
             var unresolved = analysis.Findings.Count(finding => finding.RuleId == "JS0017");
-            var relative = analysis.ImportReferences.Count(reference => reference.Relative);
             totalUnresolvedImports += unresolved;
 
-            var name = Relative(root, file);
-            var dependsOn = analysis.ImportReferences
-                .Where(reference => reference.Relative)
-                .Select(reference => ResolveRelative(file, reference.Module))
+            // A specifier is followed wherever the resolver points it: a relative path, a tsconfig alias
+            // or a package in node_modules. Only a target the scan contains becomes an edge, so the graph
+            // stays closed over the scanned scripts; a dependency outside them is counted, not walked.
+            var targets = analysis.ImportReferences
+                .Select(reference => JavaScriptPaths.Resolve(file, reference.Module))
                 .Where(target => target is not null)
-                .Select(target => Relative(root, target!))
+                .ToList();
+            var external = targets.Count(target => !scanned.Contains(target!));
+            totalExternalImports += external;
+
+            var name = JavaScriptPaths.Relative(root, file);
+            var dependsOn = targets
+                .Where(target => scanned.Contains(target!))
+                .Select(target => JavaScriptPaths.Relative(root, target!))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(target => target, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -67,7 +70,8 @@ public sealed class JavaScriptService : IJavaScriptService
                 typeScript = analysis.TypeScript,
                 jsx = analysis.Jsx,
                 imports = analysis.Imports.Count,
-                resolvedImports = relative - unresolved,
+                resolvedImports = targets.Count,
+                externalImports = external,
                 unresolvedImports = unresolved,
                 modules = analysis.Imports.Take(50).ToList(),
                 dependsOn = dependsOn.Take(50).ToList(),
@@ -93,6 +97,7 @@ public sealed class JavaScriptService : IJavaScriptService
             maxFiles,
             totalImports,
             totalUnresolvedImports,
+            totalExternalImports,
             totalFindings,
             moduleGraph = new
             {
@@ -107,9 +112,11 @@ public sealed class JavaScriptService : IJavaScriptService
             },
             files = entries,
             hint = "analyze_js lists the findings themselves; js_files only says what is there. " +
-                   "unresolvedImports counts the relative specifiers that point at no file (JS0017). " +
-                   "moduleGraph resolves relative specifiers only — a package specifier needs the project's " +
-                   "own resolver — and reports each strongly connected group as one import cycle.",
+                   "resolvedImports counts the specifiers that point at a file: a relative path, a " +
+                   "tsconfig baseUrl/paths alias, or a package in node_modules; externalImports are the " +
+                   "resolved ones outside the scan, and unresolvedImports the relative ones that point at " +
+                   "no file (JS0017). moduleGraph draws an edge between two scanned scripts and reports " +
+                   "each strongly connected group as one import cycle.",
         };
     }
 
@@ -145,7 +152,7 @@ public sealed class JavaScriptService : IJavaScriptService
             {
                 if (Rank(finding.Severity) < Rank(severity)) continue;
                 if (ruleId is not null && finding.RuleId != ruleId) continue;
-                findings.Add(finding with { File = Relative(root, file) });
+                findings.Add(finding with { File = JavaScriptPaths.Relative(root, file) });
             }
         }
 
@@ -170,8 +177,9 @@ public sealed class JavaScriptService : IJavaScriptService
             findings = shown,
             truncated = findings.Count > shown.Count,
             note = "A pattern scan over masked source, not a parser: it proves the shape of a line, never that a " +
-                   "module resolves or a type holds. A relative import IS resolved against the file system " +
-                   "(JS0017) — the path itself, a source extension, or an index file; a package specifier is not. " +
+                   "module resolves or a type holds. JS0017 resolves a relative import against the file system " +
+                   "(the path itself, a source extension, or an index file); an alias or a package specifier is " +
+                   "not a defect here — js_files and js_symbols resolve those for the module graph. " +
                    "Template literals are masked whole, so a rule inside `${…}` does not fire; regular-expression " +
                    "literals are not detected and a rule may fire inside one.",
         };
@@ -186,15 +194,15 @@ public sealed class JavaScriptService : IJavaScriptService
             var text = await File.ReadAllTextAsync(file);
             var analysis = JavaScriptAnalyzer.AnalyzeText(text, file);
 
-            // A relative specifier is the one import a scanner can check: it names a file next to this
-            // one. A package specifier needs the resolver in node_modules, which the project's own tools own.
+            // JS0017 stays relative-only: an alias or a package is followed when it resolves, but a
+            // scanner cannot tell a missing package from one the bundler provides, so it is not a defect.
             var unresolved = analysis.ImportReferences
                 .Where(reference => reference.Relative)
-                .Where(reference => ResolveRelative(file, reference.Module) is null)
+                .Where(reference => JavaScriptPaths.ResolveRelative(file, reference.Module) is null)
                 .Select(reference => new JsFinding(
                     "JS0017", "warning", "Correctness",
                     $"The relative import '{reference.Module}' does not resolve to a file.",
-                    file, reference.Line, reference.Column, SnippetAt(text, reference.Line),
+                    file, reference.Line, reference.Column, JavaScriptPaths.SnippetAt(text, reference.Line),
                     "Fix the path; a directory resolves through index.ts/index.js."))
                 .ToList();
 
@@ -214,8 +222,10 @@ public sealed class JavaScriptService : IJavaScriptService
 
     /// <summary>
     /// The import cycles of the module graph: one entry per strongly connected component with more than one
-    /// module, or one module that imports itself. Only relative specifiers are edges a scanner can prove, so a
-    /// package import never creates one. Above 2000 modules the walk is skipped and the caller is told.
+    /// module, or one module that imports itself. An edge is a specifier <see cref="JavaScriptPaths.Resolve"/>
+    /// points at another scanned script — a relative path, a tsconfig alias or a package inside the scan — so
+    /// a dependency outside the scanned files never creates one. Above 2000 modules the walk is skipped and
+    /// the caller is told.
     /// </summary>
     private static (List<List<string>> Cycles, bool Skipped) FindCycles(List<(string From, string To)> edges)
     {
@@ -294,100 +304,8 @@ public sealed class JavaScriptService : IJavaScriptService
         return (cycles.OrderBy(cycle => cycle[0], StringComparer.OrdinalIgnoreCase).ToList(), false);
     }
 
-    /// <summary>The source extensions a relative import may omit, in the order TypeScript resolves them.</summary>
-    private static readonly string[] ResolutionSuffixes =
-        [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
-
-    /// <summary>
-    /// The file a relative specifier points at: the path itself, the path with a source extension, a
-    /// directory index, or the TypeScript source behind a compiled <c>.js</c> specifier. Null when none exists.
-    /// </summary>
-    private static string? ResolveRelative(string fromFile, string specifier)
-    {
-        var directory = Path.GetDirectoryName(fromFile);
-        if (directory is null) return null;
-
-        var target = Path.GetFullPath(Path.Combine(directory, specifier.Replace('/', Path.DirectorySeparatorChar)));
-        if (File.Exists(target)) return target;
-
-        // A TypeScript project imports './x.js' although the source on disk is './x.ts'.
-        if (target.EndsWith(".js", StringComparison.OrdinalIgnoreCase) ||
-            target.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase))
-        {
-            var stem = Path.ChangeExtension(target, null);
-            foreach (var suffix in ResolutionSuffixes)
-                if (File.Exists(stem + suffix))
-                    return stem + suffix;
-        }
-
-        foreach (var suffix in ResolutionSuffixes)
-            if (File.Exists(target + suffix))
-                return target + suffix;
-
-        foreach (var suffix in ResolutionSuffixes)
-        {
-            var index = Path.Combine(target, "index" + suffix);
-            if (File.Exists(index)) return index;
-        }
-
-        return null;
-    }
-
-    private static string SnippetAt(string text, int line)
-    {
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        if (line < 1 || line > lines.Length) return string.Empty;
-        var snippet = lines[line - 1].Trim();
-        return snippet.Length <= 160 ? snippet : snippet[..160] + "…";
-    }
-
-    private (string Root, List<string> Files, bool Truncated) Discover(string? path, int maxFiles)
-    {
-        var root = ResolveRoot(path);
-        var files = new List<string>();
-        var truncated = false;
-
-        if (File.Exists(root))
-        {
-            files.Add(root);
-            return (Path.GetDirectoryName(root) ?? root, files, false);
-        }
-
-        if (!Directory.Exists(root))
-            return (root, files, false);
-
-        var stack = new Stack<string>();
-        stack.Push(root);
-        while (stack.Count > 0)
-        {
-            var directory = stack.Pop();
-            string[] children;
-            try { children = Directory.GetDirectories(directory); }
-            catch { continue; }
-
-            foreach (var child in children)
-            {
-                var name = Path.GetFileName(child);
-                if (ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
-                if (name.StartsWith(".artifacts", StringComparison.OrdinalIgnoreCase)) continue;
-                stack.Push(child);
-            }
-
-            string[] entries;
-            try { entries = Directory.GetFiles(directory); }
-            catch { continue; }
-
-            foreach (var entry in entries)
-            {
-                if (!JavaScriptAnalyzer.IsScript(entry)) continue;
-                if (files.Count >= maxFiles) { truncated = true; break; }
-                files.Add(entry);
-            }
-        }
-
-        files.Sort(StringComparer.OrdinalIgnoreCase);
-        return (root, files, truncated);
-    }
+    private (string Root, List<string> Files, bool Truncated) Discover(string? path, int maxFiles) =>
+        JavaScriptPaths.Discover(ResolveRoot(path), maxFiles);
 
     private string ResolveRoot(string? path)
     {
@@ -399,9 +317,6 @@ public sealed class JavaScriptService : IJavaScriptService
 
         return Directory.GetCurrentDirectory();
     }
-
-    private static string Relative(string root, string file) =>
-        Path.GetRelativePath(root, file).Replace('\\', '/');
 
     private static int Rank(string severity) => severity switch
     {

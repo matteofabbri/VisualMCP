@@ -50,6 +50,10 @@ public sealed class StaticToExtensionService : IStaticToExtensionService
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
 
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.StaticToExtensionAsync(
+                _workspace, filePath, methodName, containingType, dryRun, cancellationToken);
+
         var diskText = await File.ReadAllTextAsync(path, cancellationToken);
         var modelledText = (await document.GetTextAsync(cancellationToken)).ToString();
         if (!string.Equals(diskText, modelledText, StringComparison.Ordinal))

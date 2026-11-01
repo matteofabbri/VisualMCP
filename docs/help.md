@@ -176,8 +176,9 @@ language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only 
 Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
 Core migrations run through `ef_migrations`. SQL has a scanned layer (`sql_files`, `analyze_sql` with
-SQL0001–SQL0010), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0017 — masked
-source, relative imports resolved into a module graph with its cycles, no type model), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
+SQL0001–SQL0012), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0017 — masked
+source, specifiers resolved through relative paths, tsconfig `baseUrl`/`paths` and `node_modules` into a
+module graph with its cycles, no type model), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
 (`yaml_files`, `analyze_yaml`, which also reads a Kubernetes manifest's identity and applies
 YAML0009–YAML0012 to it) and F# another
 (`fsharp_files`, `analyze_fsharp`, the declaration index F# has no symbol tool for; the compiler's own

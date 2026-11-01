@@ -34,8 +34,8 @@ public interface IKubernetesService
     Task<object> HelmAsync(string action, string? release, string? chart, string? namespaceName,
         string? valuesFile, string[]? setValues, int timeoutSeconds);
 
-    /// <summary>Offline validation of a manifest: the built-in kinds' required fields. No cluster is contacted.</summary>
-    Task<object> ValidateAsync(string? file, string? content);
+    /// <summary>Validation of a manifest: the built-in kinds' required fields, and — with <c>server=true</c> — the cluster's own dry run.</summary>
+    Task<object> ValidateAsync(string? file, string? content, bool server = false);
 
     /// <summary>Port-forward sessions: start, list, status, stop.</summary>
     Task<object> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
@@ -566,9 +566,11 @@ public sealed class KubernetesService : IKubernetesService
     /// Validates a manifest without a cluster: the required fields of the built-in kinds, the
     /// selector/template agreement a Deployment needs, a pinned image, a name that is a DNS label, and the
     /// duplicate resources an apply would silently collapse. <c>file</c> may be one manifest or a folder
-    /// of them; <c>content</c> is the manifest itself.
+    /// of them; <c>content</c> is the manifest itself. With <c>server</c> the same text is also sent to the
+    /// configured cluster through <c>kubectl apply --dry-run=server</c>, which is the authority for a CRD's
+    /// OpenAPI schema and an admission webhook.
     /// </summary>
-    public async Task<object> ValidateAsync(string? file, string? content)
+    public async Task<object> ValidateAsync(string? file, string? content, bool server = false)
     {
         if (string.IsNullOrWhiteSpace(file) == string.IsNullOrWhiteSpace(content))
             return new { error = "Pass exactly one of file (a manifest or a folder of them) or content (the manifest itself)." };
@@ -605,6 +607,25 @@ public sealed class KubernetesService : IKubernetesService
             .Select(source => KubernetesManifestValidator.Validate(source.Text, source.Name))
             .ToList();
 
+        if (server)
+        {
+            var serverResults = new List<object>();
+            foreach (var source in sources)
+                serverResults.Add(await ValidateOnServerAsync(source));
+
+            if (results.Count == 1 && !Directory.Exists(file))
+                return new { offline = results[0], server = serverResults[0] };
+
+            return new
+            {
+                files = sources.Select(source => source.Name).ToList(),
+                results,
+                server = serverResults,
+                note = "Each file was validated on its own offline; the server result is the API server's own " +
+                       "dry run (OpenAPI schema and admission chain).",
+            };
+        }
+
         // One manifest (text or a single file) is answered on its own; a folder is a set, so the wrapper
         // keeps the per-file answers apart.
         if (results.Count == 1 && !Directory.Exists(file)) return results[0];
@@ -616,6 +637,46 @@ public sealed class KubernetesService : IKubernetesService
             note = "Each file was validated on its own; K8S023 (a volume naming a ConfigMap or Secret) is " +
                    "checked within one file.",
         };
+    }
+
+    /// <summary>
+    /// Writes the manifest to the store's temporary folder and asks the cluster to dry-run it. A missing
+    /// kubectl or an unreachable cluster is a structured result, not a failure of the call.
+    /// </summary>
+    private static async Task<object> ValidateOnServerAsync((string Name, string Text) source)
+    {
+        var directory = Path.Combine(Directory.GetCurrentDirectory(), ".visualMCP", "tmp");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"k8s-validate-{Guid.NewGuid():N}.yaml");
+
+        try
+        {
+            await File.WriteAllTextAsync(path, source.Text);
+            var run = await KubectlAsync($"apply --dry-run=server -f \"{path}\"", 60);
+
+            if (run.ExitCode == 127)
+                return new { file = source.Name, ran = false, error = run.Stderr.Trim() };
+
+            var output = string.IsNullOrWhiteSpace(run.Stdout) ? run.Stderr : run.Stdout;
+            return new
+            {
+                file = source.Name,
+                ran = true,
+                valid = run.ExitCode == 0 && !run.TimedOut,
+                exitCode = run.ExitCode,
+                timedOut = run.TimedOut,
+                output = output.Length > 4_000 ? output[..4_000] : output,
+                note = run.ExitCode == 0
+                    ? "The cluster accepted it: the OpenAPI schema and the admission chain were applied."
+                    : "The cluster refused it: the output is the API server's own message — a CRD's schema, " +
+                      "an admission webhook or a missing namespace.",
+            };
+        }
+        finally
+        {
+            try { File.Delete(path); }
+            catch (IOException) { }
+        }
     }
 
     // ── port-forward sessions ────────────────────────────────────────────────

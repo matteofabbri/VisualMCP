@@ -93,13 +93,15 @@ public static class KubernetesTools
         "unpinned image (:latest or no tag), the same kind/namespace/name twice, a name that is not a DNS label, a " +
         "cluster-scoped kind carrying a namespace, a ConfigMap or Secret with no data, and a volume naming a " +
         "ConfigMap/Secret that is not in the input. A table of the built-in kinds, not the OpenAPI schema: a custom " +
-        "resource is reported as having no built-in schema, and k8s_apply dryRun=true stays the server-side " +
-        "authority. Read-only.")]
+        "resource is reported as having no built-in schema. Pass server=true to ALSO send the same text to the " +
+        "configured cluster with kubectl apply --dry-run=server, which is the authority for a CRD's OpenAPI schema " +
+        "and an admission webhook; a missing kubectl or an unreachable cluster is reported, not raised. Read-only.")]
     public static Task<object> KubernetesValidate(
         IKubernetesService k8s,
         [Description("A manifest on disk, or a folder of .yaml/.yml files.")] string? file = null,
-        [Description("The manifest text itself.")] string? content = null)
-        => k8s.ValidateAsync(file, content);
+        [Description("The manifest text itself.")] string? content = null,
+        [Description("Also ask the configured cluster to dry-run it (kubectl apply --dry-run=server).")] bool server = false)
+        => k8s.ValidateAsync(file, content, server);
 
     [McpServerTool(Name = "k8s_port_forward"), Description(
         "kubectl port-forward as a session: action=start (target pod/name, svc/name or deployment/name, ports " +

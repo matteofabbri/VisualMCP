@@ -140,6 +140,33 @@ public sealed class FSharpSymbolTests
         Assert.Contains("No declaration named 'nope'", missing.GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task Rename_rewrites_the_declaration_and_a_use_in_an_opening_file()
+    {
+        using var files = new Scripts(
+            ("Order.fs", """
+                module Shop.Order
+
+                let totalOf amount = amount * 2m
+                """),
+            ("Program.fs", """
+                module Shop.Program
+
+                open Shop.Order
+
+                let run () = totalOf 3m
+                """));
+
+        var result = await Service.SymbolsAsync("rename", "totalOf", null, files.Root, false, 100,
+            newName: "sumOf", dryRun: false);
+        var json = Json(result);
+
+        Assert.Equal("rename", json.GetProperty("action").GetString());
+        Assert.True(json.GetProperty("applied").GetBoolean());
+        Assert.Contains("let sumOf amount", File.ReadAllText(Path.Combine(files.Root, "Order.fs")));
+        Assert.Contains("sumOf 3m", File.ReadAllText(Path.Combine(files.Root, "Program.fs")));
+    }
+
     private static FSharpSymbolService Service => new(new NullWorkspace());
 
     private static JsonElement Json(object result) => JsonSerializer.SerializeToElement(result);

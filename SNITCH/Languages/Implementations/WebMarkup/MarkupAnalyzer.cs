@@ -78,6 +78,7 @@ public static class MarkupAnalyzer
         ["CSS0007"] = "javascript: URL",
         ["CSS0008"] = "IE expression()",
         ["CSS0009"] = "A selector that matches no element in the scanned pages",
+        ["CSS0010"] = "A declaration overridden on every element it matches",
     };
 
     /// <summary>
@@ -280,16 +281,19 @@ public static class MarkupAnalyzer
             findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList(),
             nodes,
             inline.Selectors,
-            inline.Classes);
+            inline.Classes,
+            inline.Rules);
     }
 
-    /// <summary>The CSS of every &lt;style&gt; block, with findings and selectors moved onto the page's lines.</summary>
-    private static (List<MarkupFinding> Findings, List<CssSimpleSelector> Selectors, List<string> Classes)
+    /// <summary>The CSS of every &lt;style&gt; block, with findings, selectors and rules moved onto the page's lines.</summary>
+    private static (List<MarkupFinding> Findings, List<CssSimpleSelector> Selectors, List<string> Classes,
+        List<CssRule> Rules)
         AnalyzeInlineStyles(string text, string filePath, int[] lineStarts, List<HtmlTag> tags)
     {
         var findings = new List<MarkupFinding>();
         var selectors = new List<CssSimpleSelector>();
         var classes = new List<string>();
+        var rules = new List<CssRule>();
 
         foreach (var tag in tags)
         {
@@ -324,10 +328,27 @@ public static class MarkupAnalyzer
                 selectors.Add(selector with { Line = line, Column = column });
             }
 
+            foreach (var rule in analysis.Rules ?? [])
+            {
+                var (line, column) = Remap(rule.Selector.Line, rule.Selector.Column);
+                var declarations = rule.Declarations
+                    .Select(declaration => declaration with
+                    {
+                        Line = Remap(declaration.Line, declaration.Column).Line,
+                        Column = Remap(declaration.Line, declaration.Column).Column,
+                    })
+                    .ToList();
+                rules.Add(rule with
+                {
+                    Selector = rule.Selector with { Line = line, Column = column },
+                    Declarations = declarations,
+                });
+            }
+
             classes.AddRange(analysis.Classes ?? []);
         }
 
-        return (findings, selectors, classes);
+        return (findings, selectors, classes, rules);
     }
 
     /// <summary>The tag scanner's balance: an unclosed element or a close that does not match.</summary>
@@ -458,7 +479,7 @@ public static class MarkupAnalyzer
         return new MarkupAnalysis(
             "css", lineStarts.Length, balance.Open, [],
             findings.OrderBy(finding => finding.Line).ThenBy(finding => finding.Column).ToList(),
-            Selectors: selectors, Classes: classes);
+            Selectors: selectors, Classes: classes, Rules: CssRules(masked, lineStarts));
     }
 
     // ── selector index ─────────────────────────────────────────────────────────
@@ -513,6 +534,123 @@ public static class MarkupAnalyzer
                     text, subject.Tag, subject.Classes?.FirstOrDefault(), subject.Id, line, column,
                     complex, complex.Checkable);
             }
+        }
+    }
+
+    /// <summary>
+    /// Every rule of a stylesheet with its declarations, source order and specificity — the input the
+    /// cascade needs. The scan is the same one CSS0009 uses; an at-rule is skipped.
+    /// </summary>
+    public static IReadOnlyList<CssRule> CssRules(string text)
+    {
+        text ??= string.Empty;
+        return CssRules(MaskCss(text), LineStarts(text));
+    }
+
+    internal static IReadOnlyList<CssRule> CssRules(string masked, int[] lineStarts)
+    {
+        var rules = new List<CssRule>();
+        var order = 0;
+        var start = 0;
+
+        for (var index = 0; index < masked.Length; index++)
+        {
+            if (masked[index] == '}')
+            {
+                start = index + 1;
+                continue;
+            }
+
+            if (masked[index] != '{') continue;
+
+            var raw = masked[start..index];
+            var selectorText = raw.Trim();
+            var selectorOffset = start + (raw.Length - raw.TrimStart().Length);
+            start = index + 1;
+
+            var close = masked.IndexOf('}', index + 1);
+            if (close < 0) close = masked.Length;
+
+            if (selectorText.Length == 0 || selectorText.StartsWith('@') || !CssRuleSelector.IsMatch(selectorText))
+            {
+                index = close;
+                start = close + 1;
+                continue;
+            }
+
+            var declarations = Declarations(masked[(index + 1)..close], index + 1, lineStarts);
+
+            foreach (var part in SplitSelectorList(selectorText))
+            {
+                var text = part.Trim();
+                if (text.Length == 0 || !TryParseComplexSelector(text, out var complex)) continue;
+
+                var (line, column) = Position(lineStarts,
+                    selectorOffset + selectorText.IndexOf(part, StringComparison.Ordinal));
+                var subject = complex.Parts[^1];
+                var selector = new CssSimpleSelector(
+                    text, subject.Tag, subject.Classes?.FirstOrDefault(), subject.Id, line, column,
+                    complex, complex.Checkable);
+                rules.Add(new CssRule(selector, declarations, order++, Specificity(complex)));
+            }
+
+            index = close;
+            start = close + 1;
+        }
+
+        return rules;
+    }
+
+    private static List<CssDeclaration> Declarations(string body, int bodyOffset, int[] lineStarts)
+    {
+        var declarations = new List<CssDeclaration>();
+        var offset = bodyOffset;
+
+        foreach (var piece in body.Split(';'))
+        {
+            var trimmed = piece.Trim();
+            if (trimmed.Length > 0)
+            {
+                var colon = trimmed.IndexOf(':');
+                if (colon > 0 && colon < trimmed.Length - 1)
+                {
+                    var property = trimmed[..colon].Trim().ToLowerInvariant();
+                    var value = trimmed[(colon + 1)..].Trim();
+                    var important = value.EndsWith("!important", StringComparison.OrdinalIgnoreCase);
+                    if (important) value = value[..^"!important".Length].TrimEnd();
+
+                    var position = offset + Math.Max(0, piece.IndexOf(trimmed, StringComparison.Ordinal));
+                    var (line, column) = Position(lineStarts, position);
+                    if (property.Length > 0 && value.Length > 0)
+                        declarations.Add(new CssDeclaration(property, value, important, line, column));
+                }
+            }
+
+            offset += piece.Length + 1;
+        }
+
+        return declarations;
+    }
+
+    /// <summary>CSS specificity as one comparable number: ids, then classes/attributes/pseudo-classes, then tags/pseudo-elements.</summary>
+    public static int Specificity(CssComplexSelector selector)
+    {
+        var ids = 0;
+        var classes = 0;
+        var tags = 0;
+
+        foreach (var part in selector.Parts) Count(part);
+
+        return Math.Min(ids, 99) * 10_000 + Math.Min(classes, 99) * 100 + Math.Min(tags, 99);
+
+        void Count(CssSelectorPart part)
+        {
+            if (part.Id is not null) ids++;
+            classes += (part.Classes?.Count ?? 0) + (part.Attributes?.Count ?? 0) + (part.PseudoClasses?.Count ?? 0);
+            if (part.Tag is not null) tags++;
+            if (part.PseudoElement) tags++;
+            foreach (var inner in part.Not ?? Array.Empty<CssSelectorPart>()) Count(inner);
+            foreach (var inner in part.IsAny ?? Array.Empty<CssSelectorPart>()) Count(inner);
         }
     }
 
@@ -1322,8 +1460,15 @@ public sealed record CssSimpleSelector(
     string Text, string? Tag, string? Class, string? Id, int Line, int Column,
     CssComplexSelector? Complex = null, bool Checkable = true);
 
+/// <summary>One <c>property: value</c> of a rule, with the position that names it.</summary>
+public sealed record CssDeclaration(string Property, string Value, bool Important, int Line, int Column);
+
+/// <summary>A CSS rule as the cascade reads it: a selector, its declarations, its source order and its specificity.</summary>
+public sealed record CssRule(
+    CssSimpleSelector Selector, IReadOnlyList<CssDeclaration> Declarations, int Order, int Specificity);
+
 /// <summary>The facts a scan of one markup file produces.</summary>
 public sealed record MarkupAnalysis(
     string Kind, int Lines, int Elements, IReadOnlyList<string> Ids, IReadOnlyList<MarkupFinding> Findings,
     IReadOnlyList<MarkupNode>? Nodes = null, IReadOnlyList<CssSimpleSelector>? Selectors = null,
-    IReadOnlyList<string>? Classes = null);
+    IReadOnlyList<string>? Classes = null, IReadOnlyList<CssRule>? Rules = null);

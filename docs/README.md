@@ -149,20 +149,24 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   tree, navigation and verified edits) with the code-behind resolved through Roslyn. EF Core migrations
   run through `ef_migrations`; SQL
   (`sql_files`, `analyze_sql`, SQL0001–SQL0012), JavaScript/TypeScript (`js_files`, `analyze_js`,
-  JS0001–JS0017, with relative imports resolved, and **`js_symbols`** — a lexical symbol table: outline,
-  find, refs, unused), HTML/CSS (`markup_files`, `analyze_markup`), YAML
+  JS0001–JS0017, with every specifier resolved through a relative path, `tsconfig.json` `baseUrl`/`paths`
+  or `node_modules`, and **`js_symbols`** — a lexical symbol table: outline,
+  find, refs, unused, rename), HTML/CSS (`markup_files`, `analyze_markup`), YAML
   (`yaml_files`, `analyze_yaml`, YAML0001–YAML0012) and F#
-  (`fsharp_files`, `analyze_fsharp`, and **`fsharp_symbols`** — the same four questions as a name table)
+  (`fsharp_files`, `analyze_fsharp`, and **`fsharp_symbols`** — the same questions plus a lexical rename)
   each have a scanned layer of their own; the JavaScript/TypeScript
   toolchain also runs through the project's own npm/pnpm/yarn (`node_*`, with `tsc`/`eslint` interpreted),
-  and Kubernetes/Helm through `k8s_*`, with `k8s_validate` checking a manifest offline and
+  and Kubernetes/Helm through `k8s_*`, with `k8s_validate` checking a manifest offline (and, with
+  `server=true`, through the cluster's own `kubectl apply --dry-run=server`) and
   `k8s_port_forward` keeping a forwarded port as a session.
   A runnable Visual Basic sample lives in [`samples/VbDemo`](../samples/VbDemo/README.md), with the
   measured tool-by-tool results in [`DEMO.md`](../samples/VbDemo/DEMO.md).
   **What stays outside**: a scanner proves the shape of a line, and its symbol table resolves a name the
-  token stream can follow, never a type or a schema — the JS/TS source has a module graph and a lexical
+  token stream can follow, never a type or a schema — the JS/TS source has a module graph (its specifiers
+  followed through relative paths, `tsconfig.json` `baseUrl`/`paths` and `node_modules`) and a lexical
   symbol table but no type model, HTML/CSS have no DOM, YAML has no general schema (a Kubernetes manifest
-  is checked by `k8s_validate` against the built-in kinds, not the OpenAPI schema), and F# has no semantic
+  is checked by `k8s_validate` against the built-in kinds unless `server=true` asks the cluster for its
+  OpenAPI and admission answer), and F# has no semantic
   layer (its compiler's diagnostics come through `build_project`). See
   [Limits → Language and platform coverage](reference/limits.md#language-and-platform-coverage).
 - **Scope:** everything is static analysis or process instrumentation. No tool proves that a change

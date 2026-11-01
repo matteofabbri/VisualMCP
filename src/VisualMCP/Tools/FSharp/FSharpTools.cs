@@ -42,14 +42,18 @@ public static class FSharpTools
         "that `open` its module — and the declarations nothing reads. F# has no Roslyn model, so this is a " +
         "name table over the masked source, not a type model: shadowing inside a match arm, a module " +
         "abbreviation and anything the compiled assembly exports are outside it. action=outline (needs file), " +
-        "find (name), refs (name, optional file) or unused. Read-only.")]
+        "find (name), refs (name, optional file) or unused. action=rename (name, newName, optional file, " +
+        "dryRun) renames one declaration and every reference the scan resolved to it; it is lexical and has " +
+        "no compiler gate, and it writes only with dryRun=false.")]
     public static Task<object> FSharpSymbols(
         IFSharpSymbolService svc,
-        [Description("outline | find | refs | unused")] string action = "find",
-        [Description("The name to find or follow (find and refs).")] string? name = null,
-        [Description("The declaring file, for outline and to disambiguate refs.")] string? file = null,
+        [Description("outline | find | refs | unused | rename")] string action = "find",
+        [Description("The name to find or follow (find, refs and rename).")] string? name = null,
+        [Description("The declaring file, for outline and to disambiguate refs/rename.")] string? file = null,
         [Description("A file or a directory to scan (default: the solution directory).")] string? path = null,
         [Description("Match the name as a substring instead of exactly (find).")] bool partial = false,
-        [Description("Maximum rows to return (default 200).")] int maxResults = 200)
-        => svc.SymbolsAsync(action, name, file, path, partial, maxResults);
+        [Description("Maximum rows to return (default 200).")] int maxResults = 200,
+        [Description("The new name (rename).")] string? newName = null,
+        [Description("Preview only (rename, default true); pass false to write the files.")] bool dryRun = true)
+        => svc.SymbolsAsync(action, name, file, path, partial, maxResults, newName, dryRun);
 }

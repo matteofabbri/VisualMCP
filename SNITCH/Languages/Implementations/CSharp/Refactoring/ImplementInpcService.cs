@@ -39,6 +39,10 @@ public sealed class ImplementInpcService : IImplementInpcService
         if (classSymbol is null)
             return new { error = $"Class '{className}' not found." };
 
+        if (Snitch.Languages.VB.Refactoring.VbRefactoringSupport.IsVisualBasic(classSymbol))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.ImplementInpcAsync(
+                _workspace, className, propertyNames, dryRun, CancellationToken.None);
+
         // Find source document
         var declLoc = classSymbol.Locations.FirstOrDefault(l => l.IsInSource);
         if (declLoc is null) return new { error = "Class has no source location." };

@@ -433,6 +433,27 @@ public sealed class KubernetesServiceTests
         Assert.Contains("Not found", ResultAssert.Error(await _service.ValidateAsync("missing.yaml", null)));
     }
 
+    [Fact]
+    public async Task ValidateWithServerKeepsTheOfflineAnswerAndReportsTheDryRun()
+    {
+        var result = ResultAssert.Json(await _service.ValidateAsync(null, ValidDeployment, server: true));
+
+        Assert.True(result.TryGetProperty("offline", out var offline));
+        Assert.Equal(1, offline.GetProperty("documentCount").GetInt32());
+
+        var server = result.GetProperty("server");
+        Assert.True(server.TryGetProperty("ran", out var ran));
+        if (ran.GetBoolean())
+        {
+            Assert.True(server.TryGetProperty("valid", out _));
+            Assert.True(server.TryGetProperty("output", out _));
+        }
+        else
+        {
+            Assert.Contains("not found", server.GetProperty("error").GetString()!.ToLowerInvariant());
+        }
+    }
+
     // ── port-forward sessions ────────────────────────────────────────────────
 
     [Fact]

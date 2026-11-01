@@ -9,11 +9,12 @@ public static class JavaScriptTools
 {
     [McpServerTool(Name = "js_files"), Description(
         "What the solution's JavaScript/TypeScript is: every .js/.jsx/.mjs/.cjs/.ts/.tsx file under the solution " +
-        "(or under `path`), with its line count, whether it is TypeScript and JSX, the modules it imports, the " +
-        "relative ones resolved to the file they point at, the module graph and its import cycles, the names it " +
-        "exports, its function and class counts and how many findings it carries. node_modules, dist, build, out, " +
-        "coverage and the other generated folders are skipped. Use it to find the source before reading it; " +
-        "analyze_js lists the findings. Read-only.")]
+        "(or under `path`), with its line count, whether it is TypeScript and JSX, the modules it imports — each " +
+        "specifier resolved the way the project's tools do (a relative path, a tsconfig.json baseUrl/paths alias, " +
+        "a package in node_modules), with the targets outside the scan counted — the module graph and its import " +
+        "cycles, the names it exports, its function and class counts and how many findings it carries. " +
+        "node_modules, dist, build, out, coverage and the other generated folders are skipped. Use it to find " +
+        "the source before reading it; analyze_js lists the findings. Read-only.")]
     public static Task<object> JsFiles(
         IJavaScriptService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,
@@ -27,9 +28,11 @@ public static class JavaScriptTools
         "JS0006 document.write, JS0007 loose equality, JS0008 var, JS0009 console, JS0010 debugger, JS0011 empty " +
         "catch, JS0012 @ts-ignore/@ts-nocheck, JS0013 target=_blank without rel=noopener, JS0014 JSX <img> without " +
         "alt, JS0015 explicit any (TypeScript only), JS0016 setTimeout/setInterval given a string, JS0017 a " +
-        "relative import that points at no file. It masks comments, strings and template literals first, so a " +
-        "keyword inside them does not fire. A pattern scanner, not a parser: a relative import is resolved " +
-        "against the file system, but a package specifier and a type are not. Read-only.")]
+        "relative import that points at no file (a package specifier is not a defect here). It masks comments, " +
+        "strings and template literals first, so a " +
+        "keyword inside them does not fire. A pattern scanner, not a parser: JS0017 resolves a relative import " +
+        "against the file system and js_files/js_symbols resolve every specifier, but a type is never resolved. " +
+        "Read-only.")]
     public static Task<object> AnalyzeJs(
         IJavaScriptService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,
@@ -45,17 +48,22 @@ public static class JavaScriptTools
         "other modules take from it — and the declarations nothing reads. Lexical, not a type model: a " +
         "tokeniser over the masked source plus one scope per brace block resolves a name to the declaration " +
         "in the innermost enclosing scope, and an imported name through its binding to the exporting module " +
-        "(a relative specifier is resolved against the file system, a package one is not). JSX component " +
+        "(the specifier followed through a relative path, a tsconfig baseUrl/paths alias or a package in " +
+        "node_modules). JSX component " +
         "tags are references; a member reached through an untyped object, a computed member name and eval " +
         "are not resolved. action=outline (needs file), find (name), refs (name, optional file) or unused. " +
-        "Read-only.")]
+        "action=rename (name, newName, optional file, dryRun) renames one declaration and every reference " +
+        "the scan resolved to it, including the import binding in the modules that import it; it is " +
+        "lexical and has no compiler gate, and it writes only with dryRun=false.")]
     public static Task<object> JsSymbols(
         IJavaScriptSymbolService svc,
-        [Description("outline | find | refs | unused")] string action = "find",
-        [Description("The name to find or follow (find and refs).")] string? name = null,
-        [Description("The declaring file, for outline and to disambiguate refs.")] string? file = null,
+        [Description("outline | find | refs | unused | rename")] string action = "find",
+        [Description("The name to find or follow (find, refs and rename).")] string? name = null,
+        [Description("The declaring file, for outline and to disambiguate refs/rename.")] string? file = null,
         [Description("A file or a directory to scan (default: the solution directory).")] string? path = null,
         [Description("Match the name as a substring instead of exactly (find).")] bool partial = false,
-        [Description("Maximum rows to return (default 200).")] int maxResults = 200)
-        => svc.SymbolsAsync(action, name, file, path, partial, maxResults);
+        [Description("Maximum rows to return (default 200).")] int maxResults = 200,
+        [Description("The new name (rename).")] string? newName = null,
+        [Description("Preview only (rename, default true); pass false to write the files.")] bool dryRun = true)
+        => svc.SymbolsAsync(action, name, file, path, partial, maxResults, newName, dryRun);
 }

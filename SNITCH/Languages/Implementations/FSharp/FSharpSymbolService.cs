@@ -1,17 +1,20 @@
+using Snitch.Languages.CSharp.Refactoring;
 using Snitch.Workspace;
 
 namespace Snitch.Languages.FSharp;
 
 /// <summary>
 /// Symbol navigation over the solution's F# files: the declarations a file makes, the declaration a name
-/// resolves to, the references to it (inside its file and in the files that <c>open</c> its module) and the
-/// declarations nothing reads. Lexical: F# has no Roslyn model, so a name resolves by position in its file
-/// and, across files, only through an <c>open</c> the other file declares.
+/// resolves to, the references to it (inside its file and in the files that <c>open</c> its module), the
+/// declarations nothing reads, and a lexical rename of one declaration with every reference the scan
+/// resolved to it. Lexical: F# has no Roslyn model, so a name resolves by position in its file and, across
+/// files, only through an <c>open</c> the other file declares.
 /// </summary>
 public interface IFSharpSymbolService
 {
-    /// <summary>outline | find | refs | unused.</summary>
-    Task<object> SymbolsAsync(string action, string? name, string? file, string? path, bool partial, int maxResults);
+    /// <summary>outline | find | refs | unused | rename.</summary>
+    Task<object> SymbolsAsync(string action, string? name, string? file, string? path, bool partial, int maxResults,
+        string? newName = null, bool dryRun = true);
 }
 
 public sealed class FSharpSymbolService : IFSharpSymbolService
@@ -27,11 +30,12 @@ public sealed class FSharpSymbolService : IFSharpSymbolService
     public FSharpSymbolService(IRoslynWorkspace workspace) => _workspace = workspace;
 
     public async Task<object> SymbolsAsync(
-        string action, string? name, string? file, string? path, bool partial, int maxResults)
+        string action, string? name, string? file, string? path, bool partial, int maxResults,
+        string? newName = null, bool dryRun = true)
     {
         action = string.IsNullOrWhiteSpace(action) ? "find" : action.Trim().ToLowerInvariant();
-        if (action is not ("outline" or "find" or "refs" or "unused"))
-            return new { error = "action must be outline, find, refs or unused." };
+        if (action is not ("outline" or "find" or "refs" or "unused" or "rename"))
+            return new { error = "action must be outline, find, refs, unused or rename." };
 
         maxResults = Math.Clamp(maxResults, 1, 5_000);
         var root = ResolveRoot(path);
@@ -43,6 +47,7 @@ public sealed class FSharpSymbolService : IFSharpSymbolService
             "outline" => Outline(index, file, maxResults),
             "find" => Find(index, name, partial, maxResults),
             "refs" => References(index, name, file, maxResults),
+            "rename" => await RenameAsync(index, name, newName, file, dryRun),
             _ => Unused(index, maxResults),
         };
     }
@@ -281,6 +286,132 @@ public sealed class FSharpSymbolService : IFSharpSymbolService
                    "and a use reached through a module abbreviation are not occurrences the scan can see.",
         };
     }
+
+    // ── rename ───────────────────────────────────────────────────────────────────────
+    private static readonly HashSet<string> ReservedNames = new(StringComparer.Ordinal)
+    {
+        "abstract", "and", "as", "assert", "base", "begin", "class", "default", "delegate", "do", "done",
+        "downcast", "downto", "elif", "else", "end", "exception", "extern", "false", "finally", "fixed",
+        "for", "fun", "function", "global", "if", "in", "inherit", "inline", "interface", "internal",
+        "lazy", "let", "match", "member", "module", "mutable", "namespace", "new", "not", "null", "of",
+        "open", "or", "override", "private", "public", "rec", "return", "select", "static", "struct",
+        "then", "to", "true", "try", "type", "upcast", "use", "val", "void", "when", "while", "with",
+        "yield",
+    };
+
+    private static async Task<object> RenameAsync(Index index, string? name, string? newName, string? file,
+        bool dryRun)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return new { error = "action=rename needs a name." };
+        if (string.IsNullOrWhiteSpace(newName) || !IsIdentifier(newName) || ReservedNames.Contains(newName))
+            return new { error = $"'{newName}' is not an F# identifier." };
+        if (string.Equals(name, newName, StringComparison.Ordinal))
+            return new { error = "The names are identical." };
+
+        var declaringFile = file is null ? null : ResolveFile(index.Root, file);
+        var candidates = new List<(FSharpFileSymbols Symbols, int Position)>();
+        foreach (var symbols in index.Files.Values)
+        {
+            if (declaringFile is not null &&
+                !string.Equals(symbols.Path, declaringFile, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            for (var position = 0; position < symbols.Declarations.Count; position++)
+                if (string.Equals(symbols.Declarations[position].Name, name, StringComparison.Ordinal))
+                    candidates.Add((symbols, position));
+        }
+
+        if (candidates.Count == 0)
+            return new { error = $"No declaration named '{name}'{(declaringFile is null ? string.Empty : $" in {file}")}." };
+
+        if (candidates.Count > 1 && declaringFile is null)
+            return new
+            {
+                error = $"{candidates.Count} declarations are named '{name}'; pass file to choose one.",
+                files = candidates.Select(candidate => Relative(index.Root, candidate.Symbols.Path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            };
+
+        var (owner, declarationPosition) = candidates[0];
+        var declaration = owner.Declarations[declarationPosition];
+        var ownerText = await File.ReadAllTextAsync(owner.Path);
+
+        var edits = new List<(string File, int Offset, int Length, string Text)>
+        {
+            (owner.Path, PositionOf(ownerText, declaration.Line, declaration.Column),
+                declaration.Name.Length, newName),
+        };
+
+        foreach (var use in owner.Uses.Where(use => use.Declaration == declarationPosition))
+            edits.Add((owner.Path, PositionOf(ownerText, use.Line, use.Column), use.Name.Length, newName));
+
+        foreach (var (opening, use) in ExternalReferences(index, owner, declaration))
+        {
+            var text = await File.ReadAllTextAsync(opening.Path);
+            edits.Add((opening.Path, PositionOf(text, use.Line, use.Column), use.Name.Length, newName));
+        }
+
+        var written = new List<object>();
+        foreach (var group in edits.GroupBy(edit => edit.File, StringComparer.OrdinalIgnoreCase))
+        {
+            var original = await File.ReadAllTextAsync(group.Key);
+            var text = original;
+            foreach (var edit in group.OrderByDescending(edit => edit.Offset))
+                text = text[..edit.Offset] + edit.Text + text[(edit.Offset + edit.Length)..];
+
+            if (!dryRun) await File.WriteAllTextAsync(group.Key, text);
+
+            written.Add(new
+            {
+                file = Relative(index.Root, group.Key),
+                changes = group.Count(),
+                preview = RefactoringFileWriter.Diff(original, text),
+            });
+        }
+
+        return new
+        {
+            action = "rename",
+            name,
+            newName,
+            symbol = new
+            {
+                kind = declaration.Kind.ToString().ToLowerInvariant(),
+                file = Relative(index.Root, owner.Path),
+                line = declaration.Line,
+                column = declaration.Column,
+                container = declaration.Container,
+                isPublic = declaration.Public,
+            },
+            filesChanged = written.Count,
+            changes = edits.Count,
+            dryRun,
+            applied = !dryRun,
+            files = written,
+            note = "A lexical rename: the declaration and every reference the scan resolved to it — before it " +
+                   "in its file, or in a file that opens the declaring module. There is no compiler gate for " +
+                   "F#, so a name reached through a module alias or a type the scan does not model is not renamed.",
+        };
+    }
+
+    /// <summary>Line/column (1-based) to an index in the file's text; the line scan owns both.</summary>
+    private static int PositionOf(string text, int line, int column)
+    {
+        var currentLine = 1;
+        var index = 0;
+        while (currentLine < line && index < text.Length)
+        {
+            if (text[index] == '\n') currentLine++;
+            index++;
+        }
+
+        return Math.Min(text.Length, index + Math.Max(0, column - 1));
+    }
+
+    private static bool IsIdentifier(string text) =>
+        text.Length > 0 &&
+        (char.IsLetter(text[0]) || text[0] == '_') &&
+        text.All(character => char.IsLetterOrDigit(character) || character is '_' or '\'');
 
     // ── the index ────────────────────────────────────────────────────────────────────
 

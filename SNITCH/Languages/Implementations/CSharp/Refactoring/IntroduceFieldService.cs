@@ -55,6 +55,10 @@ public sealed class IntroduceFieldService : IIntroduceFieldService
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
 
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.IntroduceFieldAsync(
+                _workspace, filePath, line, expressionText, fieldName, dryRun, cancellationToken);
+
         var sourceText = await document.GetTextAsync(cancellationToken);
         if (line > sourceText.Lines.Count) return new { error = $"Line {line} is out of range." };
 

@@ -34,6 +34,10 @@ public sealed class IntroduceVariableService : IIntroduceVariableService
         if (document is null)
             return new { error = $"File '{filePath}' is not part of the loaded solution." };
 
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.IntroduceVariableAsync(
+                _workspace, filePath, line, expressionText, variableName, dryRun, CancellationToken.None);
+
         var sourceText = await document.GetTextAsync();
         if (line < 1 || line > sourceText.Lines.Count)
             return new { error = $"Line {line} is out of range." };

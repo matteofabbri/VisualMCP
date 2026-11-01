@@ -142,7 +142,8 @@ public sealed class MarkupService : IMarkupService
                       "structural pseudo-classes (:root, :first-child, :last-child, :only-child, :empty), joined " +
                       "by descendant, child, adjacent-sibling and general-sibling combinators. A selector whose " +
                       "meaning only a browser can decide (:hover, :checked, :nth-child(), :has()) is indexed but " +
-                      "never reported; specificity and the cascade are not resolved.");
+                      "never reported; CSS0010 resolves specificity and source order for a declaration that is " +
+                      "overridden on every element it matches.");
 
             foreach (var (file, selector) in selectorSources)
             {
@@ -151,6 +152,31 @@ public sealed class MarkupService : IMarkupService
                 if (!selector.Checkable) continue;
                 if (pageNodes.Any(nodes => nodes.Any(node => MarkupAnalyzer.Matches(nodes, node, selector)))) continue;
                 AddIfSelected(UnmatchedSelector(file, selector));
+            }
+
+            var cssRules = analyses
+                .SelectMany(entry => (entry.Analysis.Rules ?? []).Select(rule => (entry.File, Rule: rule)))
+                .ToList();
+
+            if (cssRules.Count > 0)
+            {
+                var elementTotal = pageNodes.Sum(nodes => nodes.Count);
+                var declarationTotal = cssRules.Sum(entry => entry.Rule.Declarations.Count);
+                if ((long)declarationTotal * elementTotal > 400_000)
+                {
+                    notes.Add($"CSS0010 was skipped: the cascade would compare {declarationTotal} declarations " +
+                              $"against {elementTotal} elements.");
+                }
+                else
+                {
+                    foreach (var finding in DeadDeclarations(cssRules, pageNodes))
+                        AddIfSelected(finding);
+
+                    notes.Add("CSS0010 resolves a declaration's specificity (ids, then classes/attributes/" +
+                              "pseudo-classes, then tags/pseudo-elements) and the source order within a file; " +
+                              "equal specificity across two different files is treated as unknown, because the " +
+                              "link order is not in the scan.");
+                }
             }
 
             var defined = analyses
@@ -216,6 +242,66 @@ public sealed class MarkupService : IMarkupService
             $"The selector '{selector.Text}' matches no element (tag, class, id, attribute) in the scanned pages.",
             file, selector.Line, selector.Column, selector.Text,
             "Remove the rule, or check the spelling: a typo here is a style that never applies.");
+
+    /// <summary>
+    /// A declaration is dead when every element it applies to is won by another rule that sets the same
+    /// property — higher specificity, <c>!important</c>, or the same specificity and a later rule in the
+    /// same file. Equal specificity across files is unknown (the link order is not in the scan), so it does
+    /// not make a declaration dead.
+    /// </summary>
+    private static IEnumerable<MarkupFinding> DeadDeclarations(
+        List<(string File, CssRule Rule)> rules, List<IReadOnlyList<MarkupNode>> pages)
+    {
+        foreach (var (file, rule) in rules)
+        {
+            if (!rule.Selector.Checkable) continue;
+
+            var matched = new List<(IReadOnlyList<MarkupNode> Nodes, MarkupNode Node)>();
+            foreach (var page in pages)
+                foreach (var node in page)
+                    if (MarkupAnalyzer.Matches(page, node, rule.Selector))
+                        matched.Add((page, node));
+
+            if (matched.Count == 0) continue;
+
+            foreach (var declaration in rule.Declarations)
+            {
+                if (!matched.All(entry => Overridden(rules, rule, file, declaration, entry.Nodes, entry.Node)))
+                    continue;
+
+                yield return new MarkupFinding("CSS0010", "info", "Maintainability",
+                    $"The declaration '{declaration.Property}: {declaration.Value}' in '{rule.Selector.Text}' is " +
+                    $"overridden on every one of the {matched.Count} element(s) it matches.",
+                    file, declaration.Line, declaration.Column,
+                    $"{rule.Selector.Text} {{ {declaration.Property}: {declaration.Value} }}",
+                    "Remove it, or raise its specificity: no element ever renders this value.");
+            }
+        }
+    }
+
+    private static bool Overridden(List<(string File, CssRule Rule)> rules, CssRule rule, string file,
+        CssDeclaration declaration, IReadOnlyList<MarkupNode> page, MarkupNode node)
+    {
+        foreach (var (otherFile, other) in rules)
+        {
+            if (ReferenceEquals(other, rule)) continue;
+            if (!other.Selector.Checkable) continue;
+            if (!MarkupAnalyzer.Matches(page, node, other.Selector)) continue;
+
+            var winner = other.Declarations.LastOrDefault(candidate => candidate.Property == declaration.Property);
+            if (winner is null) continue;
+
+            if (declaration.Important && !winner.Important) continue;
+            if (!declaration.Important && winner.Important) return true;
+            if (other.Specificity > rule.Specificity) return true;
+            if (other.Specificity == rule.Specificity &&
+                string.Equals(otherFile, file, StringComparison.OrdinalIgnoreCase) &&
+                other.Order > rule.Order)
+                return true;
+        }
+
+        return false;
+    }
 
     private static (string Kind, string? Error) Normalize(string kind)
     {

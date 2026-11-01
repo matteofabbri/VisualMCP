@@ -53,6 +53,10 @@ public sealed class ConvertAnonymousToTypeService : IConvertAnonymousToTypeServi
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
 
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.ConvertAnonymousToTypeAsync(
+                _workspace, filePath, line, typeName, dryRun, cancellationToken);
+
         var root = await document.GetSyntaxRootAsync(cancellationToken);
         var model = await document.GetSemanticModelAsync(cancellationToken);
         var compilation = await document.Project.GetCompilationAsync(cancellationToken);

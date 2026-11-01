@@ -271,6 +271,83 @@ public sealed class JavaScriptSymbolTests
         Assert.Contains("not a script of the scan", outline.GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task Rename_rewrites_the_declaration_the_uses_and_the_import_binding()
+    {
+        using var files = new Scripts(
+            ("app.js", """
+                export function classify(value) {
+                    return value > 0 ? 'big' : 'small';
+                }
+                """),
+            ("main.js", """
+                import { classify } from './app.js';
+
+                console.log(classify(1));
+                """));
+
+        var result = await Service.SymbolsAsync("rename", "classify", null, files.Root, false, 100,
+            newName: "categorize", dryRun: false);
+
+        Assert.True(Json(result).GetProperty("applied").GetBoolean());
+        Assert.Contains("function categorize", File.ReadAllText(Path.Combine(files.Root, "app.js")));
+
+        var main = File.ReadAllText(Path.Combine(files.Root, "main.js"));
+        Assert.Contains("import { categorize } from './app.js';", main);
+        Assert.Contains("console.log(categorize(1));", main);
+    }
+
+    [Fact]
+    public async Task A_tsconfig_alias_is_followed_to_the_declaring_module()
+    {
+        using var files = new Scripts(
+            ("tsconfig.json", """
+                {
+                    // TypeScript allows comments and a trailing comma in its own config.
+                    "compilerOptions": {
+                        "baseUrl": ".",
+                        "paths": { "@/*": ["./*"] },
+                    },
+                }
+                """),
+            ("app.js", "export function classify(value) { return value > 0; }"),
+            ("main.js", """
+                import { classify } from '@/app';
+
+                console.log(classify(1));
+                """));
+
+        var result = await Service.SymbolsAsync("refs", "classify", null, files.Root, false, 100);
+        var symbol = Assert.Single(Json(result).GetProperty("symbols").EnumerateArray());
+
+        var external = Assert.Single(symbol.GetProperty("references").EnumerateArray(),
+            reference => reference.GetProperty("file").GetString() == "main.js");
+        Assert.Equal("call", external.GetProperty("kind").GetString());
+        Assert.Contains("@/app", external.GetProperty("via").GetString());
+    }
+
+    [Fact]
+    public async Task A_package_import_resolves_through_node_modules_and_a_missing_one_does_not()
+    {
+        using var files = new Scripts(
+            ("node_modules/greeting/package.json", """{ "main": "lib/index.js" }"""),
+            ("node_modules/greeting/lib/index.js", "export function greet(name) { return 'hi ' + name; }"),
+            ("main.js", """
+                import { greet } from 'greeting';
+                import { nothing } from 'nothing-here';
+
+                console.log(greet('x'), nothing);
+                """));
+
+        var outline = Json(await Service.SymbolsAsync("outline", null, "main.js", files.Root, false, 100));
+        var imports = outline.GetProperty("imports").EnumerateArray().ToList();
+
+        Assert.True(Assert.Single(imports, entry => entry.GetProperty("module").GetString() == "greeting")
+            .GetProperty("resolved").GetBoolean());
+        Assert.False(Assert.Single(imports, entry => entry.GetProperty("module").GetString() == "nothing-here")
+            .GetProperty("resolved").GetBoolean());
+    }
+
     private static JavaScriptSymbolService Service => new(new NullWorkspace());
 
     private static JsonElement Json(object result) => JsonSerializer.SerializeToElement(result);
@@ -290,7 +367,12 @@ public sealed class JavaScriptSymbolTests
             Root = Path.Combine(Path.GetTempPath(), "vmcp-js-symbols-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
             foreach (var (name, source) in files)
-                File.WriteAllText(Path.Combine(Root, name), source);
+            {
+                // A name may carry a path, which is how a test builds node_modules or a src folder.
+                var path = Path.Combine(Root, name.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, source);
+            }
         }
 
         public string Root { get; }

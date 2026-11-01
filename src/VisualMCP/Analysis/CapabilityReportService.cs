@@ -92,16 +92,18 @@ public sealed class CapabilityReportService : ICapabilityReportService
                        "binding validation against the data type, inventory, navigation, binding inspector, element tree, " +
                        "verified edits)",
                 metacode = "Snitch.Metacode (C#, Visual Basic, Razor, pseudocode, Ghidra frontends; persisted index)",
-                sql = "Snitch.Languages.Sql (SqlAnalyzer: comments/literals masked, statements split, SQL0001-SQL0010; " +
+                sql = "Snitch.Languages.Sql (SqlAnalyzer: comments/literals masked, statements split, SQL0001-SQL0012; " +
                       "a pattern scanner, not a dialect parser)",
                 javascript = "Snitch.Node (the project's own npm/pnpm/yarn plus tsc and eslint interpreted) + " +
-                             "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0017, " +
-                             "relative imports resolved into a module graph with its cycles; no type checking)",
+                             "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0017; " +
+                             "a specifier resolved through a relative path, the nearest tsconfig baseUrl/paths or " +
+                             "node_modules into a module graph with its cycles; no type checking)",
                 markup = "Snitch.Languages.WebMarkup (MarkupAnalyzer: quote-aware HTML tag scanner, " +
                          $"{MarkupRange("HTML")}; CSS/SCSS masked, {MarkupRange("CSS")}; a selector resolves against " +
                          "the page's element index (tag, classes, id, attribute conditions, structural pseudo-classes, " +
                          "descendant/child/sibling combinators) and <style> blocks are analysed; a dynamic pseudo-class " +
-                         "is not reported, and specificity and the cascade are not resolved)",
+                         "is not reported, and a declaration overridden on every element it matches is CSS0010 " +
+                         "(equal specificity across two files is unknown)",
                 yaml = "Snitch.Languages.Yaml (YamlAnalyzer: indentation-aware line scan, YAML0001-YAML0012, manifest " +
                        "identity and container checks; not a schema validator)",
                 fsharp = "Snitch.Languages.FSharp (FSharpAnalyzer: masked scan, FS0001-FS0010, declaration inventory). " +

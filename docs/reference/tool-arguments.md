@@ -726,12 +726,15 @@ k8s_kustomize(path, namespaceName?, timeoutSeconds=120)
                   rendered YAML and the document count; a local path is checked
                   and made absolute, a git/URL reference is passed through
 
-k8s_validate(file?, content?)
+k8s_validate(file?, content?, server=false)
                 → exactly one of file/content; file may be a manifest or a
                   folder of .yaml/.yml (then each file is validated on its own
                   and the answer holds one result per file); K8S001–K8S023 are
-                  a table of the built-in kinds, not the OpenAPI schema, and
-                  k8s_apply dryRun=true stays the server-side authority
+                  a table of the built-in kinds, not the OpenAPI schema;
+                  server=true also sends the same text through
+                  kubectl apply --dry-run=server, which is the cluster's own
+                  OpenAPI and admission check (the offline answer is kept beside
+                  it; a missing kubectl or an unreachable cluster is reported)
 
 k8s_port_forward(action=start|list|status|stop, sessionId?, target?, ports?,
                   namespaceName?, timeoutSeconds=10)
@@ -805,32 +808,42 @@ analyze_sql(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200, schem
 
 js_files(path?, maxFiles=500)
                 → per file: lines, typeScript, jsx, import count and modules,
-                  dependsOn (the relative imports resolved to a file), exported
-                  names, functions, classes, finding count; plus moduleGraph:
-                  nodeCount, edgeCount, edges, cycles (one entry per strongly
-                  connected group of modules); resolved and unresolved relative
-                  imports; node_modules/dist/build/out/coverage/.next are skipped
+                  dependsOn (the specifiers resolved to another scanned file),
+                  exported names, functions, classes, finding count; plus a
+                  resolvedImports count (relative path, tsconfig baseUrl/paths
+                  alias or node_modules package), externalImports (resolved
+                  outside the scan), unresolvedImports (the relative ones, JS0017)
+                  and moduleGraph: nodeCount, edgeCount, edges, cycles (one entry
+                  per strongly connected group of modules); node_modules/dist/
+                  build/out/coverage/.next are skipped
 
 analyze_js(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
                 → JS0001-JS0017 over masked source (comments, strings and
                   template literals blanked first); JS0015 (any) fires only for
                   .ts/.tsx/.mts/.cts; JS0017 is a relative import that names no
-                  file (a package specifier is not resolved). Unknown rule ids
-                  return the catalogue.
+                  file (a package specifier is not a defect here; js_files and
+                  js_symbols resolve those). Unknown rule ids return the catalogue.
 
-js_symbols(action=find|outline|refs|unused, name?, file?, path?, partial=false,
-           maxResults=200)
+js_symbols(action=find|outline|refs|unused|rename, name?, file?, path?, partial=false,
+           maxResults=200, newName?, dryRun=true)
                 → a lexical symbol table over the same files: outline needs a
                   file and lists its declarations (name, kind, line, column,
-                  container, exportedAs, uses) with its imports and exports;
+                  container, exportedAs, uses) with its imports (each with
+                  resolved=true/false) and exports;
                   find and refs need a name (partial=true makes it a substring);
                   refs follows a declaration's own uses and the uses in the
                   modules that import it (via names the specifier); unused lists
                   the declarations nothing reads. A name resolves to the
                   declaration in the innermost enclosing scope; an imported name
-                  resolves through its binding when the specifier is relative;
+                  resolves through its binding, the specifier followed through a
+                  relative path, a tsconfig baseUrl/paths alias or a package in
+                  node_modules;
                   JSX component tags are references; a member through an untyped
-                  object and eval are not resolved
+                  object and eval are not resolved. rename needs name and newName
+                  (and file when the name is declared more than once): it rewrites
+                  the declaration, the uses the scan resolved and the import
+                  binding in the modules that import it, previewing unless
+                  dryRun=false; lexical, so there is no compiler gate
 
 markup_files(path?, kind=both, maxFiles=500)
                 → kind is html|css|both; per file: lines, elements, id count,
@@ -861,15 +874,18 @@ analyze_fsharp(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
                 → FS0001-FS0010 over masked source; comments (including
                   (* … *)) and string literals are blanked first
 
-fsharp_symbols(action=find|outline|refs|unused, name?, file?, path?,
-               partial=false, maxResults=200)
+fsharp_symbols(action=find|outline|refs|unused|rename, name?, file?, path?,
+               partial=false, maxResults=200, newName?, dryRun=true)
                 → the lexical name table: outline needs a file and lists its
                   modules, types, union cases, record fields, let bindings and
                   members with line/column/container; find and refs need a name;
                   refs counts a use before the declaration in the same file and,
                   across files, only in a file that opens the declaring module;
                   unused refuses to call a name dead when it occurs somewhere
-                  the scan could not resolve
+                  the scan could not resolve; rename needs name and newName (and
+                  file when the name is declared more than once) and rewrites the
+                  declaration and the references the scan resolved — lexical, so
+                  there is no compiler gate; it previews unless dryRun=false
 
 trace_data_flow(projectName?, cwe?, depth=2, maxResults=200)
                 → flows from a source (query/form/header/cookie/body/route data,

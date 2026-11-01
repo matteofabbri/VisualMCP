@@ -36,7 +36,9 @@ public sealed class GlobalUsingsService : IGlobalUsingsService
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
 
-        var projects = solution.Projects.Where(project => project.Language == LanguageNames.CSharp).ToList();
+        var projects = solution.Projects
+            .Where(project => project.Language == LanguageNames.CSharp || project.Language == LanguageNames.VisualBasic)
+            .ToList();
         var project = projectName is null
             ? projects.Count == 1 ? projects[0] : null
             : projects.FirstOrDefault(candidate => candidate.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
@@ -49,6 +51,10 @@ public sealed class GlobalUsingsService : IGlobalUsingsService
                     : $"Project '{projectName}' not found.",
                 projects = projects.Select(candidate => candidate.Name).ToList(),
             };
+
+        if (project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.GlobalUsingsAsync(
+                _workspace, solution, project, dryRun, cancellationToken);
 
         var projectDirectory = project.FilePath is null ? null : Path.GetDirectoryName(project.FilePath);
         if (projectDirectory is null) return new { error = $"Project '{project.Name}' has no directory on disk." };

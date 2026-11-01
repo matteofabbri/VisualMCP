@@ -411,4 +411,78 @@ public sealed class MarkupAnalyzerTests
         Assert.Equal(0, cssOnly.GetProperty("findingCount").GetInt32());
         Assert.Contains("no HTML page is in scope", cssOnly.GetProperty("note").GetString());
     }
+
+    [Fact]
+    public void CssRules_ReadDeclarationsOrderAndSpecificity()
+    {
+        var rules = MarkupAnalyzer.CssRules("#x .a, div { color: red; margin: 0 !important; }");
+
+        Assert.Equal(2, rules.Count);
+        var byId = rules[0];
+        Assert.Equal(2, byId.Declarations.Count);
+        Assert.Equal("color", byId.Declarations[0].Property);
+        Assert.Equal("red", byId.Declarations[0].Value);
+        Assert.True(byId.Declarations[1].Important);
+        Assert.Equal(10_100, byId.Specificity); // one id (10000) + one class (100)
+        Assert.Equal(0, byId.Order);
+
+        Assert.Equal(1, rules[1].Specificity); // one tag
+        Assert.Equal(1, rules[1].Order);
+    }
+
+    [Fact]
+    public async Task ADeclarationOverriddenOnEveryElementItMatchesIsReported()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """<div class="a b"></div>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), """
+            .a { color: red; }
+            .b { color: blue; }
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "CSS0010", 100, 100));
+        var finding = Assert.Single(json.GetProperty("findings").EnumerateArray());
+
+        Assert.Contains("color: red", finding.GetProperty("Message").GetString());
+        Assert.Contains(".a", finding.GetProperty("Snippet").GetString());
+    }
+
+    [Fact]
+    public async Task AHigherSpecificityRuleMakesTheElementRuleDead()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """<div class="a"></div>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), """
+            div { color: red; }
+            .a { color: blue; }
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "CSS0010", 100, 100));
+        var finding = Assert.Single(json.GetProperty("findings").EnumerateArray());
+        Assert.Contains("color: red", finding.GetProperty("Message").GetString());
+    }
+
+    [Fact]
+    public async Task ADeclarationThatWinsOnSomeElementIsNotReported()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"),
+            """<div class="a"></div><div class="a b"></div>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), """
+            .a { color: red; }
+            .b { color: blue; }
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "CSS0010", 100, 100));
+        Assert.Equal(0, json.GetProperty("findingCount").GetInt32());
+    }
 }

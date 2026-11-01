@@ -40,6 +40,10 @@ public sealed class PullMembersUpService : IPullMembersUpService
         if (classSymbol is null)
             return new { error = $"Class '{className}' not found." };
 
+        if (Snitch.Languages.VB.Refactoring.VbRefactoringSupport.IsVisualBasic(classSymbol))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.PullMembersUpAsync(
+                _workspace, className, memberNames, targetName, dryRun, CancellationToken.None);
+
         // Find target (base class or interface)
         var allBases = classSymbol.AllInterfaces
             .Cast<INamedTypeSymbol>()
