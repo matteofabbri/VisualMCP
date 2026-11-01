@@ -1,7 +1,7 @@
 # ReSharper & CodeMaid — Feature Coverage
 
 Comparison of VisualMCP tools against ReSharper, Rider and CodeMaid.
-Legend: ✅ implemented · ⚠️ partial · ❌ missing · 💀 not applicable to a headless MCP server
+Legend: ✅ implemented · ⚠️ partial · ❌ missing
 
 Last updated: 2026-11-01 — **420 tools** in the running build; `capability_report` prints the live count.
 This is the ✅ side of the comparison: each row names a capability that exists, the tool that provides it,
@@ -34,7 +34,7 @@ an exception explained below it.
 | Full-text search + regex | `search_text`, `search_code`, `text_index` | ✅ raw matching lines, the same regex resolved to the declaration that contains each hit, and a persisted FTS5 index |
 | **Structural search & replace** | `structural_search` | ✅ AST pattern with `$holes$`, compiler-gated rewrite, C# and Visual Basic |
 | Search by semantic query ("methods that throw X") | `find_throw_sites` | ✅ the direct throwers of a type (or of everything derived from it), the callers that reach one with the shortest call path, and the methods that catch it as a boundary |
-| Go to file by fuzzy name / Search Everywhere / MRU | `find_file` | ✅ fuzzy and CamelHumps file-name search; the MRU list and the popup are the client's |
+| Go to file by fuzzy name / Search Everywhere | `find_file` | ✅ fuzzy and CamelHumps file-name search |
 
 ### Refactorings
 
@@ -104,7 +104,6 @@ pattern merging and the extension block, named in its table below.
 | Optimize / sort usings | `optimize_usings` | ✅ |
 | Reorder members | `reorder_members` | ✅ |
 | Remove regions | `remove_regions` | ✅ |
-| On-save cleanup | — | 💀 the client triggers `code_cleanup` on its own save event |
 | Formatting settings management, `.editorconfig` generation | `configure_formatting` | ✅ authors `csharp_*`/`dotnet_*`/indent/line-ending/charset/file-header options; severities with `configure_inspection` |
 
 ### Local history
@@ -132,7 +131,6 @@ pattern merging and the extension block, named in its table below.
 | Branch protection and rulesets | `gh_branch_protection` | ✅ protection, required status checks and the repository rulesets that apply |
 | GitLab, Azure DevOps, Bitbucket Cloud | `git_host` | ✅ merge/pull requests, comments, merge, `review-pr`, close/reopen/update, issues/work items and pipelines; provider and coordinates parsed from the remote, credentials from `GITLAB_TOKEN`/`AZURE_DEVOPS_EXT_PAT`/`BITBUCKET_*`; GitLab's missing request-changes vote is stated, not faked |
 | The review brief for a diff | `code_review` | ✅ changed files by kind, the risk checklist, new TODO/FIXME markers with their line, the worst methods of each changed C# file, and optionally the inspection findings inside them |
-| Real-time collaborative editing | — | 💀 a shared transport and an editor surface, not a tool a local stdio server can offer ([gaps.md §9](gaps.md#9-ui-bound-features--not-applicable-by-design)) |
 
 ### Analysis & inspections
 
@@ -204,7 +202,6 @@ adapter implements exposed as a tool, plus two capabilities reached through Rosl
 | Console output | `debug_output` | ✅ stdout/stderr as the debuggee wrote them, plus the adapter's stderr when a launch failed |
 | Restart with the same breakpoints, optionally rebuilt | `debug_restart` | ✅ the same program, arguments, environment, line/function breakpoints and exception settings again under a new session id; `rebuild=true` runs `dotnet build` on the project that produced the assembly, and a failed build leaves the session untouched |
 | Edit-and-continue / hot reload | — | ⚠️ the adapter applies metadata deltas only over GDB/MI (`-apply-deltas`), and its DAP mode has no request for them. Substitutes: `debug_restart rebuild=true` and `debug_evaluate newValue` |
-| Debugger windows (breakpoints list, modules, parallel stacks) | `debug_sessions`, `debug_stack`, `debug_threads` | 💀 the data is a tool result; the window is the client's |
 
 ### Decompilation & profiling
 
@@ -217,7 +214,6 @@ adapter implements exposed as a tool, plus two capabilities reached through Rosl
 | Navigate inside decompiled code | `assembly_workspace` | ✅ search, source, references and outline over a Roslyn workspace keyed on the MVID; `action=il` returns the same symbol as IL; rename is not possible (there is no source to write) |
 | IL viewer | `disassemble` | ✅ the IL of one type or method, with tokens resolved against the metadata; `assembly_workspace action=il` links the decompiled view and the IL view of the same symbol |
 | CPU/memory/I-O diagnosis | `profile_*` (27 tools) | ✅ sampling, allocation sites, GC, heap retention, thread-pool and lock analysis, async and database event analysis, instrumentation, plus the verdict tools (`profile_slowdown`, `profile_threadpool`, `profile_review_change`, `profile_root_cause`) |
-| Interactive timeline, object-graph explorer | `profile_*` | 💀 the data is a tool result; the client draws the timeline and the graph |
 
 ---
 
@@ -231,7 +227,6 @@ adapter implements exposed as a tool, plus two capabilities reached through Rosl
 | Format document | `format_code` | ✅ |
 | Full cleanup pass | `code_cleanup` | ✅ with named profiles |
 | Comment wrapping, join lines, blank-line rules | `layout_code` | ✅ reflow full-line `//` comments to a width, join a line range (refused when the tokens would change), collapse runs of blank lines and trim them at the braces |
-| Code outline / Spade view | `get_type_members`, `read_symbol` | 💀 the data is a tool result; the tree is the client's |
 
 ---
 
@@ -257,7 +252,7 @@ and, in the last column, exactly where it stops.
 
 The batches that changed this page or the count it quotes, newest first. A count is the live inventory at
 the end of the batch (`capability_report` prints the current one); the product-wide numbered log, with
-every batch and the rows it closed, is [gaps.md §13](gaps.md#13-revision-log).
+every batch and the rows it closed, is [gaps.md §12](gaps.md#12-revision-log).
 
 | Date | What changed | Tools |
 |---|---|---|
@@ -265,7 +260,7 @@ every batch and the rows it closed, is [gaps.md §13](gaps.md#13-revision-log).
 | 2026-11-01 | **The debugger, against the adapter's real surface**: per-exception-type filters (`filterOptions`) and the stopped exception's block (`exceptionInfo`), function breakpoints, Set Value through `debug_evaluate newValue`, hit conditions counted by the server, **data breakpoints as the solution's Roslyn-resolved write sites**, and `debug_restart` with an optional rebuild. Edit-and-continue/hot reload is a ⚠️ row: the adapter applies metadata deltas only over GDB/MI | 413 → 416 |
 | 2026-10-31 | **The HTML/CSS depth**: `markup_files` indexes every page's tags/classes/ids and every sheet's simple selectors; `analyze_markup` gains CSS0009 (a simple selector that matches no element) and HTML0015 (a class used and defined in no scanned sheet), runs the CSS rules and selectors on every `<style>` block, and checks an inline `style` attribute for `!important`, `javascript:` and `expression()` | 404 (unchanged) |
 | 2026-10-31 | **The depth of the scanned layers and the data-flow reach**: `analyze_yaml` gains YAML0009–YAML0012 (kind/apiVersion asymmetry, metadata without a name, a container with no image, duplicate container names), `analyze_js` resolves a relative import and reports JS0017, and `trace_data_flow` follows a value stored in a field of the same type across the method that writes it and the method that reads it. No new tool: the range of three existing ones | 401 (unchanged) |
-| 2026-10-31 | **Version control and collaboration** stops being a row in [gaps.md](gaps.md) and becomes a feature section here: the 37 tools — 28 in the Git family (27 `git_*` and `commit_lint`), 8 GitHub and `code_review`. The section adds no tool, it moves ones already counted; real-time co-editing stays the one boundary and is UI-bound by design | 401 (unchanged) |
+| 2026-10-31 | **Version control and collaboration** stops being a row in [gaps.md](gaps.md) and becomes a feature section here: the 37 tools — 28 in the Git family (27 `git_*` and `commit_lint`), 8 GitHub and `code_review`. The section adds no tool, it moves ones already counted | 401 (unchanged) |
 | 2026-10-31 | **The board becomes the source of truth**: `board_brief` (counts, the card to pick up, staleness) and `board_audit` (each open card cross-checked against the live tool and context-action catalogue); the rows on this page do not move, the inventory does | 399 → 401 |
 | 2026-10-31 | **The last point of every open family**: the scanned layers (`js_files`/`analyze_js`, `markup_files`/`analyze_markup`, `yaml_files`/`analyze_yaml`, `fsharp_files`/`analyze_fsharp`), `trace_data_flow`, `find_throw_sites` (387 → 397), five context actions (`merge_patterns`, `concat_to_stringbuilder`, `linq_query_to_method`, `linq_method_to_query`, `convert_to_extension_block`) and CS1729 in `create_from_usage`; then `commit_lint` (→ 398) and `disk_usage` (→ 399) | 387 → 399 |
 | 2026-10-31 | **The rows that used to close this page**: the debugger (16 `debug_*` tools over netcoredbg), the test workflow (`run_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `debug_test`), decompiled code as a workspace (`assembly_workspace`), the diagram and exploration tools (`call_graph`, `sequence_diagram`, `control_flow_graph`, `find_todos`, `find_endpoints`, `find_file`, `solution_map`), the smaller refactorings (`transform_parameters`, `make_non_static`, `move_type_to_nested_scope`, `generify`, `remove_params`, `extension_to_static`, `invert_boolean`, `inline_field`, `extract_members_to_partial`), and the last ReSharper/CodeMaid rows: templates (`templates`), cleanup profiles (`code_cleanup profile=`), CodeMaid's layout rules (`layout_code`), fuzzy symbol search (`find_symbol`), ten more context actions (merge/split conditions, a null check joined with its use, `var` and back, split declaration, remove braces, nullable migration, digit separators, `ConfigureAwait(false)`) and the create-from-usage long tail (CS0117, CS1501, CS7036 next to CS1061/CS0246/CS0103) | — |

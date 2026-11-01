@@ -8,19 +8,18 @@ A different axis — how many calls an agent needs to answer one question, measu
 store — is [Agent ergonomics](agent-ergonomics.md). That page is a backlog of tool-surface work;
 this one is the feature inventory.
 
-Three kinds of absence are kept apart, because they need different decisions:
+Two kinds of absence are kept apart, because they need different decisions:
 
 | Mark | Meaning | What to do about it |
 |---|---|---|
-| ❌ | A real gap. The feature exists in ReSharper/Rider and could be built here. | Implement it; section 11 says where the remaining boundaries are |
+| ❌ | A real gap. The feature exists in ReSharper/Rider and could be built here. | Implement it; section 10 says where the remaining boundaries are |
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
-| 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
 Last updated: 2026-11-01 — **420 tools** in the running build (`capability_report` prints the live
 count). Version control and collaboration is not on this page: it is a feature section of
 [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md), because none of it is a gap. The
 batches that closed rows here, each with the count it produced, are in
-[§13 Revision log](#13-revision-log); anything older is in `git log`.
+[§12 Revision log](#12-revision-log); anything older is in `git log`.
 
 ---
 
@@ -29,14 +28,13 @@ batches that closed rows here, each with the count it produced, are in
 | Area | State | Priority | Why this priority |
 |---|---|:---:|---|
 | [Language and platform scope](#1-language-and-platform-scope) | ⚠️ | Low if your solution uses them | C#, VB, XAML, Razor, EF Core, Kubernetes and the Node toolchain are covered semantically or by a wrapper; SQL, JS/TS, HTML/CSS, YAML and F# each have a **scanned** layer with an inventory and a rule set, and JS/TS and F# also have a **lexical symbol table** (`js_symbols`, `fsharp_symbols`: declarations, the declaration a name resolves to, its references). What none of the scanners does is type-check an expression |
-| [Debugger](#2-debugger) | ✅ | — | Implemented: 20 `debug_*` tools over netcoredbg (DAP) — line, function and data breakpoints, per-exception-type filters, value editing and restart. Edit-and-continue is the one thing the adapter exposes only over GDB/MI, so it is an engine limit ([reference/limits.md](reference/limits.md#debugger)) rather than a missing tool; the windows are the client's ([section 9](#9-ui-bound-features--not-applicable-by-design)) |
+| [Debugger](#2-debugger) | ✅ | — | Implemented: 20 `debug_*` tools over netcoredbg (DAP) — line, function and data breakpoints, per-exception-type filters, value editing and restart. Edit-and-continue is the one thing the adapter exposes only over GDB/MI, so it is an engine limit ([reference/limits.md](reference/limits.md#debugger)) rather than a missing tool |
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ✅ | — | Severity, suppression, custom rules, `.DotSettings` reading, naming rules, spelling and a warm analysis loop exist; only the proprietary ReSharper id set is absent |
 | [Decompiled code as a workspace](#4-decompiled-code-as-a-workspace) | ✅ | — | `assembly_workspace` decompiles into a Roslyn workspace: search, source, references, outline |
 | [Context actions and templates](#5-context-actions-templates-and-generation) | ⚠️ | Low | 41 action ids and the template family (18 live, 10 postfix, 8 file) exist, including LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block; what remains is the proprietary tail whose condition is a type-system fact rather than a shape |
 | [Refactoring gaps](#6-refactoring-gaps) | ✅ | — | All ~51 of Rider's main set are implemented, including `transform_parameters`, `make_non_static`, `move_type_to_nested_scope` and `generify` (2026-10-31) |
-| [Diagrams and exploration](#7-architecture-diagrams-and-exploration) | ✅ | — | Graph artifacts (project/namespace/type, call, sequence, control flow), value tracking, localization and the explorers exist as data; drawing them is the client's |
+| [Diagrams and exploration](#7-architecture-diagrams-and-exploration) | ✅ | — | Graph artifacts (project/namespace/type, call, sequence, control flow), value tracking, localization and the inventories exist as tools and artifacts |
 | [Build, run, packaging](#8-build-run-and-packaging) | ⚠️ | Low | Build/test/run/publish and the six build-settings tools (evaluated MSBuild, binlog, run configurations, launch/publish profiles, package sources) exist; installer authoring, deployment targets, a standalone CLI and solution-wide style campaigns do not |
-| [UI-bound features](#9-ui-bound-features--not-applicable-by-design) | 💀 | — | Deliberately out of scope for an MCP server |
 
 ---
 
@@ -74,8 +72,8 @@ that is the distinction this section keeps.
 | **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
 | **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup` including member reordering); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`, `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`); **refactorings and generation** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `generate_docs`, `implement_members`, `reduce_complexity`/`fix_complexity`); `simplify_vb_code` (**41 of the 49 VB ids**, the other 8 refused by id with a reason); `context_action` on a `.vb` document (**33 ids** with a VB spelling) and `apply_code_fix` with the analyzers' VB fixers; `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static, the pattern combinators) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; the declaration-shape refactoring tail listed in §1.2 (`extract_class`/`extract_superclass`, `inline_class`/`inline_parameter`/`inline_symbol`, `move_instance_method`/`move_static_members`, `move_type_to_nested_scope`/`move_type_to_outer_scope`, `function_to_indexer`/`indexer_to_function`); `reduce_complexity` reports extract-method as a hand edit |
 | **F#** | `fsharp_files` — the declaration inventory (modules, types, top-level functions, opens); **`fsharp_symbols`** — the lexical symbol table: the declarations a file makes (modules, namespaces, types, union cases, record fields, `let` bindings and members, with their positions), the declaration a name resolves to (before it in the same file, or in a file that `open`s its module), every reference, and the declarations nothing reads; `analyze_fsharp` — FS0001–FS0010 over masked source (tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open`); `build_project` returns the F# compiler's own diagnostics (FS####); `run_tests` runs F# tests | No semantic model: F# is not a Roslyn language, so there is no type checking, no rename/refactoring, no inspection and no complexity. The symbol table is lexical — shadowing inside a match arm, a module abbreviation and a name the compiled assembly exports are outside it — and the compiler's FS#### diagnostics remain the authority |
-| **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `xaml_pages` (inventory + the project's dialect and target frameworks), `analyze_xaml` (XAML0001–XAML0015, binding paths validated against the data type), `xaml_bindings` (the binding inspector), `xaml_tree` (the element tree), `xaml_navigate`; verified edits `xaml_rename`, `xaml_extract_style`, `xaml_promote_resource`, `format_xaml`; the C# code-behind is fully analysed. The data type comes from `x:DataType`/`DataType` in scope, a code-behind `DataContext = …`/`BindingContext = …`, a design-time `d:DataContext`, or a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element | No rendered preview or designer, and no compiled XAML: a binding whose data type none of those names is `not-checked` rather than guessed, and a key from a referenced assembly's theme dictionary is invisible |
-| **JavaScript / TypeScript / JSX / TSX** | `node_info`, `node_install`, `node_script` (the project's npm/pnpm/yarn); `node_typecheck` (tsc → `TSxxxx` diagnostics with file:line), `node_lint` (eslint → findings with rule and position), `node_outdated`, `node_audit`; `js_files` (imports, exports, functions, classes, JSX, the relative imports resolved into a module graph with its import cycles) and `analyze_js` (JS0001–JS0017 over masked source; a relative specifier is resolved against the file system, a package specifier is not); **`js_symbols`** — the lexical symbol table: the declarations a file makes (functions, classes and their members, variables and destructured bindings, parameters, TypeScript interfaces/types/enums, import bindings), the declaration a name resolves to in the innermost enclosing scope, every reference inside the module and through the imports other modules take from it, JSX component tags as references, and the declarations nothing reads | No type model: an imported name resolves through its binding to the exporting module only when the specifier is relative and the module is in the scan, a member reached through an untyped object, a computed member name and `eval` are not resolved, and there is no rename or refactoring; no bundler or component analysis; no browser preview |
+| **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `xaml_pages` (inventory + the project's dialect and target frameworks), `analyze_xaml` (XAML0001–XAML0015, binding paths validated against the data type), `xaml_bindings` (the binding inspector), `xaml_tree` (the element tree), `xaml_navigate`; verified edits `xaml_rename`, `xaml_extract_style`, `xaml_promote_resource`, `format_xaml`; the C# code-behind is fully analysed. The data type comes from `x:DataType`/`DataType` in scope, a code-behind `DataContext = …`/`BindingContext = …`, a design-time `d:DataContext`, or a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element | No compiled XAML: a binding whose data type none of those names is `not-checked` rather than guessed, and a key from a referenced assembly's theme dictionary is invisible |
+| **JavaScript / TypeScript / JSX / TSX** | `node_info`, `node_install`, `node_script` (the project's npm/pnpm/yarn); `node_typecheck` (tsc → `TSxxxx` diagnostics with file:line), `node_lint` (eslint → findings with rule and position), `node_outdated`, `node_audit`; `js_files` (imports, exports, functions, classes, JSX, the relative imports resolved into a module graph with its import cycles) and `analyze_js` (JS0001–JS0017 over masked source; a relative specifier is resolved against the file system, a package specifier is not); **`js_symbols`** — the lexical symbol table: the declarations a file makes (functions, classes and their members, variables and destructured bindings, parameters, TypeScript interfaces/types/enums, import bindings), the declaration a name resolves to in the innermost enclosing scope, every reference inside the module and through the imports other modules take from it, JSX component tags as references, and the declarations nothing reads | No type model: an imported name resolves through its binding to the exporting module only when the specifier is relative and the module is in the scan, a member reached through an untyped object, a computed member name and `eval` are not resolved, and there is no rename or refactoring; no bundler or component analysis |
 | **HTML / CSS / SCSS** | `markup_files` (elements, distinct classes, selectors, ids, duplicates) and `analyze_markup`: HTML0001–HTML0015 (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS0001–CSS0009 (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a selector that matches no element in the scanned pages), with the CSS rules and selectors also read from every `<style>` block and the safety rules checked on an inline `style` attribute | A structural scanner, not a renderer. A selector resolves against the page index — compound parts with tag, classes, id, attribute conditions and the structural pseudo-classes `:root`/`:first-child`/`:last-child`/`:only-child`/`:empty`, joined by descendant, child, adjacent-sibling and general-sibling combinators — on the nesting the tags write. A selector whose meaning only a browser can decide (`:hover`, `:checked`, `:nth-child()`, `:has()`) is indexed but never reported; specificity and the cascade are not resolved, and a CDN stylesheet or a style built in JavaScript (CSS-in-JS) is outside the scan; no CSS-isolation analysis, no formatting |
 | **YAML** | `yaml_files` (documents, top-level keys, and `kind`/`apiVersion`/`metadata.name` for a manifest) and `analyze_yaml`: YAML0001–YAML0008 (tab indentation, duplicate key, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collection, an alias with no anchor) and YAML0009–YAML0012 (kind without apiVersion or the reverse, a metadata block with no name, a container with no image, two containers with the same name); a Kubernetes manifest is also validated field by field offline by `k8s_validate` (K8S001–K8S023) | No schema for a CI pipeline file or a compose file, and no schema at all for YAML that is not a Kubernetes manifest: the structural rules are a line scan, `k8s_validate` is a table of the built-in kinds rather than the OpenAPI schema |
 | **SQL** | `sql_files` (per-file statements, verbs and tables) and `analyze_sql` (SQL0001–SQL0012: lexical, correctness, safety, security and performance rules); the scan reads the DDL the files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) into a schema model and checks a statement's table and column names against it (SQL0011 a table the scan does not declare, SQL0012 a column its declared table does not have), opt-out with `schema=off`; SQL built in C# is followed by `trace_data_flow` (a request value reaching `FromSqlRaw`/`ExecuteSqlRaw`/Dapper/`CommandText`) | No dialect parser and no live database: the schema is the one the scanned files declare, so a table created elsewhere is reported as undeclared, not as invalid. No execution, no query plan, no formatting |
@@ -282,9 +280,6 @@ through Roslyn, with the project's own dialect as the thing that decides which r
 
 What remains, and why:
 
-- **a rendered preview or a designer** — the visual tree laid out, the styles applied, a binding
-  inspector against a live object. That needs a XAML rendering host, which a Roslyn server is not;
-  `xaml_tree` and `xaml_bindings` are the static half of the same two answers.
 - **bindings whose data type is not in the markup** — a `DataContext` produced by a data template
   selector, a DI container at runtime or assigned in another assembly's code is reported as
   `not-checked` rather than guessed at.
@@ -329,9 +324,7 @@ Still missing, because it needs a type model rather than a tokeniser:
   selector against the page index, compound parts (tag, classes, id, attribute conditions, the
   structural pseudo-classes) joined by descendant, child and sibling combinators. A selector whose
   meaning only a browser can decide is indexed but not reported; specificity, the cascade and CSS built
-  in JavaScript are not resolved;
-- no browser preview or DOM inspection — the `signal_r_*` tools exercise a SignalR hub at runtime, which
-  is not JavaScript analysis.
+  in JavaScript are not resolved.
 
 ### 1.6 SQL, databases and EF Core
 
@@ -416,7 +409,7 @@ workaround: put logic in the code-behind and it is analysed.
 | Project kind | State |
 |---|---|
 | ASP.NET Core (MVC, Razor Pages, Minimal APIs, Web API) | ✅ C# at source level; Razor markup by scanner. No runtime request tracing (profiling is process-level) |
-| WinForms | ⚠️ C# is analysed; `.Designer.cs` is generated code and several analyses skip it; no designer |
+| WinForms | ⚠️ C# is analysed; `.Designer.cs` is generated code and several analyses skip it |
 | WPF / WinUI 3 / MAUI / Avalonia / UWP | ⚠️ C# analysed; XAML by the markup layer (`xaml_pages`, `analyze_xaml`, `xaml_bindings`, `xaml_tree`, `xaml_navigate`, the verified edits) — the project's dialect is detected, a binding path is checked against the type the markup names, and a type the markup does not name is "not checked" rather than guessed (section 1.4) |
 | gRPC | ⚠️ generated C# analysed; `.proto` files are not parsed |
 | SignalR | ⚠️ hubs are C#; no hub-contract analysis. Runtime client tools (`signal_r_*`) exist to exercise a hub |
@@ -455,12 +448,10 @@ the whole surface the adapter exposes over DAP, plus one Roslyn capability on to
 
 Sessions survive across tool calls, so a stop that happened between two calls is still there.
 
-Two things stay outside, and neither is a missing tool. **Edit-and-continue and hot reload** need the
+One thing stays outside, and it is not a missing tool. **Edit-and-continue and hot reload** need the
 metadata deltas the adapter applies only over GDB/MI; the substitute — `debug_restart rebuild=true`
 plus value editing — and the exact reason are in
-[reference/limits.md](reference/limits.md#debugger). The **debugger windows** (breakpoints list, call
-stack, modules, parallel stacks) are UI: the data behind them is in `debug_sessions`, `debug_stack` and
-`debug_threads`, and rendering it is the client's job ([section 9](#9-ui-bound-features--not-applicable-by-design)).
+[reference/limits.md](reference/limits.md#debugger).
 
 ---
 
@@ -481,7 +472,6 @@ covered as well:
 | Formatting settings management, `.editorconfig` generation | ✅ `configure_formatting` authors `csharp_*`/`dotnet_*`/`indent_*`/`end_of_line`/`charset`/`file_header_template`; severities with `configure_inspection` |
 | Naming rules (`IDE1006`) application | ✅ `naming_rules` reads `dotnet_naming_rule`/`symbols`/`style` from the `.editorconfig` chain, lists the violations with the expected name, and with `apply=true` renames them through `apply_rename` (recorded and revertible). Locals and parameters are listed only |
 | Spelling inspection | ✅ `find_spelling_issues`: flags words one edit away from a word the solution or `.visualMCP/spelling.dic` + the `.DotSettings` words already use — no bundled English dictionary, so the evidence is the repository's own vocabulary |
-| Quick-fix menu / preview UI | 💀 the client shows the diff; the server returns it |
 
 The practical consequence: a team can run the inspections, gate a change with `inspection_baseline`,
 tune one rule and suppress one finding where the compiler reads it, add rules without building an
@@ -505,8 +495,7 @@ Still missing:
 
 - rename inside the decompiled set (it would need a mapping back to IL, and an edit has no source to
   write);
-- debugging the decompiled code (it needs the debugger plus a source-mapping step);
-- an assembly explorer UI (`outline` is the data behind it).
+- debugging the decompiled code (it needs the debugger plus a source-mapping step).
 
 ---
 
@@ -543,15 +532,15 @@ What that does not cover:
 
 | Missing family | Examples |
 |---|---|
-| Import/completion actions | `import_type` adds the using for a type already named on the line, and `remove_argument_name` makes a named argument positional; still missing symbol completion, static-member import, qualify/unqualify |
+| Import actions | `import_type` adds the using for a type already named on the line, and `remove_argument_name` makes a named argument positional; still missing static-member import and qualify/unqualify |
 | Wrap actions | try/catch, try/finally, if, using and #region are covered; still missing quotes and the "Surround with" template family |
 | Guard actions | the common null/empty guards, the index/range guard, the dictionary-key guard and the enum-defined guard are covered; still missing span-index and contract annotations |
 | Literal/string actions | raw/verbatim/regular re-encoding, both directions of interpolation↔concatenation, digit separators and the StringBuilder rewrite (`concat_to_stringbuilder`) are covered; still missing escape/unescape of individual characters and split/join |
 | Statement actions | `foreach`↔`for`, add-braces, `if`-chain→`switch`, `invert_loop`, merge/split conditions, remove-braces, LINQ in both directions, pattern merging and the extension block are covered; still missing statement ↔ expression |
 | Type actions | a DTO from JSON (`generate_dto_from_json`) and a builder (`generate_builder`) are covered; still missing a DTO from XML and a comparer |
 | Test actions | `generate_tests` scaffolds a class; still missing "add a test for this member" and "run the covering test" |
-| Editor policy | naming rules, and `use_var`/`use_explicit_type` as explicit actions (`IDE0007`/`IDE0008` are deliberately not style rewrites), are covered; still missing code-style enforcement on save and licence-header insertion (`IDE0073` needs the repository's template) |
-| Regex and injections | regex completion/validation, and language injections (SQL/HTML/CSS/JSON embedded in a C# string is just text) |
+| Style policy | naming rules, and `use_var`/`use_explicit_type` as explicit actions (`IDE0007`/`IDE0008` are deliberately not style rewrites), are covered; still missing licence-header insertion (`IDE0073` needs the repository's template) |
+| Regex and injections | regex validation, and language injections (SQL/HTML/CSS/JSON embedded in a C# string is just text) |
 
 The split matters when comparing numbers with ReSharper: **97 style ids ≠ 41 context actions**, and
 **~800 inspection ids ≠ 800 fixes**. Four families exist (style rewrites, analyzer code fixes, the
@@ -586,17 +575,13 @@ one operation:
   Positions where a type parameter cannot stand (static member access, attribute, `nameof`, `const`) keep the
   concrete type; a method type parameter that cannot be inferred gets the concrete type as an explicit type
   argument at every call site, and a type gets its arguments at every reference. Constraints are passed in,
-  because only the caller knows what the body needs.
-
-What is left of that family is not a refactoring: the interactive dialog and the UI in
-[section 9](#9-ui-bound-features--not-applicable-by-design).
+   because only the caller knows what the body needs.
 
 ---
 
 ## 7. Architecture, diagrams and exploration
 
-The numbers and the diagram data are both here; what remains is the rendering, which an MCP server
-returns as text for the client (section 9):
+The numbers and the diagram data are both here:
 
 - **Graphs as artifacts**: `export_dependency_graph` at project, namespace and **type** level
   (`analyze_dependencies`, `analyze_circular_namespace_dependencies`, `analyze_namespace_coupling` and
@@ -605,20 +590,20 @@ returns as text for the client (section 9):
   try regions).
 - **Value tracking**: `track_value` lists the definitions (writes, including the declaration) and the uses
   (reads) of a symbol under a position, each with file:line, member and snippet.
-- **Structure view / file structure**: `reference_index action=outline` (a file's declarations) and
-  `get_type_members`; breadcrumbs are the client's. Recent files/edits: `edit_history` and `command_log`.
-- **Code vision**: the data is `reference_index action=refs`/`callers`; inlay hints are editor UI.
+- **File structure**: `reference_index action=outline` (a file's declarations) and
+  `get_type_members`. Recent files/edits: `edit_history` and `command_log`.
 - **Localization analysis**: `localization_report` — unused `.resx` keys, missing translations per culture,
   extra keys, and user-facing literals as candidates. Spelling: `find_spelling_issues`.
-- **Explorers**: an assembly explorer is `assembly_workspace`/`inspect_assembly`, the NuGet tool window is
-  `list_nuget_packages`/`check_nuget_updates`, the solution explorer is `solution_map`/`read_tree`.
+- **Inventories as data**: `assembly_workspace`/`inspect_assembly` for an assembly,
+  `list_nuget_packages`/`check_nuget_updates` for its packages, `solution_map`/`read_tree` for the
+  solution's structure.
 
-Implemented 2026-10-30: the **endpoints view** (`find_endpoints`), the **TODO explorer**
+Implemented 2026-10-30: the **endpoint inventory** (`find_endpoints`), the **TODO list**
 (`find_todos`), **go to file** by fuzzy/CamelHumps name (`find_file`), **stack-trace analysis**
 (`analyze_stack_trace`) and the codebase map (`solution_map`).
 
-`plan_feature_change` produces an ordered text plan with impact counts; it is not a clickable impact
-graph — `impact` counts plus `export_dependency_graph` are the data behind one.
+`plan_feature_change` produces an ordered text plan with impact counts; `impact` counts plus
+`export_dependency_graph` are the data behind it.
 
 ---
 
@@ -649,28 +634,7 @@ remains:
 
 ---
 
-## 9. UI-bound features — not applicable by design
-
-These are not gaps to close. An MCP server returns data; the client renders it. They are listed so the
-comparison with an IDE is honest.
-
-| IDE feature | Why it is not here |
-|---|---|
-| Code editor, syntax highlighting, folding | The client's job |
-| Completion, parameter info, quick-info popup | Editor UI; the underlying symbol data is available through `get_symbol_info`/`get_type_members` |
-| Quick-fix bulb and menu | The server returns the fix and its diff; the client shows it |
-| Tool windows (Solution Explorer, NuGet, Test Explorer, Assembly Explorer) | UI; the data is exposed as tools |
-| Settings UI, `.editorconfig`/`.DotSettings` editors | Files on disk; the server consumes them |
-| On-save cleanup, code vision, inlay hints | Editor lifecycle |
-| XAML/WinForms designers, previews | UI + platform-specific parsers (the parsers are the real gap, section 1.4) |
-| Debugger UI (breakpoint list, call stack window) | The debugger *engine* is the gap (section 2); the window is the client's job |
-| Browser preview, database consoles | Out of scope for this product |
-| AI Assistant, full-line completion, AI commit messages | The client's model is the assistant; the server supplies the tools it calls |
-| Remote development, cloud workspaces, Code With Me | The server is a local stdio process over local paths |
-
----
-
-## 10. Beyond ReSharper: SonarQube, CodeScene and the profiling IDEs
+## 9. Beyond ReSharper: SonarQube, CodeScene and the profiling IDEs
 
 These families are covered, so what this section keeps is the **residual boundary** of each one — the
 part of the SonarQube/CodeScene/IDE feature that is still absent. The
@@ -685,7 +649,7 @@ part of the SonarQube/CodeScene/IDE feature that is still absent. The
 
 ---
 
-## 11. What to do today
+## 10. What to do today
 
 This section used to be a workaround table. **Closed 2026-10-31**, and narrowed again on **2026-11-01**:
 every row is now either a tool in this build or a boundary stated with its reason, and the rows whose
@@ -707,12 +671,11 @@ the second says which call answers it or where the answer stops and why.
 | Single test, the whole suite, coverage | `run_tests` (project filter, raw `dotnet test` arguments), `run_test` (name, class or raw filter, TRX result), `rerun_failed` (the recorded failures of either run), `debug_test` for the failing one, `get_test_coverage_map` for line and branch rates |
 | Inspection suppression and severity | `suppress_finding` (a `#pragma` around the member or a `SuppressMessage` attribute, compiler-gated) and `configure_inspection` (severity per scope); `inspection_baseline` gates CI (§3) |
 | Decompiled symbol navigation | `assembly_workspace` (load, search, source, il, references, outline over a Roslyn workspace) and `inspect_assembly`/`find_assembly_api`. Rename and debugging inside the decompiled code are not possible: there is no source to write (§4) |
-| Taint analysis across a data flow | `trace_data_flow` (sources, sinks, sanitizers and the path between them) and `find_throw_sites` for "which methods throw this exception"; the reach — locals, parameters, call arguments to a caller-set depth, plus a field written by one method and read by another on any object — is stated in the answer, together with the instance-insensitivity that makes it an over-approximation (§10) |
-| Real-time collaborative editing | A shared transport and an editor surface, not a local stdio tool (§9) |
+| Taint analysis across a data flow | `trace_data_flow` (sources, sinks, sanitizers and the path between them) and `find_throw_sites` for "which methods throw this exception"; the reach — locals, parameters, call arguments to a caller-set depth, plus a field written by one method and read by another on any object — is stated in the answer, together with the instance-insensitivity that makes it an over-approximation (§9) |
 
 ---
 
-## 12. How this inventory is maintained
+## 11. How this inventory is maintained
 
 - The ✅ side lives in [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md). This page is the
   ❌/⚠️ side and the reasons behind them.
@@ -720,11 +683,10 @@ the second says which call answers it or where the answer stops and why.
   missing" note.
 - When a new tool ships, check whether it removes a row here — the two pages are meant to sum to the same
   product, not to be two independent claims.
-- "Not applicable" rows stay: they are the boundary of the product, not a backlog.
 
 ---
 
-## 13. Revision log
+## 12. Revision log
 
 The batches that closed rows on this page, newest first. A count is the live inventory at the end of the
 batch (`capability_report` prints the current one); the per-feature record of each batch is in
@@ -733,19 +695,19 @@ batch (`capability_report` prints the current one); the per-feature record of ea
 | # | Date | What closed | Tools |
 |---:|---|---|---|
 | 36 | 2026-11-01 | **The Visual Basic declaration-shape tail is closed** — the last boundary of the workaround table that needed only a parser. Eleven refactorings that used to stop at a C# syntax tree now run on a `.vb` document under the same compiler gate, as a partial of `VbRefactoringTail` (text spans from the VB semantic model, the projection compiled before anything is written): **`inline_symbol`** (a local with one initializer, or a `Function`/`Property` whose body is a single `Return`, parameters substituted at each call site; a write or a `ByRef` argument refuses), **`inline_parameter`** (every call site must pass the same value, which may not read a local, a parameter, `Me` or an instance member), **`inline_class`** (the helper's members moved into the owner, `field.Member` losing its prefix, every other use of the helper a refusal), **`move_static_members`** (a `Shared` member, both the qualified and the bare reference re-pointed, `Imports` added where the target namespace is not visible), **`move_instance_method`** (a `Shared` method whose first parameter is the receiver — VB writes `source As SourceType`, not `SourceType source` — with `Me` and the implicit instance members rewritten, `MyBase` and Private/Protected state refusing), **`move_type_to_outer_scope`**/**`move_type_to_nested_scope`** (the declaration moves scope, references are qualified or unqualified accordingly, `Imports` added, the emptied file deleted), **`extract_class`** (a `Friend NotInheritable Class` beside the owner, a `Private ReadOnly` holder plus one forwarding `Sub`/`Function`/`Property` per selected member), **`extract_superclass`** (the base in its own file, `Inherits` added as VB's single base clause), and **`function_to_indexer`**/**`indexer_to_function`** (VB's `Default ReadOnly/WriteOnly Property` with `Get`/`Set`, call sites rewritten — `x.Get(i)` ↔ `x(i)` — and a keyword name bracketed as `[Get]`). The selection checks are the C# ones in VB's terms: a member that travels may only read members that travel with it, a field cannot be forwarded, and a constructor that stays behind may not assign one. Fourteen tests, one per operation plus two refusals; 296 refactoring/VB tests green. What stays C#-only in the catalogue is the refactoring whose output is a C# construct (records, primary constructors, anonymous types, generic parameters, nullable annotations, INPC, usings, extension methods, pull/push, `transform_parameters`, `introduce_*`) | 420 (unchanged) |
-| 35 | 2026-11-01 | **The test workflow leaves this page**, after the two rows that did not hold were made true. `run_tests`'s `projectFilter` selected **test names** (`--filter FullyQualifiedName~…`) while it was documented as a project filter; it now resolves the solution's test projects (a `.csproj` referencing `Microsoft.NET.Test.Sdk`), runs each matching project, refuses a filter that matches none by naming the projects that exist, and no longer invents a `--filter`. Both `run_tests` and `run_test` now write `.visualMCP/last-test-run.json`, so `rerun_failed` really does re-run the failures of either — one record per project, cleared by a green run, the first single-project shape still read. `get_test_coverage_map`'s `projectName` had the same defect and now runs that project's `.csproj` (and no longer needs a prior `--no-build`). Everything else in the section already held: discovery with the inline data rows, coverage (line and branch), debugging a test, continuous testing, affected tests, flaky detection, mutation testing, scaffolding. The section is deleted and its features are the [Testing](resharper-codemaid-coverage.md#testing) table; the explorer UI was always §9 | 420 (unchanged) |
-| 34 | 2026-11-01 | **The four remaining implementable §11 boundaries**: **`js_symbols`** — a lexical symbol table for JavaScript/TypeScript/JSX/TSX: a tokeniser over the masked source, one scope per brace block, a declaration for every name a declaration position introduces (function, class and its members, declarator incl. destructuring, parameter, TypeScript interface/type/enum, import binding) and a resolution to the innermost scope carrying the name; an imported name resolves through its binding to the exporting module when the specifier is relative, JSX component tags are references, and `outline`/`find`/`refs`/`unused` answer from it. **`fsharp_symbols`** — the same four questions over F#, as a name table: modules, namespaces, types, union cases, record fields, `let` bindings and members, a name resolving before it in its file and, across files, only through an `open`. **`k8s_validate`** — an offline manifest validator for the built-in kinds (K8S001–K8S023: required fields, selector/template agreement, a pinned image, a DNS-1123 name, a duplicate resource, a cluster-scoped kind with a namespace, an empty ConfigMap/Secret, a dangling volume reference), with its own YAML path reader. **`k8s_port_forward`** — `kubectl port-forward` as a session: start (waits for the forwarding line), list, status, stop. Also corrected the stale rows this page still carried: the VB row said 15 style ids (41 now) and no VB context actions (33 ids), and the EF section still called the model-vs-snapshot field diff missing. What stays a boundary: a type model for JS/TS (no rename/refactoring), type checking for F#, a live database, the OpenAPI schema and a forward outliving the server, CSS specificity and the cascade, the VB declaration-shape tail, and the two by design (§4, §9) | 416 → 420 |
-| 33 | 2026-11-01 | **Four §11 boundaries narrowed, from the model instead of a guess**: `analyze_sql` reads the DDL the scanned files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) into a schema model and gains **SQL0011** (a table the scan does not declare) and **SQL0012** (a column its declared table does not have), `schema=off` to turn it off; `ef_migrations action=model-diff` compares the `ModelSnapshot` with the entity classes **property by property** (added in the model, shadow properties, type changes), so `pending-model-changes`'s boolean has a field-level answer; a binding's data context is also read from a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element; `trace_data_flow` keys a field by its declaration **and its receiver**, so `a.Value` and `b.Value` are different entries and only `this`/field/property receivers keep an identity across methods. The Visual Basic declaration-shape tail also shrinks by three: `inline_field`, `move_to_namespace` and `property_to_function` now run on a `.vb` document under the same compiler gate. The remaining §11 boundaries are the ones that need a parser rather than a model: JS/TS symbols (§1.5), F# semantics (§1.3), a live database (§1.6), port-forward and manifest schema validation (§1.7), the rest of the VB tail, and the two by design (§4, §9) | 416 (unchanged) |
+| 35 | 2026-11-01 | **The test workflow leaves this page**, after the two rows that did not hold were made true. `run_tests`'s `projectFilter` selected **test names** (`--filter FullyQualifiedName~…`) while it was documented as a project filter; it now resolves the solution's test projects (a `.csproj` referencing `Microsoft.NET.Test.Sdk`), runs each matching project, refuses a filter that matches none by naming the projects that exist, and no longer invents a `--filter`. Both `run_tests` and `run_test` now write `.visualMCP/last-test-run.json`, so `rerun_failed` really does re-run the failures of either — one record per project, cleared by a green run, the first single-project shape still read. `get_test_coverage_map`'s `projectName` had the same defect and now runs that project's `.csproj` (and no longer needs a prior `--no-build`). Everything else in the section already held: discovery with the inline data rows, coverage (line and branch), debugging a test, continuous testing, affected tests, flaky detection, mutation testing, scaffolding. The section is deleted and its features are the [Testing](resharper-codemaid-coverage.md#testing) table | 420 (unchanged) |
+| 34 | 2026-11-01 | **The four remaining implementable §10 boundaries**: **`js_symbols`** — a lexical symbol table for JavaScript/TypeScript/JSX/TSX: a tokeniser over the masked source, one scope per brace block, a declaration for every name a declaration position introduces (function, class and its members, declarator incl. destructuring, parameter, TypeScript interface/type/enum, import binding) and a resolution to the innermost scope carrying the name; an imported name resolves through its binding to the exporting module when the specifier is relative, JSX component tags are references, and `outline`/`find`/`refs`/`unused` answer from it. **`fsharp_symbols`** — the same four questions over F#, as a name table: modules, namespaces, types, union cases, record fields, `let` bindings and members, a name resolving before it in its file and, across files, only through an `open`. **`k8s_validate`** — an offline manifest validator for the built-in kinds (K8S001–K8S023: required fields, selector/template agreement, a pinned image, a DNS-1123 name, a duplicate resource, a cluster-scoped kind with a namespace, an empty ConfigMap/Secret, a dangling volume reference), with its own YAML path reader. **`k8s_port_forward`** — `kubectl port-forward` as a session: start (waits for the forwarding line), list, status, stop. Also corrected the stale rows this page still carried: the VB row said 15 style ids (41 now) and no VB context actions (33 ids), and the EF section still called the model-vs-snapshot field diff missing. What stays a boundary: a type model for JS/TS (no rename/refactoring), type checking for F#, a live database, the OpenAPI schema and a forward outliving the server, CSS specificity and the cascade, the VB declaration-shape tail, and the by-design boundary (§4) | 416 → 420 |
+| 33 | 2026-11-01 | **Four §10 boundaries narrowed, from the model instead of a guess**: `analyze_sql` reads the DDL the scanned files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) into a schema model and gains **SQL0011** (a table the scan does not declare) and **SQL0012** (a column its declared table does not have), `schema=off` to turn it off; `ef_migrations action=model-diff` compares the `ModelSnapshot` with the entity classes **property by property** (added in the model, shadow properties, type changes), so `pending-model-changes`'s boolean has a field-level answer; a binding's data context is also read from a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element; `trace_data_flow` keys a field by its declaration **and its receiver**, so `a.Value` and `b.Value` are different entries and only `this`/field/property receivers keep an identity across methods. The Visual Basic declaration-shape tail also shrinks by three: `inline_field`, `move_to_namespace` and `property_to_function` now run on a `.vb` document under the same compiler gate. The remaining §10 boundaries are the ones that need a parser rather than a model: JS/TS symbols (§1.5), F# semantics (§1.3), a live database (§1.6), port-forward and manifest schema validation (§1.7), the rest of the VB tail, and the by-design boundary (§4) | 416 (unchanged) |
 | 32 | 2026-11-01 | **The Visual Basic refactoring tail**: six refactorings that used to stop at a C# syntax tree now run on a `.vb` document under the same compiler gate — `extract_interface` (an `Interface` in VB's vocabulary, plus the `Implements` clause VB requires on the class *and* on each member), `extract_method` (a contiguous block into a private `Sub`/`Function`, the locals and parameters it reads becoming its parameters, refused on a jump or a write), `move_type` (the declaration into a file of its own, carrying the file's `Imports` and its `Namespace`), `property_to_auto` (a trivial `Get`/`Set` pair into an auto-`Property`, dropped backing field; refused when the field is read elsewhere), `function_to_property` (a parameterless `Function` into a `ReadOnly Property`, call sites in both VB spellings, `GetCount()` and `GetCount`) and `move_to_folder`, whose folder derivation now reads a VB `Namespace` block. Seven tests, one per path and one refusal | 416 (unchanged) |
 | 31 | 2026-11-01 | **§2 Debugger, closed against the adapter's real surface**: the DAP requests netcoredbg does implement are now all exposed — **per-exception-type filters** (`filterOptions`: full type name, `!Type` to exclude) and the stopped exception's own block (`exceptionInfo`, returned by `debug_exceptions` and by every stop on an exception), **function breakpoints** (`setFunctionBreakpoints`), **Set Value** (`setExpression` through `debug_evaluate newValue`), and **hit conditions counted here** because the adapter ignores them. Two features the adapter has no DAP request for are delivered anyway: **data breakpoints** as the solution's Roslyn-resolved write sites (`debug_data_breakpoints`) and **restart with a rebuild** (`debug_restart`) as the edit → build → run loop. Only edit-and-continue/hot reload stays out — the adapter applies metadata deltas over GDB/MI only — and it is recorded in [reference/limits.md](reference/limits.md#debugger), not here | 413 → 416 |
-| 30 | 2026-11-01 | **Four §11 boundaries narrowed**: `assembly_workspace action=il` returns the same decompiled symbol as IL, so the C# and IL views are one call apart; `k8s_kustomize` renders an overlay offline and `k8s_exec` runs one confirmed command inside a pod (port-forward stays out); `ef_migrations action=diff` scripts the SQL between two migrations; `analyze_markup`/CSS0009 resolve compound selectors — descendant/child/sibling combinators, attribute conditions and the structural pseudo-classes — against a per-page element index, and a selector with a dynamic pseudo-class is indexed but never reported. Specificity, the cascade, a model-vs-snapshot field diff and port-forward remain outside | 411 → 413 |
+| 30 | 2026-11-01 | **Four §10 boundaries narrowed**: `assembly_workspace action=il` returns the same decompiled symbol as IL, so the C# and IL views are one call apart; `k8s_kustomize` renders an overlay offline and `k8s_exec` runs one confirmed command inside a pod (port-forward stays out); `ef_migrations action=diff` scripts the SQL between two migrations; `analyze_markup`/CSS0009 resolve compound selectors — descendant/child/sibling combinators, attribute conditions and the structural pseudo-classes — against a per-page element index, and a selector with a dynamic pseudo-class is indexed but never reported. Specificity, the cascade, a model-vs-snapshot field diff and port-forward remain outside | 411 → 413 |
 | 29 | 2026-11-01 | **Three limits closed by extending the tool that named them**: `trace_data_flow` follows a field written in one method and read in another **on any object** (before, only a field of the reading type), and the answer states the instance-insensitivity that makes it an over-approximation; `analyze_razor_pages`/`find_razor_vulnerabilities` resolve the partials a form renders (`<partial name=…>`, `@Html.Partial("…")`, the `RenderPartial` family, nested with a cycle guard), so RZ1005 no longer fires on a form whose token lives in a shared partial; `change_signature` gains a **VB path** — the declaration and every plain call site, call parentheses optional, `Optional` emitted for an added default, refused on an `AddressOf` use | 411 (unchanged) |
 | 28 | 2026-10-31 | **The Visual Basic tail**: `simplify_vb_code` rewrites 24 more VB ids (the qualifier, the `If`/`Else` folds, a completed `Select Case`, object initializers, tuple element names, `NameOf`, interpolation, both LINQ chains, `HashCode.Combine`, modifier order, accessibility, `ReadOnly`, an unused member, an unread field, unreachable code, a dead store, an unused parameter, an auto-property and the three layout rules) — 41 of the 49, with 8 refused by id and the reason; `change_type`, `use_base_type`, `type_to_partial` and `safe_delete` gain a VB path, so seven refactorings now run on a `.vb` document. The C#-syntax members of the refactoring catalogue keep needing their own path | 404 (unchanged) |
 | 27 | 2026-10-31 | **The HTML/CSS limit narrows**: `markup_files` indexes every page's tag/class/id set and every stylesheet's simple selectors; `analyze_markup` gains **CSS0009** (a `tag`/`.class`/`#id`/`tag.class` selector that matches no element in the scanned pages) and **HTML0015** (a class used in markup that no scanned stylesheet defines), and the CSS rules and selectors now run on every `<style>` block with the finding reported on the page's line. The match is lexical and set-against-set: combinators, attribute selectors, pseudo-classes, specificity and the cascade stay out, a CDN stylesheet or CSS-in-JS is outside the scan | 404 (unchanged) |
 | 26 | 2026-10-31 | **Three boundaries narrowed**: `list_generated_sources includeSource=true` returns the text of the trees a source generator emits (before, only their metadata); `js_files` builds the module graph from the relative specifiers and reports its import cycles (before, no graph); `ef_migrations action=pending-model-changes` answers whether the model still matches the migration snapshot | 404 (unchanged) |
 | 25 | 2026-10-31 | **The depth of the scanned layers and the data-flow reach**: `analyze_yaml` gains YAML0009–YAML0012 (kind without apiVersion or the reverse, metadata with no name, a container with no image, two containers with the same name); `analyze_js` resolves a relative import against the file system and reports JS0017; `trace_data_flow` follows a value stored in a field of the same type, across the method that writes it and the method that reads it | 401 (unchanged) |
 | 24 | 2026-10-31 | **Visual Basic, the last two C#-shaped surfaces.** `context_action` routes a `.vb` document to a VB engine of 33 ids (guards, wrapping, Imports, interpolation, digit separators, named arguments, var/explicit type, split declaration, StringBuilder, merge/split checks, conditional access, `Select Case`, LINQ both ways, For Each↔For, invert loop) and refuses the C#-only ones with the reason; `apply_code_fix` selects analyzers **and fixers** by language, so the .NET analyzers' 100+ VB `CodeFixProvider`s run on a `.vb` document (CA1822 → `Shared`) | 401 (unchanged) |
-| 23 | 2026-10-31 | **Section 9 leaves this page.** Version control and collaboration is now a feature section of [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md): the 28 Git tools (27 `git_*` and `commit_lint`), the 8 GitHub tools and `code_review`, 37 in all. The only remaining boundary, real-time co-editing, is the UI-bound table (§9) | 401 (unchanged) |
+| 23 | 2026-10-31 | **Section 9 leaves this page.** Version control and collaboration is now a feature section of [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md): the 28 Git tools (27 `git_*` and `commit_lint`), the 8 GitHub tools and `code_review`, 37 in all | 401 (unchanged) |
 | 22 | 2026-10-31 | **The board becomes the source of truth**: `board_brief` (counts, the card to pick up, staleness) and `board_audit` (each open card cross-checked against the live tool and context-action catalogue plus the paths it names, with `close=true`), `board_move note=` as the recorded definition of done, a `board` block on every non-empty `read_project_docs`, and the "what is missing → the board" routing in the server instructions and the installed `AGENTS.md` block | 399 → 401 |
 | 21 | 2026-10-31 | **Disk hygiene**: `disk_usage` — the report of every folder a .NET session grows, safe cleanup per target, and a redirect guard persisted in `.visualMCP/disk-policy.json` | 398 → 399 |
 | 20 | 2026-10-31 | **Version control: the last points**: `commit_lint` (Conventional Commits as data) and `git_commit conventional=true`; `git_host` gains `review-pr`, `close-pr`, `reopen-pr` and `update-pr` on GitLab, Azure DevOps and Bitbucket | 397 → 398 |

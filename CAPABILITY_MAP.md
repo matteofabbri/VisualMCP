@@ -128,13 +128,11 @@ listener serving every page).
 | Detailed info on a symbol (signature, doc, inheritance) | ✅ | `get_symbol_info` |
 | List the members of a type | ✅ | `get_type_members` |
 | Go-to-definition with the body (shows the declaration's source) | ✅ | `read_symbol` — semantically resolved, replaces `search_text` + `read_file` |
-| Go-to-line | ❌ | 💀 for a pure MCP server |
 | Full-text + regex search across all files | ✅ | `search_text` (regex, reads from disk) |
 | **Repository full-text index (FTS5)** | ✅ | `text_index` — one row per line of every file (source, documentation, decompiled) in `.visualMCP/visualmcp.db`, identifiers split (`required` finds `GetRequiredService`), BM25 ranking, answer `file:line` + the line + context lines + the files that match most; incremental build by (length, mtime) and pruning of vanished files |
 | Search by AST structure (structural search) | ❌ | 🎯 ReSharper SSR — to implement |
 | Search by semantic pattern (e.g. "all methods that throw X") | ❌ | 🎯 |
 | File structure / outline of a type | 🔧 | Covered by `get_type_members` |
-| Recent search / MRU | ❌ | 💀 for a pure MCP server |
 
 ---
 
@@ -392,7 +390,6 @@ instead of ignoring the id: they are layout, team choices or semantic changes, n
 | Flaky test analysis | ❌ | 🎯 |
 | Mutation testing | ❌ | 🎯 Stryker integration |
 | Run a specific test by name/filter | 🔧 | through `extraArgs` in `run_tests` |
-| Live test feedback (NCrunch-style) | ❌ | 💀 for a pure MCP server |
 | Snapshot testing helpers | ❌ | ❌ |
 
 ---
@@ -883,13 +880,12 @@ What remains, in order of impact:
 | Language/platform scope: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Medium | ⚠️ closed on 2026-10-31 for XAML (dialect detection, inventory, XAML0001–0015 with the binding paths validated against their data type — including a root `<Root.DataContext>` element — the binding inspector, the element tree, navigation and four verified edits), Razor, SQL (SQL0001–SQL0012 scanner, with the DDL the scan reads as its schema model since 2026-11-01), EF migrations (`ef_migrations`, with `diff` between two migrations and `model-diff` against the snapshot since 2026-11-01), Kubernetes/Helm (`k8s_*`, with an offline kustomize render, a confirmed exec and offline chart lint since 2026-11-01) and the Node toolchain (npm/pnpm/yarn, tsc, eslint). **JS/TS** (toolchain only) and **F#** (build/test only: it is not a Roslyn language) remain without a semantic model |
 | Test flow: debugging a test, continuous testing, "which tests cover this symbol", scaffolding, mutation testing | 🟡 Medium | ✅ closed: `run_test`, `rerun_failed`, `debug_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `run_affected_tests`, `find_flaky_tests` |
 | Decompiled code as a workspace (go-to-definition, find usages) and IL view | 🟡 Medium | ✅ closed for navigation: `assembly_workspace` (search/source/il/references/outline over a Roslyn workspace per MVID) + `disassemble` for IL; `action=il` links the decompiled symbol and its IL. Rename and debugging in decompiled code remain impossible (there is no source to write) |
-| Diagrams and exploration: interactive type/project graph, sequence diagram, structure view, code vision, TODO explorer | 🟢 Low | ⚠️ `export_dependency_graph` (projects/namespaces/types), `call_graph`, `sequence_diagram`, `control_flow_graph`, `track_value`, `find_todos`, `find_endpoints`, `solution_map` and `find_file` exist; rendering is the client's job |
+| Diagrams and exploration: interactive type/project graph, sequence diagram, structure view, code vision, TODO explorer | 🟢 Low | ⚠️ `export_dependency_graph` (projects/namespaces/types), `call_graph`, `sequence_diagram`, `control_flow_graph`, `track_value`, `find_todos`, `find_endpoints`, `solution_map` and `find_file` exist |
 | Rest of the "create/generate" family and context actions: long tail and live/postfix/file templates | 🟡 Medium | ⚠️ `context_action` covers 26 ids; `implement_members`, `create_from_usage`, `generate_docs`, `generate_dto_from_json`, `generate_builder` cover the frequent cases; templates and the long tail remain |
 | Inspection administration (per-scope severity, suppressions, `.DotSettings`, daemon with warm compilation) | 🟡 Medium | ✅ closed: `configure_inspection`, `suppress_finding`, `read_dot_settings`, `custom_inspections`, `naming_rules`, `find_spelling_issues`, `background_analysis`/`analysis_findings`; only ReSharper's proprietary catalogue remains outside |
 | Local history, three-way merge assistance, GitLab/Azure DevOps | 🟢 Low | ✅ closed on 2026-10-31: `local_history`, `git_conflicts` (conflict model), `git_rebase action=plan`, `git_patch`, `git_host` (GitLab/Azure DevOps/Bitbucket), inline review and `code_review` |
 | Minor refactorings: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Low | ✅ closed on 2026-10-31 (`extract_members_to_partial`, `inline_field`, `transform_parameters`, `extension_to_static`, `invert_boolean`, `make_non_static`, `move_type_to_nested_scope`, `generify`) |
-| Taint analysis and quality trend between commits | 🟡 Medium | ❌ not closable with an isolated tool: it needs a data-flow engine, and respectively the findings saved per revision (see §11 of gaps.md) |
-| Real-time collaborative editing | 💀 | Out of scope: shared transport and editor surface, not a local stdio tool |
+| Taint analysis and quality trend between commits | 🟡 Medium | ❌ not closable with an isolated tool: it needs a data-flow engine, and respectively the findings saved per revision (see §10 of gaps.md) |
 
 The complete inventory — language by language and area by area, with what exists today, what exactly is
 missing and where the boundary ends — is in **[docs/gaps.md](docs/gaps.md)**. The ✅ picture category by

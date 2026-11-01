@@ -279,6 +279,6 @@ what the agent actually did, not what the tool descriptions intend.
   [The chains, measured](#the-chains-measured) does not belong on this page.
 - When an item ships, move its row to ✅, add the tool to
   [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), and delete the corresponding workaround row in
-  [gaps.md § 11](gaps.md#11-what-to-do-today) if it exists.
+  [gaps.md § 10](gaps.md#10-what-to-do-today) if it exists.
 - Re-measure with a fresh snapshot when a batch closes; the counts drift with the way we work, and
   a stale number is worse than no number.
