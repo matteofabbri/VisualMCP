@@ -307,6 +307,6 @@ Write-Step "Installing VisualMCP routing guard ($Scope)..."
 if ($wantsZCode)  { Set-ZCodeHook;  Set-AgentsBlock }
 if ($wantsClaude) { Set-ClaudeHook }
 
-Write-Host "`nHook denies read-only shell probes on .NET repos, writes into a memory store and new plan-like .md files, and names the MCP tool (or board call) instead." -ForegroundColor Green
+Write-Host "`nHook denies read-only shell probes on .NET repos, writes into a memory store, a new .md at the repository root that is not a published document, and a plan-like .md in docs/ - and names the MCP tool (or board call) instead." -ForegroundColor Green
 Write-Host "Escape hatch: include 'vmcp-allow' in a command to keep Bash deliberately." -ForegroundColor DarkYellow
 Write-Host "RESTART ZCode / Claude Code: hooks are read at session start." -ForegroundColor Yellow

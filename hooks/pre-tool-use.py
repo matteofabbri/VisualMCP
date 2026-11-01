@@ -13,9 +13,11 @@ This is the POSIX counterpart of pre-tool-use.ps1 and behaves identically:
   file creation) in favour of Edit/Write;
 - refuses a Write/Edit into a memory store (MEMORY.md, ~/.zcode/.../memories,
   ~/.claude/projects/<slug>/memory): the memory is board_remember/board_recall;
-- refuses the CREATION of a plan-like .md at the repository root or in docs/
-  (checklist, plan, backlog, todo, handoff, notes, gaps, memory): the plan is
-  a board card, and create_task_checklist writes one instead of a file;
+- refuses the CREATION of any .md at the repository root except the published
+  documents (README, CONTRIBUTING, LICENSE, CHANGELOG, ...), and of a plan-like
+  one (checklist, plan, backlog, todo, handoff, notes, gaps, memory) in docs/:
+  a plan or a working note is a board card, and create_task_checklist writes one
+  instead of a file;
 - passes everything else: builds, tests, git, scripts, non-.NET trees, edits to
   documents that already exist;
 - never fails the session: any error or unparsable payload exits 0;
@@ -51,8 +53,12 @@ RX_MEMORY_STORE = re.compile(
 # The names of a file that is a plan/backlog rather than documentation.
 RX_PLAN_FILE = re.compile(r"(checklist|plan|backlog|todo|handoff|notes|gaps|memory)", re.IGNORECASE)
 
-# Where a plan-like .md must not be created: the repository root and its docs folder.
-PLAN_FOLDERS = ("", "docs")
+# The published documents a repository root may hold. A new .md there that is not one of these is a
+# plan, a working note or a scratch file, which is exactly what the board exists to replace.
+ROOT_DOCUMENTS = {
+    "readme", "contributing", "license", "changelog", "code_of_conduct",
+    "security", "authors", "notice", "support", "governance", "citation",
+}
 
 
 def memory_route():
@@ -61,6 +67,17 @@ def memory_route():
         "Use board_remember{topic, body, kind} and read it back with board_recall{query}; pinned notes ride "
         "along in board_brief and read_project_docs. A MEMORY.md or a note file is not read by the next session. "
         "To write it deliberately, use the MCP tool run_command."
+    )
+
+
+def root_route():
+    return (
+        "VisualMCP: a new Markdown file at the repository root is not where this belongs. "
+        "The root holds the published documents (README, CONTRIBUTING, LICENSE, CHANGELOG); documentation goes "
+        "under docs/, and work to be done goes on the board: create_task_checklist{title, steps} or "
+        "board_add{title, description, steps} create a card, board_move{status, note} records progress — no file "
+        "is written and the card is what the next session reads. "
+        "To write the file deliberately, use the MCP tool run_command."
     )
 
 
@@ -142,12 +159,18 @@ def protected_write_reason(tool_name, path, cwd):
         return None
 
     absolute = os.path.normcase(os.path.abspath(path if os.path.isabs(path) else os.path.join(cwd, path)))
-    # os.path.join(root, "") appends a separator, so the root is added without going through the loop.
-    allowed = {os.path.normcase(root)}
-    allowed.update(os.path.normcase(os.path.join(root, folder)) for folder in PLAN_FOLDERS if folder)
-    if os.path.dirname(absolute) not in allowed:
-        return None
     if os.path.exists(absolute):
+        return None
+
+    folder = os.path.dirname(absolute)
+    # The repository root holds a fixed set of published documents. Anything else created there — a
+    # plan, a checklist, a working note named after the task it describes — reads as documentation
+    # to the next session while it is really a to-do list; that belongs on the board.
+    if folder == os.path.normcase(root):
+        stem = os.path.splitext(os.path.basename(absolute))[0].lower()
+        return None if stem in ROOT_DOCUMENTS else root_route()
+
+    if folder != os.path.normcase(os.path.join(root, "docs")):
         return None
     if not RX_PLAN_FILE.search(os.path.basename(absolute)):
         return None

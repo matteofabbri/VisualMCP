@@ -90,7 +90,9 @@ function Get-ProtectedWriteReason([string]$ToolName, [string]$Path, [string]$Cwd
             "To write it deliberately, use the MCP tool run_command.")
     }
 
-    # A NEW plan-like .md at the repository root or in docs/: the plan is a card, not a file.
+    # A NEW .md at the repository root, or a plan-like one in docs/. The root holds a fixed set of
+    # documents; anything else created there (a plan, a checklist, a working note named after the
+    # task it describes) is noise the next session reads as documentation. The plan is a card.
     # Editing a document that already exists is never refused (docs/gaps.md stays editable).
     if ($ToolName -ne 'Write') { return $null }
     if ($normalized -notmatch '\.md$') { return $null }
@@ -103,10 +105,26 @@ function Get-ProtectedWriteReason([string]$ToolName, [string]$Path, [string]$Cwd
     if (Test-Path -LiteralPath $absolute) { return $null }
 
     $folder = [System.IO.Path]::GetDirectoryName($absolute)
-    $allowedRoot = [System.IO.Path]::GetFullPath($root)
-    $allowedDocs = [System.IO.Path]::GetFullPath((Join-Path $root 'docs'))
-    if ($folder -ine $allowedRoot -and $folder -ine $allowedDocs) { return $null }
+    $rootFolder = [System.IO.Path]::GetFullPath($root)
+    $docsFolder = [System.IO.Path]::GetFullPath((Join-Path $root 'docs'))
 
+    if ($folder -ieq $rootFolder) {
+        $documents = @(
+            'readme', 'contributing', 'license', 'changelog', 'code_of_conduct',
+            'security', 'authors', 'notice', 'support', 'governance', 'citation'
+        )
+        $stem = [System.IO.Path]::GetFileNameWithoutExtension($name).ToLowerInvariant()
+        if ($documents -contains $stem) { return $null }
+
+        return ("VisualMCP: a new Markdown file at the repository root is not where this belongs. " +
+            "The root holds the published documents (README, CONTRIBUTING, LICENSE, CHANGELOG); documentation " +
+            "goes under docs/, and work to be done goes on the board: create_task_checklist{title, steps} or " +
+            "board_add{title, description, steps} create a card, board_move{status, note} records progress; " +
+            "no file is written and the card is what the next session reads. " +
+            "To write the file deliberately, use the MCP tool run_command.")
+    }
+
+    if ($folder -ine $docsFolder) { return $null }
     if ($name -notmatch '(?i)(checklist|plan|backlog|todo|handoff|notes|gaps|memory)') { return $null }
 
     return ("VisualMCP: a plan/notes file is not the plan. " +

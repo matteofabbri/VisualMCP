@@ -40,6 +40,22 @@ The deny reason names the replacement (`find_symbol`, `find_references`, `search
 already loaded. The block in `agents-block.md` states the same routing up front, plus why C#
 semantics (overloads, overrides, generics, partial types) need Roslyn rather than text matching.
 
+On top of the shell, a protected `Write` is refused when it would create a file where the result
+does not belong:
+
+- any new `*.md` at the repository root that is not one of the published documents (`README`,
+  `CONTRIBUTING`, `LICENSE`, `CHANGELOG`, `CODE_OF_CONDUCT`, `SECURITY`, `AUTHORS`, `NOTICE`,
+  `SUPPORT`, `GOVERNANCE`, `CITATION`). A checklist, a plan, a working note named after the task
+  it describes — the three files this rule was written for — reads as documentation to the next
+  session while it is really a to-do list: that is a card.
+- a new `*.md` in `docs/` whose name says it is a plan (`checklist`, `plan`, `backlog`, `todo`,
+  `handoff`, `notes`, `gaps`, `memory`).
+- a write into a memory store (`MEMORY.md`, `~/.zcode/cli/memories/…`,
+  `~/.claude/projects/<slug>/memory/…`): memory is `board_remember` / `board_recall`.
+
+Editing a document that already exists is never refused, and `create_task_checklist` /
+`board_add` write a card instead of a file, so there is nothing to work around.
+
 ## What always passes
 
 Anything that mentions a build or tooling command (`dotnet`, `msbuild`, `nuget`, `git`, `gh`,

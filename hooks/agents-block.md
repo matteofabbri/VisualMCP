@@ -65,4 +65,7 @@ Rules:
 - For multi-step work, `create_task_checklist{title, steps}` puts ONE card on the board with the
   steps as a checklist (a file is not written), and `update_task_checklist{id, done: [...]}` ticks
   them off; `board_add{title, steps: [...]}` does the same on a card you describe yourself.
+- Never create a `.md` at the repository root unless it is one of the published documents (README,
+  CONTRIBUTING, LICENSE, CHANGELOG, ...): a checklist, a plan or a working note named after the task
+  it describes is a card, and the hook refuses the write. Documentation goes under `docs/`.
 <!-- VisualMCP:end -->
