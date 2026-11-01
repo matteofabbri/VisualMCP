@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Text;
-using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -66,19 +65,39 @@ public sealed class TestWorkflowService : ITestWorkflowService
 
     public async Task<object> RerunFailedAsync(string? projectName, int timeoutSeconds = 300)
     {
-        var record = ReadRecord();
-        if (record is null || record.Failed.Count == 0)
+        var directory = SolutionDirectory();
+        var record    = TestRunRecordStore.Read(directory);
+        var failures  = record?.AllFailures().ToList() ?? [];
+
+        if (failures.Count == 0)
             return new
             {
                 error = "No failed tests are recorded: run_test (or run_tests) has not produced a failure since the record was last written.",
-                record = LastRecordPath(),
+                record = TestRunRecordStore.PathFor(directory),
             };
 
-        var filter = string.Join("|", record.Failed
-            .Select(name => name.Contains('.') ? $"FullyQualifiedName={name}" : $"FullyQualifiedName~{name}"));
+        // An explicit project re-runs every recorded failure there; otherwise each project re-runs its own.
+        if (!string.IsNullOrWhiteSpace(projectName))
+            return await RunAsync(projectName, RunTestsService.ComposeFailureFilter(failures.Select(entry => entry.Test)),
+                timeoutSeconds, why: $"re-running {failures.Count} recorded failure(s)");
 
-        return await RunAsync(projectName ?? record.Project, filter, timeoutSeconds,
-            why: $"re-running {record.Failed.Count} recorded failure(s)");
+        var groups = record!.Projects.Where(group => group.Failed.Count > 0).ToList();
+        if (groups.Count == 1)
+            return await RunAsync(groups[0].Project, RunTestsService.ComposeFailureFilter(groups[0].Failed),
+                timeoutSeconds, why: $"re-running {groups[0].Failed.Count} recorded failure(s)");
+
+        var runs = new List<object>();
+        foreach (var group in groups)
+            runs.Add(await RunAsync(group.Project, RunTestsService.ComposeFailureFilter(group.Failed),
+                timeoutSeconds, why: $"re-running {group.Failed.Count} recorded failure(s)"));
+
+        return new
+        {
+            verdict = "ran",
+            projects = runs,
+            record = TestRunRecordStore.PathFor(directory),
+            note = "Each project re-runs the failures it recorded.",
+        };
     }
 
     private async Task<object> RunAsync(string? projectName, string filter, int timeoutSeconds, string why)
@@ -156,7 +175,7 @@ public sealed class TestWorkflowService : ITestWorkflowService
                 failed = resultsList.Failed.Count,
                 failedTests = resultsList.Failed,
                 failureMessages = resultsList.Messages,
-                record = LastRecordPath(),
+                record = TestRunRecordStore.PathFor(SolutionDirectory()),
                 output = Trim(timedOut ? "(timed out; the run was stopped)" : output, 4000),
                 stderr = Trim(errors, 2000),
                 note = resultsList.Ran
@@ -583,36 +602,8 @@ public sealed class TestWorkflowService : ITestWorkflowService
             .FirstOrDefault();
     }
 
-    private string LastRecordPath() =>
-        Path.Combine(SolutionDirectory() ?? Path.GetTempPath(), ".visualMCP", "last-test-run.json");
-
-    private TestRunRecord? ReadRecord()
-    {
-        try
-        {
-            var path = LastRecordPath();
-            if (!File.Exists(path)) return null;
-            return JsonSerializer.Deserialize<TestRunRecord>(File.ReadAllText(path));
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private void WriteRecord(string project, List<string> failed)
-    {
-        try
-        {
-            var path = LastRecordPath();
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, JsonSerializer.Serialize(new TestRunRecord(project, failed, DateTimeOffset.UtcNow)));
-        }
-        catch
-        {
-            // The record is a convenience: a read-only folder must not fail the run.
-        }
-    }
+    private void WriteRecord(string project, List<string> failed) =>
+        TestRunRecordStore.Write(SolutionDirectory(), [new FailedTestGroup(project, failed)]);
 
     private static (bool Ran, int Passed, List<string> Failed, List<object> Messages) ParseTrx(string path)
     {
@@ -665,6 +656,4 @@ public sealed class TestWorkflowService : ITestWorkflowService
     {
         try { return process.ExitCode; } catch { return -1; }
     }
-
-    private sealed record TestRunRecord(string Project, List<string> Failed, DateTimeOffset At);
 }

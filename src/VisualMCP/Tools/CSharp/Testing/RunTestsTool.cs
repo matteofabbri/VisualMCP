@@ -8,11 +8,13 @@ namespace VisualMCP.Tools.CSharp.Testing;
 public static class RunTestsTool
 {
     [McpServerTool, Description(
-        "Run all tests in the loaded solution using 'dotnet test' and return structured results " +
-        "(pass/fail/skip counts, duration, and failure details). Requires LoadSolution to have been called first.")]
+        "Run the solution's tests with 'dotnet test' and return structured results (pass/fail/skip counts, " +
+        "duration, per-project results and the failing tests with their message and stack trace). The failed " +
+        "tests are recorded, so rerun_failed re-runs exactly them. The working-directory solution auto-loads " +
+        "on first use.")]
     public static Task<object> RunTests(
         IRunTestsService svc,
-        [Description("Optional: run only projects whose name contains this string (case-insensitive)")] string? projectFilter = null,
+        [Description("Optional: run only the test projects whose name (or file name) contains this string, case-insensitive. Omit to run the whole solution.")] string? projectFilter = null,
         [Description("Optional: extra arguments forwarded verbatim to 'dotnet test' (e.g. '--no-build', '--configuration Release')")] string? extraArgs = null)
         => svc.RunTests(projectFilter, extraArgs);
 }

@@ -24,15 +24,33 @@ public sealed class GetTestCoverageMapService : IGetTestCoverageMapService
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Provide an explicit path to the .sln/.slnx." };
 
-        var solutionPath = service.LoadedSolutionPath!;
+        var solutionPath = service.LoadedSolutionPath;
+        var target = solutionPath;
+        string? scope = null;
+
+        if (!string.IsNullOrWhiteSpace(projectName))
+        {
+            var project = TestSuiteRunner.ResolveTestProject(solution, projectName, out var resolveError);
+            if (project?.FilePath is null)
+                return new
+                {
+                    error = resolveError ?? $"Project '{projectName}' has no file on disk.",
+                    projects = solution.Projects.Select(candidate => candidate.Name).ToList(),
+                };
+
+            target = project.FilePath;
+            scope  = project.Name;
+        }
+
+        if (string.IsNullOrWhiteSpace(target))
+            return new { error = "The solution has no path on disk: pass projectName (a test project) instead." };
+
         var tmpDir = Path.Combine(Path.GetTempPath(), $"mcp-coverage-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tmpDir);
 
         try
         {
-            var target = solutionPath;
-            var filter = projectName is not null ? $"--filter \"FullyQualifiedName~{projectName}\"" : "";
-            var args   = $"test \"{target}\" {filter} --collect \"XPlat Code Coverage\" --results-directory \"{tmpDir}\" --no-build 2>&1";
+            var args = $"test \"{target}\" --collect \"XPlat Code Coverage\" --results-directory \"{tmpDir}\" 2>&1";
 
             var psi = new ProcessStartInfo("dotnet", args)
             {
@@ -73,7 +91,8 @@ public sealed class GetTestCoverageMapService : IGetTestCoverageMapService
 
             return new
             {
-                projectFilter      = projectName ?? "all",
+                projectFilter      = scope ?? "all",
+                target,
                 minCoverage,
                 overallLineCoverage = totalLines > 0 ? Math.Round(coveredLines / totalLines * 100, 2) : 0,
                 coveredLines        = (int)coveredLines,

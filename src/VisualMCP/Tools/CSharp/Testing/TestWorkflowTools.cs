@@ -22,9 +22,10 @@ public static class TestWorkflowTools
         => tests.RunTestAsync(testName, className, projectName, filter, timeoutSeconds);
 
     [McpServerTool(Name = "rerun_failed"), Description(
-        "Re-run exactly the tests that failed in the last run_test (or run_tests) call, from the recorded " +
+        "Re-run exactly the tests that failed in the last run_test or run_tests call, from the recorded " +
         "failures in .visualMCP/last-test-run.json. No argument to remember: the record is written by the " +
-        "previous run. Returns the same structured result and updates the record.")]
+        "previous run and cleared by a green one. Each project re-runs its own failures unless projectName " +
+        "names one. Returns the same structured result and updates the record.")]
     public static Task<object> RerunFailed(
         ITestWorkflowService tests,
         [Description("The test project, when it changed or the record is ambiguous.")] string? projectName = null,

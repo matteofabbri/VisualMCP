@@ -247,10 +247,10 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `run_config` | ✎ preview Save and list the ways a project is launched — project, application arguments, configuration, environment variables — in `.visualMCP/run-configs.json`; `run_project configName=…` applies one |
 | `launch_settings` | ✎ preview `Properties/launchSettings.json` as data: list, add/update or remove profiles, preserving `$schema`, `iisSettings` and the profiles nobody touched |
 | `run_command` | Execute a shell command in PowerShell, pwsh, cmd or bash (PowerShell by default on Windows, bash elsewhere) — pipes, redirection, nested shells, long scripts; the process tree is killed at the timeout |
-| `run_tests` | Run `dotnet test`, parse TRX, return pass/fail/skip counts, per-project results and failure details |
-| `get_test_coverage_map` | Per-class and per-method line coverage, plus branch coverage (Cobertura `branch-rate`); requires `coverlet.collector` in the test projects |
+| `run_tests` | Run `dotnet test` — the whole solution, or the test projects a `projectFilter` selects — and return pass/fail/skip counts, per-project results and the failing tests; the failures are recorded for `rerun_failed` |
+| `get_test_coverage_map` | Per-class and per-method line coverage, plus branch coverage (Cobertura `branch-rate`), for the named test project or the solution; requires `coverlet.collector` in the test projects |
 | `run_test` | Run one test or one class without hand-building `--filter`; structured TRX result (passed/failed, failure messages) and the failures are recorded |
-| `rerun_failed` | ✎ Re-run exactly the tests that failed in the last run, from `.visualMCP/last-test-run.json` |
+| `rerun_failed` | ✎ Re-run exactly the tests that failed in the last `run_test` or `run_tests`, from `.visualMCP/last-test-run.json` — per project, cleared by a green run |
 | `tests_covering_symbol` | Which test methods reference this symbol (semantic, `[Fact]`/`[Theory]`/`[Test]`/…), with file:line |
 | `generate_tests` | ✎ preview Scaffold an xUnit test class with one `[Fact]` per public method; compiler-gated, written into the test project |
 | `test_impact_analysis` | Which tests a change can affect: git diff → the symbols the changed files declare → the test methods that reference them, with a ready filter |

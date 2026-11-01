@@ -86,13 +86,34 @@ than 30 matching files are summarised.
 
 ```
 run_tests
-  projectFilter – run only projects whose name contains this string (optional)
+  projectFilter – run only the test projects whose name (or file name) contains this string (optional;
+                  omit to run the whole solution)
   extraArgs     – forwarded verbatim to dotnet test (e.g. "--no-build", "--configuration Release")
+
+run_test(testName?, className?, projectName?, filter?, timeoutSeconds=300)
+rerun_failed(projectName?, timeoutSeconds=300)
+get_test_coverage_map(projectName?, minCoverage=0)
+list_tests(projectName?, filter?, maxResults=500)
+generate_tests(typeName, projectName?, testProjectName?, className?, dryRun=false)
+test_impact_analysis(baseRef?, projectName?, maxResults=200)
+run_affected_tests(baseRef?, projectName?, testProjectName?, timeoutSeconds=300)
+find_flaky_tests(projectName?, testName?, className?, filter?, iterations=3, timeoutSeconds=300)
+run_mutation_tests(projectName?, timeoutSeconds=1800, extraArgs?)
+continuous_testing(action=start|stop|status|run-now, intervalSeconds=10, projectName?, testFilter?)
+debug_test(projectName?, testName?, className?, filter?, breakpoints?, startTimeoutSeconds=60, ...)
 ```
 
 `run_tests` runs `dotnet test`, parses every `.trx` produced, and returns the summary
 (total/passed/failed/skipped/duration), a per-project breakdown, and the failed test names with
-their error message and stack trace.
+their error message and stack trace. `projectFilter` selects **projects** — the projects that
+reference `Microsoft.NET.Test.Sdk` — and each selected project is run on its own; a filter that
+matches none is an error naming the test projects the solution has. Both `run_tests` and `run_test`
+write the failures to `.visualMCP/last-test-run.json`, which is what `rerun_failed` re-runs and what
+a green run clears.
+
+`get_test_coverage_map` runs the named test project (or the whole solution) with
+`--collect "XPlat Code Coverage"`, so the test projects need `coverlet.collector`; it reports line
+and branch rates per class and per method.
 
 ## Debugger
 
