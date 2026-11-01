@@ -276,8 +276,17 @@ public static class RazorAnalysis
 
     // ── Findings ───────────────────────────────────────────────────────────────
 
-    public static List<RazorFinding> Sort(IEnumerable<RazorFinding> findings) =>
+    /// <summary>
+    /// Collapses findings the same page composition produced more than once: a collision between two
+    /// partials is found again for every page that renders both, and it is one problem in those files.
+    /// </summary>
+    public static List<RazorFinding> Distinct(IEnumerable<RazorFinding> findings) =>
         findings
+            .GroupBy(finding => (finding.RuleId, finding.FilePath, finding.Line, finding.Column, finding.Message))
+            .Select(group => group.First())
+            .ToList();
+
+    public static List<RazorFinding> Sort(IEnumerable<RazorFinding> findings) =>        findings
             .OrderByDescending(finding => RazorRuleCatalog.Rank(finding.Severity))
             .ThenBy(finding => finding.FilePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(finding => finding.Line)

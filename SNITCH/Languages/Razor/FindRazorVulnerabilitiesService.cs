@@ -58,7 +58,7 @@ public sealed class FindRazorVulnerabilitiesService : IFindRazorVulnerabilitiesS
         }
 
         var minimum = RazorRuleCatalog.Rank(minSeverity);
-        var filtered = all
+        var filtered = RazorAnalysis.Distinct(all)
             .Where(finding => RazorRuleCatalog.Rank(finding.Severity) >= minimum)
             .Where(finding => cweFilter is null ||
                               (finding.Cwe?.Contains(cweFilter, StringComparison.OrdinalIgnoreCase) ?? false));

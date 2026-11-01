@@ -87,10 +87,12 @@ public static class DebugControlTools
         => debugger.PauseAsync(sessionId, threadId);
 
     [McpServerTool(Name = "debug_exceptions"), Description(
-        "Exception breakpoints, per type. filters picks WHEN to break — 'all' (every throw) or 'user-unhandled' (the " +
-        ".NET adapter's default) — and exceptionTypes NARROWS that filter to named exception types, matched against " +
-        "the exception's full type name exactly (System.NullReferenceException); a leading ! excludes a type instead " +
-        "(with 'all', '!System.OperationCanceledException' breaks on everything else). Without filters or " +
+        "Exception breakpoints, per type. exceptionTypes names the types to break on and is evaluated against the " +
+        "thrown type's HIERARCHY through the loaded solution, so a base class matches its derived types and a " +
+        "leading ! excludes a whole branch (with no positive type, '!System.OperationCanceledException' breaks on " +
+        "everything else). To judge them the adapter is set to break on every throw and the stops that do not match " +
+        "are resumed transparently (exceptionTypeSkips counts them). filters picks WHEN to break when no type is " +
+        "named — 'all' (every throw) or 'user-unhandled' (the .NET adapter's default). Without filters or " +
         "exceptionTypes the call answers what the process is stopped on: the exception id, the stage (throw / " +
         "user-unhandled / unhandled), its type, message and details, including inner exceptions — the same block a " +
         "stop on an exception returns automatically.")]
@@ -98,8 +100,8 @@ public static class DebugControlTools
         IDebuggerService debugger,
         [Description("Session id.")] string sessionId,
         [Description("Filters: all, user-unhandled. Omit to only read the stopped exception.")] string[]? filters = null,
-        [Description("Optional exception type names that narrow the first filter, e.g. [\"System.NullReferenceException\"]; " +
-                     "prefix ! to exclude one.")] string[]? exceptionTypes = null,
+        [Description("Optional exception type names, full (System.NullReferenceException) or simple; a base class " +
+                     "matches its derived types. Prefix ! to exclude one.")] string[]? exceptionTypes = null,
         [Description("Also read the stopped exception's details (default: false; implied when no setting is given).")] bool details = false)
         => debugger.SetExceptionBreakpointsAsync(sessionId, filters, exceptionTypes, details);
 

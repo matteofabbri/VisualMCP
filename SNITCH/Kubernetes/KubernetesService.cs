@@ -41,7 +41,7 @@ public sealed record KubernetesResourceSummary(
 public sealed class KubernetesService : IKubernetesService
 {
     private static readonly string[] RolloutActions = ["status", "restart", "undo"];
-    private static readonly string[] HelmActions = ["list", "status", "history", "get-values", "template", "repo-list"];
+    private static readonly string[] HelmActions = ["list", "status", "history", "get-values", "template", "lint", "repo-list"];
 
     // ── status ───────────────────────────────────────────────────────────────
     public async Task<object> StatusAsync(int timeoutSeconds)
@@ -439,12 +439,22 @@ public sealed class KubernetesService : IKubernetesService
     }
 
     // ── helm ─────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Helm through its own CLI. <c>lint</c> and <c>template</c> are the offline half: a chart is checked
+    /// and rendered without a cluster, which is the chart validation the raw manifest tools cannot give.
+    /// </summary>
     public async Task<object> HelmAsync(string action, string? release, string? chart, string? namespaceName,
         string? valuesFile, string[]? setValues, int timeoutSeconds)
     {
         var verb = (action ?? string.Empty).Trim().ToLowerInvariant();
         if (!HelmActions.Contains(verb))
             return new { error = $"Unknown action '{action}'. Use one of: {string.Join(", ", HelmActions)}." };
+
+        // The arguments are checked first, so a malformed call is reported as such whether or not helm is installed.
+        if (verb is "status" or "history" or "get-values" or "template" && !IsSafeToken(release))
+            return new { error = $"The {verb} action needs a release name." };
+        if (verb is "template" or "lint" && !IsSafeToken(chart))
+            return new { error = $"The {verb} action needs a chart (a local path or a repo/chart reference)." };
 
         if (!ExternalTool.Exists("helm"))
             return new
@@ -454,11 +464,6 @@ public sealed class KubernetesService : IKubernetesService
                         "listing, status and history; kubectl covers the raw resources without it.",
             };
 
-        if (verb is "status" or "history" or "get-values" or "template" && !IsSafeToken(release))
-            return new { error = $"The {verb} action needs a release name." };
-        if (verb == "template" && !IsSafeToken(chart))
-            return new { error = "The template action needs a chart (a local path or a repo/chart reference)." };
-
         var args = verb switch
         {
             "list" => "list",
@@ -466,6 +471,7 @@ public sealed class KubernetesService : IKubernetesService
             "status" => $"status {Quote(release!)}",
             "history" => $"history {Quote(release!)}",
             "get-values" => $"get values {Quote(release!)}",
+            "lint" => $"lint {Quote(chart!)}",
             _ => $"template {Quote(release!)} {Quote(chart!)}",
         };
 
@@ -485,16 +491,64 @@ public sealed class KubernetesService : IKubernetesService
         }
 
         var run = await ExternalTool.RunAsync("helm", args, Directory.GetCurrentDirectory(), Clamp(timeoutSeconds));
+        var succeeded = !run.timedOut && run.exitCode == 0;
+
         return new
         {
             action = verb,
             release,
             chart,
             namespaceName,
-            succeeded = !run.timedOut && run.exitCode == 0,
+            succeeded,
             command = $"helm {args}",
             raw = ProcessRunner.Truncate(run.stdout, 32_000),
-            error = run.timedOut || run.exitCode != 0 ? FirstLine(run.stderr) : null,
+            lint = verb == "lint" ? SummarizeLintOutput(run.stdout + "\n" + run.stderr) : null,
+            error = succeeded ? null : FirstLine(run.stderr),
+            note = verb == "lint"
+                ? "chart lints require no cluster: the chart's templates, values and Chart.yaml are checked locally. " +
+                  "For a manifest, kubectl apply --dry-run=server validates it against the API server (k8s_apply, dryRun=true)."
+                : null,
+        };
+    }
+
+    /// <summary>
+    /// The <c>helm lint</c> findings: its <c>[INFO]</c>/<c>[WARNING]</c>/<c>[ERROR]</c> lines, counted by
+    /// severity, plus the summary line it prints at the end.
+    /// </summary>
+    public static object SummarizeLintOutput(string output)
+    {
+        var findings = new List<object>();
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        string? summary = null;
+
+        foreach (var line in output.Split('\n'))
+        {
+            var text = line.TrimEnd('\r').Trim();
+            if (text.Length == 0) continue;
+
+            var severity = text.StartsWith("[ERROR]", StringComparison.OrdinalIgnoreCase) ? "error"
+                : text.StartsWith("[WARNING]", StringComparison.OrdinalIgnoreCase) ? "warning"
+                : text.StartsWith("[INFO]", StringComparison.OrdinalIgnoreCase) ? "info"
+                : null;
+
+            if (severity is null)
+            {
+                if (text.Contains("linted", StringComparison.OrdinalIgnoreCase)) summary = text;
+                continue;
+            }
+
+            counts[severity] = counts.TryGetValue(severity, out var seen) ? seen + 1 : 1;
+            if (findings.Count < 200)
+                findings.Add(new { severity, message = text[text.IndexOf(']')..].TrimStart(' ', ']').Trim() });
+        }
+
+        return new
+        {
+            summary,
+            counts,
+            findings,
+            linter = "helm lint: templates render, values are valid for the chart, Chart.yaml is well formed. " +
+                     "It does not validate a rendered manifest against the Kubernetes API schema.",
         };
     }
 

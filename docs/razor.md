@@ -68,7 +68,7 @@ recognised as model data.
 |---|---|---|---|
 | `RZ2001` | Markup | Medium | Element never closed (tags with optional end, e.g. `<li>`, `<p>`, are excluded) |
 | `RZ2002` | Markup | Medium | Orphaned or mismatched closing tag |
-| `RZ2003` | Markup | Medium | Duplicate `id` in the same file |
+| `RZ2003` | Markup | Medium | Duplicate `id` in the rendered composition (the page, its layout and the partials either renders) |
 | `RZ2004` | Accessibility | Low | `<img>` without `alt` |
 | `RZ2005` | Accessibility | Low | `<label>` without `for` and without a nested control |
 | `RZ2006` | Markup | Low | `<button>` in a form without `type` (default: submit) |

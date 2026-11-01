@@ -74,8 +74,11 @@ public sealed class DebugSession : IAsyncDisposable
     /// <summary>The exception filters the adapter accepted ("all", "user-unhandled").</summary>
     public string[] ExceptionFilters { get; set; } = [];
 
-    /// <summary>The exception type conditions that accompany the first filter (<c>!Type</c> negates).</summary>
+    /// <summary>The exception type conditions, evaluated here against the hierarchy (<c>!Type</c> excludes).</summary>
     public string[] ExceptionTypes { get; set; } = [];
+
+    /// <summary>How many exception stops the type conditions absorbed.</summary>
+    public int ExceptionTypeSkips { get; set; }
 
     /// <summary>The sequence of the last event this session consumed as a stop/exit.</summary>
     public long LastStopSequence { get; set; }

@@ -9,7 +9,8 @@ public static class AnalyzeRazorPagesTool
 {
     [McpServerTool, Description(
         "Analyze Razor markup for problems that are not security vulnerabilities: unbalanced or unclosed Razor/HTML, " +
-        "duplicate ids and attributes, nested forms, missing alt text, labels without a control, html without lang, " +
+        "duplicate ids across the rendered composition (the page, the layout it declares and the partials either " +
+        "renders) and duplicate attributes, nested forms, missing alt text, labels without a control, html without lang, " +
         "missing viewport meta, form controls without a name, buttons without a type, deprecated HTML, ViewBag/ViewData, " +
         "legacy Html.Partial/RenderPartial/Action helpers, oversized @functions/code blocks, and forms without an action. " +
         "Every finding carries ruleId (RZ2001…), category (Markup, Accessibility, Maintainability, Razor), severity, " +

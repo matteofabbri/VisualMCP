@@ -39,6 +39,10 @@ public static class RazorScanner
             "header", "hr", "main", "nav", "ol", "p", "pre", "section", "table", "ul",
         };
 
+        /// <summary>An MVC view selects its layout in code: <c>@{ Layout = "_Layout"; }</c>.</summary>
+        private static readonly Regex LayoutAssignmentPattern = new(
+            "\\bLayout\\s*=\\s*\"([^\"]+)\"", RegexOptions.Compiled);
+
         private static readonly HashSet<string> ControlKeywords = new(StringComparer.Ordinal)
         {
             "if", "else", "foreach", "for", "while", "switch", "do", "try", "catch", "finally",
@@ -672,6 +676,13 @@ public static class RazorScanner
             _document.CodeBlocks.Add(new RazorCodeBlock(kind, name, inner, inner, at, end, line, endLine));
             _i = end;
             CollectHandlers(inner);
+
+            // The @layout directive wins; a view that assigns Layout in its code block is the MVC spelling.
+            if (_document.LayoutDirective is null)
+            {
+                var assignment = LayoutAssignmentPattern.Match(inner);
+                if (assignment.Success) _document.LayoutDirective = assignment.Groups[1].Value.Trim();
+            }
         }
 
         private void ReadControlBlock(int at, string keyword)

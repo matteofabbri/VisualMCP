@@ -63,8 +63,9 @@ public static class RazorRules
 
     /// <summary>
     /// Runs every rule over one document. <paramref name="resolvePartial"/> is what lets a rule look
-    /// inside what a page renders — today the anti-forgery check, which has to see a token that lives in
-    /// the partial a form includes. Without it the rules stay per file.
+    /// inside what a page renders: the anti-forgery check sees a token that lives in the partial a form
+    /// includes, and the duplicate-id check compares the page with its declared layout and the partials
+    /// either renders. Without it the rules stay per file.
     /// </summary>
     public static List<RazorFinding> Run(RazorDocument document, Func<string, RazorDocument?>? resolvePartial = null)
     {
@@ -82,7 +83,7 @@ public static class RazorRules
         CheckCleartextResources(document, findings);
         CheckDynamicIframe(document, findings);
         CheckInlineContent(document, findings);
-        CheckDuplicateIds(document, findings);
+        CheckDuplicateIds(document, findings, resolvePartial);
         CheckImages(document, findings);
         CheckLabels(document, findings);
         CheckButtons(document, findings);
@@ -410,27 +411,99 @@ public static class RazorRules
 
     // ── Markup ─────────────────────────────────────────────────────────────────
 
-    private static void CheckDuplicateIds(RazorDocument document, List<RazorFinding> findings)
+    /// <summary>
+    /// An id must be unique in the document the browser renders, which is the page plus the layout it
+    /// declares plus every partial either renders. The page's own duplicates are reported as before; with
+    /// a partial resolver the composition is compared as one document, and a collision is reported on the
+    /// occurrence that comes later, naming the file and line of the first. A duplicate that lives inside
+    /// one partial is left to that partial's own analysis, so it is not repeated for every page that
+    /// includes it.
+    /// </summary>
+    private static void CheckDuplicateIds(
+        RazorDocument document, List<RazorFinding> findings, Func<string, RazorDocument?>? resolvePartial)
     {
-        var seen = new Dictionary<string, RazorAttribute>(StringComparer.Ordinal);
-        foreach (var element in document.AllElements())
+        var own = IdsIn(document);
+        var seen = new Dictionary<string, DocumentId>(StringComparer.Ordinal);
+        foreach (var id in own)
         {
-            var id = element.Attribute("id");
-            if (id is not { HasValue: true, ValueHasRazor: false } || string.IsNullOrWhiteSpace(id.Value))
-                continue;
-
-            var key = id.Value.Trim();
-            if (!seen.ContainsKey(key))
-            {
-                seen[key] = id;
-                continue;
-            }
+            if (seen.TryAdd(id.Id, id)) continue;
 
             Add(findings, document, "RZ2003",
-                $"id '{key}' is already used on line {seen[key].Line}; ids must be unique in a document.",
+                $"id '{id.Id}' is already used on line {seen[id.Id].Line}; ids must be unique in a document.",
                 id.Line, id.Column);
         }
+
+        if (resolvePartial is null) return;
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { document.FilePath };
+        var composition = new List<RazorDocument>();
+        CollectComposition(document, resolvePartial, visited, depth: 0, composition);
+
+        var first = new Dictionary<string, DocumentId>(StringComparer.Ordinal);
+        foreach (var id in own) first.TryAdd(id.Id, id);
+
+        foreach (var id in composition.SelectMany(IdsIn))
+        {
+            if (first.TryAdd(id.Id, id)) continue;
+
+            var earlier = first[id.Id];
+            // A partial colliding with itself is that file's own problem, reported when it is analysed.
+            if (!ReferenceEquals(earlier.Document, id.Document))
+                Add(findings, id.Document, "RZ2003",
+                    $"id '{id.Id}' is also used on line {earlier.Line} of {Path.GetFileName(earlier.Document.FilePath)}; " +
+                    "ids must be unique in the rendered document.",
+                    id.Line, id.Column);
+        }
     }
+
+    /// <summary>The ids a document declares, in document order, with the document that declares them.</summary>
+    private static List<DocumentId> IdsIn(RazorDocument document)
+    {
+        var ids = new List<DocumentId>();
+        foreach (var element in document.AllElements())
+        {
+            var attribute = element.Attribute("id");
+            if (attribute is not { HasValue: true, ValueHasRazor: false } || string.IsNullOrWhiteSpace(attribute.Value))
+                continue;
+
+            ids.Add(new DocumentId(document, attribute.Value.Trim(), attribute.Line, attribute.Column));
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// The documents rendered into the same DOM as <paramref name="document"/>: the layout it declares
+    /// (and that layout's own layout), then every partial each renders. A cycle, a name that resolves to
+    /// nothing and a nesting deeper than eight levels all stop the walk.
+    /// </summary>
+    private static void CollectComposition(
+        RazorDocument document, Func<string, RazorDocument?> resolvePartial, HashSet<string> visited,
+        int depth, List<RazorDocument> into)
+    {
+        if (depth >= 8) return;
+
+        if (!string.IsNullOrWhiteSpace(document.LayoutDirective))
+        {
+            var layout = resolvePartial(document.LayoutDirective.Trim());
+            if (layout is not null && visited.Add(layout.FilePath))
+            {
+                CollectComposition(layout, resolvePartial, visited, depth + 1, into);
+                into.Add(layout);
+            }
+        }
+
+        foreach (var name in PartialNamesIn(document, 0, document.Text.Length))
+        {
+            var partial = resolvePartial(name);
+            if (partial is null || !visited.Add(partial.FilePath)) continue;
+
+            CollectComposition(partial, resolvePartial, visited, depth + 1, into);
+            into.Add(partial);
+        }
+    }
+
+    private readonly record struct DocumentId(RazorDocument Document, string Id, int Line, int Column);
 
     private static void CheckImages(RazorDocument document, List<RazorFinding> findings)
     {

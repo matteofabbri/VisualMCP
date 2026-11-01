@@ -183,4 +183,37 @@ public sealed class KubernetesServiceTests
         // helm is optional: either it answers, or the call reports that it is missing.
         Assert.True(result.TryGetProperty("available", out _) || result.TryGetProperty("succeeded", out _));
     }
+
+    [Fact]
+    public void HelmLintOutputIsSummarizedBySeverity()
+    {
+        // The shape helm lint prints: bracketed severities, then a summary line.
+        var summary = ResultAssert.Json(KubernetesService.SummarizeLintOutput("""
+            ==> Linting ./chart
+            [INFO] Chart.yaml: icon is recommended
+            [WARNING] templates/deployment.yaml: object name does not conform to Kubernetes naming requirements
+            [ERROR] templates/service.yaml: unable to build kubernetes objects from release manifest: error validating "": error validating data: ValidationError(Service.spec.ports[0]): missing required field "port"
+            1 chart(s) linted, 1 chart(s) failed
+            """));
+
+        Assert.Equal(1, summary.GetProperty("counts").GetProperty("info").GetInt32());
+        Assert.Equal(1, summary.GetProperty("counts").GetProperty("warning").GetInt32());
+        Assert.Equal(1, summary.GetProperty("counts").GetProperty("error").GetInt32());
+        Assert.Contains("1 chart(s) linted", summary.GetProperty("summary").GetString());
+        Assert.Contains(summary.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("severity").GetString() == "error" &&
+                       finding.GetProperty("message").GetString()!.Contains("ports[0]"));
+
+        var clean = ResultAssert.Json(KubernetesService.SummarizeLintOutput("1 chart(s) linted, 0 chart(s) failed"));
+        Assert.Empty(clean.GetProperty("findings").EnumerateArray());
+        Assert.Contains("0 chart(s) failed", clean.GetProperty("summary").GetString());
+    }
+
+    [Fact]
+    public async Task HelmLintNeedsAChartAndNoRelease()
+    {
+        // The chart check runs before helm is looked up, so it answers the same with or without helm installed.
+        Assert.Contains("chart", ResultAssert.Error(
+            await _service.HelmAsync("lint", "api", null, null, null, null, 30)));
+    }
 }

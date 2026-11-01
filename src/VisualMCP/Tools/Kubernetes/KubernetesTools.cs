@@ -133,16 +133,17 @@ public static class KubernetesChangeTools
 
     [McpServerTool(Name = "k8s_helm"), Description(
         "Helm releases through the helm CLI: action=list (all releases in a namespace, JSON), status, history, " +
-        "get-values, template (render a chart with valuesFile/setValues, which is offline and safe) or repo-list. " +
-        "Reports that helm is missing instead of failing the call. Use this INSTEAD OF shell 'helm ...'.")]
+        "get-values, template (render a chart with valuesFile/setValues, which is offline and safe), lint (check a " +
+        "chart's templates, values and Chart.yaml with no cluster) or repo-list. Reports that helm is missing instead " +
+        "of failing the call. Use this INSTEAD OF shell 'helm ...'.")]
     public static Task<object> KubernetesHelm(
         IKubernetesService k8s,
-        [Description("list | status | history | get-values | template | repo-list")] string action = "list",
+        [Description("list | status | history | get-values | template | lint | repo-list")] string action = "list",
         [Description("Release name (required by status, history, get-values, template).")] string? release = null,
-        [Description("Chart path or reference, for action=template.")] string? chart = null,
+        [Description("Chart path or reference, for action=template and action=lint.")] string? chart = null,
         [Description("Namespace; omit for the current context's namespace.")] string? namespaceName = null,
-        [Description("Values file for action=template.")] string? valuesFile = null,
-        [Description("--set assignments for action=template, e.g. ['image.tag=1.2.3'].")] string[]? setValues = null,
+        [Description("Values file for action=template and action=lint.")] string? valuesFile = null,
+        [Description("--set assignments for action=template and action=lint, e.g. ['image.tag=1.2.3'].")] string[]? setValues = null,
         [Description("Timeout in seconds (default 120).")] int timeoutSeconds = 120)
         => k8s.HelmAsync(action, release, chart, namespaceName, valuesFile, setValues, timeoutSeconds);
 

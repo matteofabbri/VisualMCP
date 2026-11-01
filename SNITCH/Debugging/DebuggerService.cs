@@ -556,18 +556,17 @@ public sealed class DebuggerService : IDebuggerService
 
             if (wantedTypes.Length > 0)
             {
-                // A type condition belongs to a filter: it narrows when that filter breaks. The first
-                // filter named is the one that carries them, "all" (every throw) by default.
-                var filterId = wantedFilters.FirstOrDefault() ?? "all";
-                arguments["filterOptions"] = wantedTypes
-                    .Select(type => new Dictionary<string, object?> { ["filterId"] = filterId, ["condition"] = type })
-                    .ToArray();
+                // The adapter matches a type condition against the full name exactly, so a base class would
+                // match nothing. Break on every throw instead and let this server decide by the hierarchy:
+                // the stops that do not match are resumed in WaitForStopAsync.
+                arguments["filters"] = new[] { "all" };
             }
 
             var body = await session.Client.RequestAsync("setExceptionBreakpoints", arguments, Short);
 
             session.ExceptionFilters = wantedFilters;
             session.ExceptionTypes = wantedTypes;
+            session.ExceptionTypeSkips = 0;
 
             var exception = details ? await ReadExceptionInfoAsync(session) : null;
 
@@ -584,8 +583,10 @@ public sealed class DebuggerService : IDebuggerService
                     : new List<object>(),
                 exception,
                 note = wantedTypes.Length > 0
-                    ? "A type condition matches the exception's full type name exactly (System.NullReferenceException); " +
-                      "prefix ! to exclude it. Base classes are not matched: name each type you want."
+                    ? "Type conditions are evaluated by this server against the thrown type's hierarchy, resolved through " +
+                      "the loaded solution: naming a base class matches its derived types and prefix ! excludes them. " +
+                      "The adapter breaks on every throw and the stops that do not match are resumed transparently " +
+                      "(exceptionTypeSkips says how many); the 'filters' you pass are then recorded but not sent."
                     : "The adapter understands 'all' (every throw) and 'user-unhandled'; add exceptionTypes to narrow them.",
             };
         }
@@ -850,6 +851,7 @@ public sealed class DebuggerService : IDebuggerService
             session.StopFile = null;
             session.StopLine = 0;
             session.HitConditionSkips = 0;
+            session.ExceptionTypeSkips = 0;
 
             await WaitForStopAsync(session, TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, 300)));
 
@@ -909,7 +911,19 @@ public sealed class DebuggerService : IDebuggerService
             if (stop is null) return null;
 
             await ApplyStopAsync(session, stop);
-            if (stop.Event != "stopped" || session.StopReason != "breakpoint") return stop;
+            if (stop.Event != "stopped") return stop;
+
+            // An exception stop the type conditions did not ask for is resumed transparently, bounded like
+            // the hit counter so a filter nothing satisfies still returns the stop it could not judge.
+            if (session.StopReason == "exception" && !await ExceptionStopWantedAsync(session))
+            {
+                if (session.ExceptionTypeSkips >= 500) return stop;
+                session.ExceptionTypeSkips++;
+                await ResumeInternalAsync(session);
+                continue;
+            }
+
+            if (session.StopReason != "breakpoint") return stop;
 
             var spec = FindHitConditionedSpec(session);
             if (spec is null) return stop;
@@ -922,15 +936,82 @@ public sealed class DebuggerService : IDebuggerService
             if (session.HitConditionSkips >= 500) return stop;
             session.HitConditionSkips++;
 
-            await session.Client.RequestAsync("continue",
-                new Dictionary<string, object?> { ["threadId"] = session.StoppedThreadId ?? 0 }, Short);
+            await ResumeInternalAsync(session);
+        }
+    }
 
-            session.State = "running";
-            session.StopReason = null;
-            session.StoppedThreadId = null;
-            session.StopLocation = null;
-            session.StopFile = null;
-            session.StopLine = 0;
+    /// <summary>Resumes the stopped thread without waiting for the next stop: the caller keeps looking.</summary>
+    private static async Task ResumeInternalAsync(DebugSession session)
+    {
+        await session.Client.RequestAsync("continue",
+            new Dictionary<string, object?> { ["threadId"] = session.StoppedThreadId ?? 0 }, Short);
+
+        session.State = "running";
+        session.StopReason = null;
+        session.StoppedThreadId = null;
+        session.StopLocation = null;
+        session.StopFile = null;
+        session.StopLine = 0;
+    }
+
+    /// <summary>
+    /// Whether the exception the process stopped on is one the type conditions asked for, walking the
+    /// hierarchy the solution resolves. With no type condition the adapter's answer stands.
+    /// </summary>
+    private async Task<bool> ExceptionStopWantedAsync(DebugSession session)
+    {
+        if (session.ExceptionTypes.Length == 0) return true;
+
+        var (full, simple) = await ReadExceptionTypeAsync(session);
+        var compilation = await DebuggeeCompilationAsync(session);
+        return ExceptionTypeMatcher.Matches(compilation, full, simple, session.ExceptionTypes);
+    }
+
+    /// <summary>The compilation of the program under debug, when the solution still holds its project.</summary>
+    private async Task<Compilation?> DebuggeeCompilationAsync(DebugSession session)
+    {
+        try
+        {
+            var solution = await _workspace.EnsureSolutionLoadedAsync();
+            if (solution is null) return null;
+
+            var project = solution.Projects.FirstOrDefault(candidate =>
+                              candidate.OutputFilePath is not null &&
+                              DebugPath.Equal(candidate.OutputFilePath, session.Program))
+                          ?? solution.Projects.FirstOrDefault();
+
+            return project is null ? null : await project.GetCompilationAsync();
+        }
+        catch
+        {
+            // No compilation means name matching only: a stop is never hidden because the model is missing.
+            return null;
+        }
+    }
+
+    /// <summary>The thrown exception's type, as the adapter's exceptionInfo reports it.</summary>
+    private static async Task<(string? Full, string? Simple)> ReadExceptionTypeAsync(DebugSession session)
+    {
+        if (session.StoppedThreadId is not int threadId) return (null, null);
+
+        try
+        {
+            var body = await session.Client.RequestAsync("exceptionInfo",
+                new Dictionary<string, object?> { ["threadId"] = threadId }, Short);
+            if (body.ValueKind != JsonValueKind.Object) return (null, null);
+
+            var simple = Str(body, "exceptionId");
+            if (body.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Object)
+            {
+                var simpleName = Str(details, "typeName") ?? simple;
+                return (Str(details, "fullTypeName") ?? simpleName, simpleName);
+            }
+
+            return (simple, simple);
+        }
+        catch
+        {
+            return (null, null);
         }
     }
 
@@ -1109,6 +1190,7 @@ public sealed class DebuggerService : IDebuggerService
                 .ToList(),
             exceptionBreakpoints = new { filters = session.ExceptionFilters, exceptionTypes = session.ExceptionTypes },
             hitConditionSkips = session.HitConditionSkips,
+            exceptionTypeSkips = session.ExceptionTypeSkips,
             exception,
             output = session.Client.ReadOutput(40),
             note = session.State switch

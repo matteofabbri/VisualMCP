@@ -60,7 +60,7 @@ public sealed class AnalyzeRazorPagesService : IAnalyzeRazorPagesService
         }
 
         var minimum = RazorRuleCatalog.Rank(minSeverity);
-        var filtered = all
+        var filtered = RazorAnalysis.Distinct(all)
             .Where(finding => category is null ||
                               finding.Category.Equals(category, StringComparison.OrdinalIgnoreCase))
             .Where(finding => rule is null ||

@@ -271,6 +271,69 @@ public sealed class RazorTests
         }
     }
 
+    [Fact]
+    public void DuplicateIds_CompareThePageWithItsLayoutAndThePartialsItRenders()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vmcp-razor-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "Views", "Home"));
+        Directory.CreateDirectory(Path.Combine(root, "Views", "Shared"));
+
+        var page = Path.Combine(root, "Views", "Home", "Edit.cshtml");
+        var layout = Path.Combine(root, "Views", "Shared", "_Layout.cshtml");
+        var widget = Path.Combine(root, "Views", "Shared", "_Widget.cshtml");
+        var other = Path.Combine(root, "Views", "Shared", "_Other.cshtml");
+        var duplicated = Path.Combine(root, "Views", "Shared", "_Duplicated.cshtml");
+
+        // A layout selected in a code block, the MVC spelling, is followed too.
+        File.WriteAllText(page, """
+            @{ Layout = "_Layout"; }
+            <div id="main">page</div>
+            <partial name="_Widget" />
+            <partial name="_Other" />
+            <partial name="_Duplicated" />
+            """);
+        File.WriteAllText(layout, "<html><body><div id=\"main\">@RenderBody()</div></body></html>");
+        File.WriteAllText(widget, "<section id=\"widget\"></section>");
+        File.WriteAllText(other, "<aside id=\"widget\"></aside>");
+        File.WriteAllText(duplicated, "<b id=\"twice\"></b><i id=\"twice\"></i>");
+
+        try
+        {
+            var collection = new RazorCollection { Root = root };
+            foreach (var path in new[] { page, layout, widget, other, duplicated })
+                collection.Files.Add(new RazorFileEntry(
+                    path, Path.GetRelativePath(root, path).Replace('\\', '/'), null));
+
+            var resolver = RazorAnalysis.CreatePartialResolver(collection).For(Path.GetDirectoryName(page));
+            var document = Scan(File.ReadAllText(page), "Views/Home/Edit.cshtml");
+            document.Kind = RazorPageClassifier.Classify(document, "Views/Home/Edit.cshtml");
+            var duplicates = RazorRules.Run(document, resolver)
+                .Where(finding => finding.RuleId == "RZ2003").ToList();
+
+            // The page and the layout both declare "main": reported on the layout, naming the page.
+            var layoutCollision = Assert.Single(duplicates, finding => finding.Snippet.Contains("id=\"main\""));
+            Assert.Equal(layout, layoutCollision.FilePath);
+            Assert.Contains("Edit.cshtml", layoutCollision.Message);
+
+            // Two partials declare "widget": reported on the second, naming the first.
+            var partialCollision = Assert.Single(duplicates, finding => finding.Snippet.Contains("id=\"widget\""));
+            Assert.Equal(other, partialCollision.FilePath);
+            Assert.Contains("_Widget.cshtml", partialCollision.Message);
+
+            // A partial colliding with itself is that file's problem, not one per page that renders it.
+            Assert.DoesNotContain(duplicates, finding => finding.Snippet.Contains("id=\"twice\""));
+            var onItsOwn = Scan(File.ReadAllText(duplicated), "Views/Shared/_Duplicated.cshtml");
+            Assert.Contains(RazorRules.Run(onItsOwn), finding => finding.RuleId == "RZ2003");
+
+            // Without a resolver the rule is per file: the page's own ids are all distinct, so nothing.
+            Assert.DoesNotContain(RazorRules.Run(document), finding => finding.RuleId == "RZ2003");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     // ── Security rules ─────────────────────────────────────────────────────────
 
     [Theory]
