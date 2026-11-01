@@ -19,13 +19,13 @@ namespace Snitch.Storage;
 /// </remarks>
 public interface ILocalHistoryService : IDisposable
 {
-    Task<object> SnapshotAsync(CancellationToken cancellationToken = default);
+    Task<LocalHistorySnapshotResult> SnapshotAsync(CancellationToken cancellationToken = default);
 
-    Task<object> HistoryAsync(string filePath, int limit = 20);
+    Task<LocalHistoryHistoryResult> HistoryAsync(string filePath, int limit = 20);
 
-    Task<object> DiffAsync(string filePath, long id, long? otherId = null, CancellationToken cancellationToken = default);
+    Task<LocalHistoryDiffResult> DiffAsync(string filePath, long id, long? otherId = null, CancellationToken cancellationToken = default);
 
-    Task<object> RestoreAsync(string filePath, long id, bool dryRun = true, CancellationToken cancellationToken = default);
+    Task<LocalHistoryRestoreResult> RestoreAsync(string filePath, long id, bool dryRun = true, CancellationToken cancellationToken = default);
 }
 
 public sealed class LocalHistoryService : ILocalHistoryService
@@ -61,19 +61,19 @@ public sealed class LocalHistoryService : ILocalHistoryService
         _store = store;
     }
 
-    public async Task<object> SnapshotAsync(CancellationToken cancellationToken = default)
+    public async Task<LocalHistorySnapshotResult> SnapshotAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
             var connection = await OpenAsync(cancellationToken);
-            if (connection is null) return NoStore();
+            if (connection is null) return new LocalHistorySnapshotResult { Error = NoStoreMessage };
 
             var files = await SourceFilesAsync(cancellationToken);
-            if (files.Count == 0) return new { error = "No source file of the loaded solution is on disk." };
+            if (files.Count == 0) return new LocalHistorySnapshotResult { Error = "No source file of the loaded solution is on disk." };
 
             var latest = LatestHashes(connection);
-            var captured = new List<object>();
+            var captured = new List<LocalHistorySnapshotEntry>();
             int unchanged = 0, skipped = 0;
 
             foreach (var path in files)
@@ -106,18 +106,18 @@ public sealed class LocalHistoryService : ILocalHistoryService
 
                 Insert(connection, path, hash, text, "snapshot");
                 latest[path] = hash;
-                captured.Add(new { file = path, hash, chars = text.Length });
+                captured.Add(new LocalHistorySnapshotEntry(path, hash, text.Length));
             }
 
-            return new
+            return new LocalHistorySnapshotResult
             {
-                database = _store.DatabasePath,
-                scanned = files.Count,
-                captured = captured.Count,
-                unchanged,
-                skipped,
-                files = captured,
-                note = "A snapshot is taken only for a file whose content differs from its newest one; " +
+                Database = _store.DatabasePath,
+                Scanned = files.Count,
+                Captured = captured.Count,
+                Unchanged = unchanged,
+                Skipped = skipped,
+                Files = captured,
+                Note = "A snapshot is taken only for a file whose content differs from its newest one; " +
                        $"each file keeps the newest {KeepPerFile}.",
             };
         }
@@ -127,16 +127,16 @@ public sealed class LocalHistoryService : ILocalHistoryService
         }
     }
 
-    public async Task<object> HistoryAsync(string filePath, int limit = 20)
+    public async Task<LocalHistoryHistoryResult> HistoryAsync(string filePath, int limit = 20)
     {
         await _gate.WaitAsync();
         try
         {
             var connection = await OpenAsync(CancellationToken.None);
-            if (connection is null) return NoStore();
+            if (connection is null) return new LocalHistoryHistoryResult { Error = NoStoreMessage };
 
             var path = FullPath(filePath);
-            if (path is null) return new { error = $"Invalid path '{filePath}'." };
+            if (path is null) return new LocalHistoryHistoryResult { Error = $"Invalid path '{filePath}'." };
 
             if (limit < 1) limit = 1;
             if (limit > 500) limit = 500;
@@ -149,27 +149,25 @@ public sealed class LocalHistoryService : ILocalHistoryService
                 .Take(limit)
                 .Select(row => new { row.Id, row.CapturedAt, row.Hash, row.Chars, row.Origin })
                 .ToList()
-                .Select(row => (object)new
-                {
-                    id = row.Id,
-                    at = row.CapturedAt.ToUniversalTime().ToString("O"),
-                    hash = row.Hash,
-                    chars = row.Chars,
-                    origin = row.Origin,
-                })
+                .Select(row => new LocalHistorySnapshotSummary(
+                    row.Id,
+                    row.CapturedAt.ToUniversalTime().ToString("O"),
+                    row.Hash,
+                    row.Chars,
+                    row.Origin))
                 .ToList();
 
             var current = File.Exists(path) ? await File.ReadAllTextAsync(path) : null;
             var currentHash = current is null ? null : VisualMcpStore.ContentHash(current);
 
-            return new
+            return new LocalHistoryHistoryResult
             {
-                file = path,
-                exists = current is not null,
-                current = new { hash = currentHash, chars = current?.Length },
-                returned = snapshots.Count,
-                snapshots,
-                note = "A snapshot whose hash equals `current.hash` is the file as it stands.",
+                File = path,
+                Exists = current is not null,
+                Current = new LocalHistoryCurrentState(currentHash, current?.Length),
+                Returned = snapshots.Count,
+                Snapshots = snapshots,
+                Note = "A snapshot whose hash equals `current.hash` is the file as it stands.",
             };
         }
         finally
@@ -178,52 +176,52 @@ public sealed class LocalHistoryService : ILocalHistoryService
         }
     }
 
-    public async Task<object> DiffAsync(string filePath, long id, long? otherId = null, CancellationToken cancellationToken = default)
+    public async Task<LocalHistoryDiffResult> DiffAsync(string filePath, long id, long? otherId = null, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
             var connection = await OpenAsync(cancellationToken);
-            if (connection is null) return NoStore();
+            if (connection is null) return new LocalHistoryDiffResult { Error = NoStoreMessage };
 
             var path = FullPath(filePath);
-            if (path is null) return new { error = $"Invalid path '{filePath}'." };
+            if (path is null) return new LocalHistoryDiffResult { Error = $"Invalid path '{filePath}'." };
 
             var baseline = Read(connection, id);
-            if (baseline is null) return new { error = $"No snapshot #{id}." };
+            if (baseline is null) return new LocalHistoryDiffResult { Error = $"No snapshot #{id}." };
             if (!string.Equals(baseline.Value.File, path, StringComparison.OrdinalIgnoreCase))
-                return new { error = $"Snapshot #{id} belongs to {baseline.Value.File}, not {path}." };
+                return new LocalHistoryDiffResult { Error = $"Snapshot #{id} belongs to {baseline.Value.File}, not {path}." };
 
             string current;
             if (otherId is { } other)
             {
                 var otherSnapshot = Read(connection, other);
-                if (otherSnapshot is null) return new { error = $"No snapshot #{other}." };
+                if (otherSnapshot is null) return new LocalHistoryDiffResult { Error = $"No snapshot #{other}." };
                 if (!string.Equals(otherSnapshot.Value.File, path, StringComparison.OrdinalIgnoreCase))
-                    return new { error = $"Snapshot #{other} belongs to {otherSnapshot.Value.File}, not {path}." };
+                    return new LocalHistoryDiffResult { Error = $"Snapshot #{other} belongs to {otherSnapshot.Value.File}, not {path}." };
 
                 var firstOlder = baseline.Value.CapturedAt <= otherSnapshot.Value.CapturedAt;
                 var older = firstOlder ? baseline.Value.Text : otherSnapshot.Value.Text;
                 var newer = firstOlder ? otherSnapshot.Value.Text : baseline.Value.Text;
 
-                return new
+                return new LocalHistoryDiffResult
                 {
-                    file = path,
-                    left = older.Length,
-                    right = newer.Length,
-                    against = $"snapshot #{other}",
-                    diff = RefactoringFileWriter.Diff(older, newer, maxLines: 200),
+                    File = path,
+                    Left = older.Length,
+                    Right = newer.Length,
+                    Against = $"snapshot #{other}",
+                    Diff = RefactoringFileWriter.Diff(older, newer, maxLines: 200),
                 };
             }
 
             current = File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : string.Empty;
 
-            return new
+            return new LocalHistoryDiffResult
             {
-                file = path,
-                snapshot = new { id, at = baseline.Value.CapturedAt.ToString("O"), chars = baseline.Value.Text.Length },
-                against = "current file",
-                diff = RefactoringFileWriter.Diff(baseline.Value.Text, current, maxLines: 200),
+                File = path,
+                Snapshot = new LocalHistoryDiffSnapshot(id, baseline.Value.CapturedAt.ToString("O"), baseline.Value.Text.Length),
+                Against = "current file",
+                Diff = RefactoringFileWriter.Diff(baseline.Value.Text, current, maxLines: 200),
             };
         }
         finally
@@ -232,21 +230,21 @@ public sealed class LocalHistoryService : ILocalHistoryService
         }
     }
 
-    public async Task<object> RestoreAsync(string filePath, long id, bool dryRun = true, CancellationToken cancellationToken = default)
+    public async Task<LocalHistoryRestoreResult> RestoreAsync(string filePath, long id, bool dryRun = true, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
             var connection = await OpenAsync(cancellationToken);
-            if (connection is null) return NoStore();
+            if (connection is null) return new LocalHistoryRestoreResult { Error = NoStoreMessage };
 
             var path = FullPath(filePath);
-            if (path is null) return new { error = $"Invalid path '{filePath}'." };
+            if (path is null) return new LocalHistoryRestoreResult { Error = $"Invalid path '{filePath}'." };
 
             var snapshot = Read(connection, id);
-            if (snapshot is null) return new { error = $"No snapshot #{id}." };
+            if (snapshot is null) return new LocalHistoryRestoreResult { Error = $"No snapshot #{id}." };
             if (!string.Equals(snapshot.Value.File, path, StringComparison.OrdinalIgnoreCase))
-                return new { error = $"Snapshot #{id} belongs to {snapshot.Value.File}, not {path}." };
+                return new LocalHistoryRestoreResult { Error = $"Snapshot #{id} belongs to {snapshot.Value.File}, not {path}." };
 
             var current = File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : string.Empty;
             var currentHash = VisualMcpStore.ContentHash(current);
@@ -254,7 +252,13 @@ public sealed class LocalHistoryService : ILocalHistoryService
             var diff = RefactoringFileWriter.Diff(current, snapshot.Value.Text, maxLines: 200);
 
             if (currentHash == snapshotHash)
-                return new { file = path, snapshot = id, applied = false, note = "The file already holds that snapshot's text." };
+                return new LocalHistoryRestoreUnchangedResult
+                {
+                    File = path,
+                    Snapshot = id,
+                    Applied = false,
+                    Note = "The file already holds that snapshot's text.",
+                };
 
             if (!dryRun)
             {
@@ -265,14 +269,14 @@ public sealed class LocalHistoryService : ILocalHistoryService
                 _store.RecordEdit("local_history_restore", path, $"snapshot #{id}", current, snapshot.Value.Text);
             }
 
-            return new
+            return new LocalHistoryRestoreAppliedResult
             {
-                file = path,
-                snapshot = new { id, at = snapshot.Value.CapturedAt.ToString("O") },
-                dryRun,
-                applied = !dryRun,
-                diff,
-                note = dryRun
+                File = path,
+                Snapshot = new LocalHistoryRestoreSnapshot(id, snapshot.Value.CapturedAt.ToString("O")),
+                DryRun = dryRun,
+                Applied = !dryRun,
+                Diff = diff,
+                Note = dryRun
                     ? "Preview only: pass dryRun=false to write the snapshot."
                     : "File written; the text it replaced is snapshotted as `before-restore`.",
             };
@@ -457,10 +461,8 @@ public sealed class LocalHistoryService : ILocalHistoryService
             : (snapshot.File, snapshot.CapturedAt, VisualMcpStore.DecompressText(snapshot.Text));
     }
 
-    private static object NoStore() => new
-    {
-        error = "No solution store is available, so there is no local history. Call load_solution first.",
-    };
+    private const string NoStoreMessage =
+        "No solution store is available, so there is no local history. Call load_solution first.";
 
     public void Dispose()
     {

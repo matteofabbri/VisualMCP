@@ -13,7 +13,7 @@ public static class NodeTools
         "yarn.lock / package-lock.json, then npm), the node and package-manager versions, the scripts, the dependency " +
         "counts and whether typescript/eslint are installed locally. Use it FIRST, then node_script/node_typecheck/" +
         "node_lint. Use this INSTEAD OF shell 'npm --version' / reading package.json by hand.")]
-    public static Task<object> NodeInfo(
+    public static Task<NodeInfoResult> NodeInfo(
         INodeService node,
         [Description("Directory to start from (default: the working directory); the nearest package.json above it is used.")]
         string? directory = null)
@@ -24,7 +24,7 @@ public static class NodeTools
         "(npm 'ci' when frozenLockfile, pnpm/yarn 'install --frozen-lockfile'), named packages add them (dev=true " +
         "for --save-dev), remove=true uninstalls them. The command, exit code and duration come back as structured " +
         "data. Use this INSTEAD OF shell 'npm install' / 'pnpm add' / 'yarn add'.")]
-    public static Task<object> NodeInstall(
+    public static Task<NodeInstallResult> NodeInstall(
         INodeService node,
         [Description("Directory to start from (default: the working directory).")] string? directory = null,
         [Description("Packages to add or remove, e.g. ['typescript', 'vite@5']; omit to install the lockfile.")]
@@ -40,7 +40,7 @@ public static class NodeTools
         "Run one package.json script (build, test, lint, dev, …) with the project's package manager, forwarding " +
         "arguments after '--', and return exit code, duration, stdout and stderr. It refuses a script package.json " +
         "does not declare and lists the ones it does. Use this INSTEAD OF shell 'npm run build' / 'pnpm build'.")]
-    public static Task<object> NodeScript(
+    public static Task<NodeScriptResult> NodeScript(
         INodeService node,
         [Description("Script name from package.json, e.g. build, test, typecheck.")] string script,
         [Description("Directory to start from (default: the working directory).")] string? directory = null,
@@ -53,7 +53,7 @@ public static class NodeTools
         "'tsc --noEmit --pretty false' by default, parsed into file:line:column + TSxxxx diagnostics with counts. " +
         "This is the JS/TS equivalent of get_diagnostics. Reports that typescript is not installed, with the command " +
         "that installs it, instead of guessing.")]
-    public static Task<object> NodeTypecheck(
+    public static Task<NodeTypecheckResult> NodeTypecheck(
         INodeService node,
         [Description("Directory to start from (default: the working directory).")] string? directory = null,
         [Description("tsconfig file or directory to pass to -p (default: tsc finds tsconfig.json).")] string? project = null,
@@ -66,7 +66,7 @@ public static class NodeTools
         "parsed into findings with file, rule id, severity and position, plus error/warning counts and the rules " +
         "that fire most. fix=true runs --fix first. Reports that eslint is not installed instead of failing. " +
         "Use this INSTEAD OF shell 'npx eslint'.")]
-    public static Task<object> NodeLint(
+    public static Task<NodeLintResult> NodeLint(
         INodeService node,
         [Description("Directory to start from (default: the working directory).")] string? directory = null,
         [Description("File, directory or glob to lint (default: the whole project, '.').")] string? pattern = null,
@@ -78,7 +78,7 @@ public static class NodeTools
         "Packages that have a newer version, from the package manager's own 'outdated --json' (npm, pnpm and yarn 1 " +
         "shapes are normalised to name/current/wanted/latest/type). Use this INSTEAD OF shell 'npm outdated'. " +
         "Read-only.")]
-    public static Task<object> NodeOutdated(
+    public static Task<NodeOutdatedResult> NodeOutdated(
         INodeService node,
         [Description("Directory to start from (default: the working directory).")] string? directory = null,
         [Description("Timeout in seconds (default 180).")] int timeoutSeconds = 180)
@@ -88,7 +88,7 @@ public static class NodeTools
         "Known vulnerabilities in the JavaScript dependencies, from the package manager's own 'audit --json' (npm " +
         "metadata/vulnerabilities, pnpm advisories, yarn NDJSON are normalised): severity counts, and per package the " +
         "severity, title, vulnerable range and whether a fix exists. Use this INSTEAD OF shell 'npm audit'. Read-only.")]
-    public static Task<object> NodeAudit(
+    public static Task<NodeAuditResult> NodeAudit(
         INodeService node,
         [Description("Directory to start from (default: the working directory).")] string? directory = null,
         [Description("Timeout in seconds (default 180).")] int timeoutSeconds = 180)

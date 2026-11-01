@@ -12,7 +12,7 @@ namespace Snitch.Platform;
 /// </summary>
 public interface IFixLineEndingsService
 {
-    Task<object> FixAsync(
+    Task<FixLineEndingsResult> FixAsync(
         string scope,
         string? path,
         string? projectName,
@@ -31,7 +31,7 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
 
     public FixLineEndingsService(IRoslynWorkspace workspace) => _workspace = workspace;
 
-    public async Task<object> FixAsync(
+    public async Task<FixLineEndingsResult> FixAsync(
         string scope,
         string? path,
         string? projectName,
@@ -42,13 +42,13 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
     {
         var level = (scope ?? "solution").Trim().ToLowerInvariant();
         if (level is not ("file" or "directory" or "project" or "solution"))
-            return new { error = "scope must be file, directory, project or solution." };
+            return new FixLineEndingsResult { Error = "scope must be file, directory, project or solution." };
 
         NewLineStyle? forced = null;
         if (!string.IsNullOrWhiteSpace(style) && !style.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
             if (!LineEndings.TryParseStyle(style, out var parsed))
-                return new { error = $"'{style}' is not a newline style. Use auto, lf or crlf." };
+                return new FixLineEndingsResult { Error = $"'{style}' is not a newline style. Use auto, lf or crlf." };
             forced = parsed;
         }
 
@@ -56,8 +56,8 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
         var (files, selectionError) = await SelectFilesAsync(level, path, projectName, filter, cancellationToken);
         if (selectionError is not null) return selectionError;
 
-        var changes = new List<object>();
-        var skipped = new List<object>();
+        var changes = new List<LineEndingChange>();
+        var skipped = new List<LineEndingSkip>();
         var alreadyFine = 0;
 
         foreach (var file in files)
@@ -69,7 +69,7 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
             }
             catch (Exception exception)
             {
-                skipped.Add(new { file, reason = exception.Message });
+                skipped.Add(new LineEndingSkip(file, exception.Message));
                 continue;
             }
 
@@ -84,14 +84,12 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
             }
 
             var (crlf, lf) = LineEndings.Count(text);
-            changes.Add(new
-            {
+            changes.Add(new LineEndingChange(
                 file,
-                was = crlf > 0 && lf > 0 ? $"mixed (crlf {crlf}, lf {lf})" : LineEndings.Describe(crlf > 0 ? NewLineStyle.CrLf : NewLineStyle.Lf),
-                now = LineEndings.Describe(target),
-                crlfLines = crlf,
-                lfLines = lf,
-            });
+                crlf > 0 && lf > 0 ? $"mixed (crlf {crlf}, lf {lf})" : LineEndings.Describe(crlf > 0 ? NewLineStyle.CrLf : NewLineStyle.Lf),
+                LineEndings.Describe(target),
+                crlf,
+                lf));
 
             if (!dryRun)
             {
@@ -101,46 +99,49 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
             }
         }
 
-        return new
+        return new FixLineEndingsResult
         {
-            @refactoring = "fix_line_endings",
-            scope = level,
-            style = forced is null ? "auto" : LineEndings.Describe(forced.Value),
-            host = HostSystem.Describe(),
-            dryRun,
-            applied = !dryRun,
-            scanned = files.Count,
-            alreadyCorrect = alreadyFine,
-            filesChanged = changes.Count,
-            changes = changes.Take(200).ToList(),
-            skipped = skipped.Take(20).ToList(),
-            note = dryRun
+            Refactoring = "fix_line_endings",
+            Scope = level,
+            Style = forced is null ? "auto" : LineEndings.Describe(forced.Value),
+            Host = HostSystem.Describe(),
+            DryRun = dryRun,
+            Applied = !dryRun,
+            Scanned = files.Count,
+            AlreadyCorrect = alreadyFine,
+            FilesChanged = changes.Count,
+            Changes = changes.Take(200).ToList(),
+            Skipped = skipped.Take(20).ToList(),
+            Note = dryRun
                 ? "Preview only: pass dryRun=false to rewrite the files."
                 : "Files rewritten.",
         };
     }
 
     // ── selection ────────────────────────────────────────────────────────────
-    private async Task<(IReadOnlyList<string> Files, object? Error)> SelectFilesAsync(
+    private async Task<(IReadOnlyList<string> Files, FixLineEndingsResult? Error)> SelectFilesAsync(
         string level, string? path, string? projectName, HashSet<string>? filter, CancellationToken cancellationToken)
     {
         switch (level)
         {
             case "file":
                 {
-                    if (string.IsNullOrWhiteSpace(path)) return ([], new { error = "scope=file needs path." });
+                    if (string.IsNullOrWhiteSpace(path))
+                        return ([], new FixLineEndingsResult { Error = "scope=file needs path." });
 
                     var full = Path.GetFullPath(path);
                     return File.Exists(full)
                         ? ([full], null)
-                        : ([], new { error = $"{full} does not exist." });
+                        : ([], new FixLineEndingsResult { Error = $"{full} does not exist." });
                 }
 
             case "directory":
                 {
                     var directory = string.IsNullOrWhiteSpace(path) ? DiscoverRoot() : Path.GetFullPath(path!);
-                    if (directory is null) return ([], new { error = "scope=directory needs path (no solution is loaded)." });
-                    if (!Directory.Exists(directory)) return ([], new { error = $"{directory} does not exist." });
+                    if (directory is null)
+                        return ([], new FixLineEndingsResult { Error = "scope=directory needs path (no solution is loaded)." });
+                    if (!Directory.Exists(directory))
+                        return ([], new FixLineEndingsResult { Error = $"{directory} does not exist." });
 
                     return (Enumerate(directory, filter), null);
                 }
@@ -148,14 +149,23 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
             case "project":
                 {
                     var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
-                    if (solution is null) return ([], new { error = "No C# solution could be auto-located. Call load_solution first." });
+                    if (solution is null)
+                        return ([], new FixLineEndingsResult { Error = "No C# solution could be auto-located. Call load_solution first." });
                     if (string.IsNullOrWhiteSpace(projectName))
-                        return ([], new { error = "scope=project needs projectName.", projects = solution.Projects.Select(p => p.Name).ToList() });
+                        return ([], new FixLineEndingsResult
+                        {
+                            Error = "scope=project needs projectName.",
+                            Projects = solution.Projects.Select(p => p.Name).ToList(),
+                        });
 
                     var project = solution.Projects.FirstOrDefault(candidate =>
                         candidate.Name.Equals(projectName, StringComparison.OrdinalIgnoreCase));
                     if (project is null)
-                        return ([], new { error = $"No project '{projectName}'.", projects = solution.Projects.Select(p => p.Name).ToList() });
+                        return ([], new FixLineEndingsResult
+                        {
+                            Error = $"No project '{projectName}'.",
+                            Projects = solution.Projects.Select(p => p.Name).ToList(),
+                        });
 
                     return (Documents(project, filter), null);
                 }
@@ -163,7 +173,8 @@ public sealed class FixLineEndingsService : IFixLineEndingsService
             default:
                 {
                     var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
-                    if (solution is null) return ([], new { error = "No C# solution could be auto-located. Call load_solution first." });
+                    if (solution is null)
+                        return ([], new FixLineEndingsResult { Error = "No C# solution could be auto-located. Call load_solution first." });
 
                     return (solution.Projects.SelectMany(project => Documents(project, filter)).ToList(), null);
                 }

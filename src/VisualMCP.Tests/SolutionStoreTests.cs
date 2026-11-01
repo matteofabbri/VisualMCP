@@ -131,7 +131,7 @@ public sealed class SolutionStoreTests
         Assert.Equal("IDE0004", edit.Rules);
 
         var history = new EditHistoryService(workspace, store);
-        var result = ResultAssert.Json(await history.RevertAsync(edit.Id));
+        var result = ResultAssert.Wire(await history.RevertAsync(edit.Id));
 
         Assert.Equal(source.Replace("\r\n", "\n"), workspace.Read("C.cs").Replace("\r\n", "\n"));
         Assert.Equal(edit.Id, result.GetProperty("reverted").GetInt64());

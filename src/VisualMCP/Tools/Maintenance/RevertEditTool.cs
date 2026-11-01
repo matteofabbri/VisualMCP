@@ -12,7 +12,7 @@ public static class RevertEditTool
         ".visualMCP/visualmcp.db, so the file is restored exactly as it was before that edit. It refuses when the file " +
         "changed after the edit (reverting would overwrite newer work) or when the edit predates the content history. " +
         "The revert itself is recorded as a new edit, so it can be undone too.")]
-    public static Task<object> RevertEdit(
+    public static Task<RevertEditResult> RevertEdit(
         IEditHistoryService history,
         [Description("The id shown by edit_history.")] long id,
         CancellationToken cancellationToken = default)

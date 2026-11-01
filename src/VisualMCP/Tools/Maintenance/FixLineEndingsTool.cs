@@ -14,7 +14,7 @@ public static class FixLineEndingsTool
         "to the target file's existing convention, so this is only needed for a deliberate migration. " +
         "scope=file (needs path), directory (path, recursive, bin/obj/.git skipped), project (projectName) or " +
         "solution. dryRun defaults to true and lists what would change; pass dryRun=false to rewrite.")]
-    public static Task<object> FixLineEndings(
+    public static Task<FixLineEndingsResult> FixLineEndings(
         IFixLineEndingsService service,
         [Description("file | directory | project | solution")] string scope = "solution",
         [Description("File or directory, for scope=file/directory.")] string? path = null,

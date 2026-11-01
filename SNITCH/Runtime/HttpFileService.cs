@@ -26,22 +26,26 @@ public sealed record HttpFileDocument(
 /// </summary>
 public interface IHttpFileService
 {
-    Task<object> RunAsync(string path, bool failFast, int timeoutSeconds, int maxBodyChars);
+    Task<HttpFileRunResult> RunAsync(string path, bool failFast, int timeoutSeconds, int maxBodyChars);
 }
 
 public sealed class HttpFileService : IHttpFileService
 {
     private const int MaxRedirects = 5;
 
-    public async Task<object> RunAsync(string path, bool failFast, int timeoutSeconds, int maxBodyChars)
+    public async Task<HttpFileRunResult> RunAsync(string path, bool failFast, int timeoutSeconds, int maxBodyChars)
     {
-        if (string.IsNullOrWhiteSpace(path)) return new { error = "A .http file path is required." };
-        if (!File.Exists(path)) return new { error = $"File not found: {path}" };
+        if (string.IsNullOrWhiteSpace(path)) return new HttpFileRunResult { Error = "A .http file path is required." };
+        if (!File.Exists(path)) return new HttpFileRunResult { Error = $"File not found: {path}" };
 
         var text = await File.ReadAllTextAsync(path);
         var document = Parse(text);
         if (document.Requests.Count == 0)
-            return new { error = $"No request found in {Path.GetFileName(path)}: expected a 'METHOD url' line under a ### separator.", path };
+            return new HttpFileRunResult
+            {
+                Error = $"No request found in {Path.GetFileName(path)}: expected a 'METHOD url' line under a ### separator.",
+                Path = path,
+            };
 
         var timeout = Math.Clamp(timeoutSeconds < 1 ? 30 : timeoutSeconds, 1, 300);
         var bodyLimit = Math.Clamp(maxBodyChars < 200 ? 4000 : maxBodyChars, 200, 200_000);
@@ -54,7 +58,7 @@ public sealed class HttpFileService : IHttpFileService
         };
         using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
 
-        var results = new List<object>();
+        var results = new List<HttpFileRequestResult>();
         var unresolved = new SortedSet<string>(StringComparer.Ordinal);
         var ran = 0;
         var failed = 0;
@@ -75,20 +79,20 @@ public sealed class HttpFileService : IHttpFileService
             if (!succeeded && failFast) break;
         }
 
-        return new
+        return new HttpFileRunResult
         {
-            path,
-            file = Path.GetFileName(path),
-            variableCount = document.Variables.Count,
-            requestCount = document.Requests.Count,
-            ran,
-            failed,
-            skipped = document.Requests.Count - ran,
-            succeeded = failed == 0,
-            stoppedEarly = failFast && ran < document.Requests.Count,
-            unresolvedVariables = unresolved.ToList(),
-            requests = results,
-            note = failFast && ran < document.Requests.Count
+            Path = path,
+            File = Path.GetFileName(path),
+            VariableCount = document.Variables.Count,
+            RequestCount = document.Requests.Count,
+            Ran = ran,
+            Failed = failed,
+            Skipped = document.Requests.Count - ran,
+            Succeeded = failed == 0,
+            StoppedEarly = failFast && ran < document.Requests.Count,
+            UnresolvedVariables = unresolved.ToList(),
+            Requests = results,
+            Note = failFast && ran < document.Requests.Count
                 ? "failFast stopped the run at the first failure; the remaining requests were not sent."
                 : null,
         };
@@ -262,7 +266,7 @@ public sealed class HttpFileService : IHttpFileService
         }
     }
 
-    private static async Task<(object Result, bool Succeeded)> SendAsync(
+    private static async Task<(HttpFileRequestResult Result, bool Succeeded)> SendAsync(
         HttpClient client,
         HttpFileRequest request,
         string url,
@@ -309,19 +313,19 @@ public sealed class HttpFileService : IHttpFileService
             stopwatch.Stop();
 
             var succeeded = (int)response.StatusCode is >= 200 and < 300;
-            var result = new
+            var result = new HttpFileRequestResult
             {
-                index = request.Index,
-                name = request.Name,
-                line = request.Line,
-                method = request.Method,
-                url,
-                statusCode = (int)response.StatusCode,
-                statusText = response.StatusCode.ToString(),
-                contentType = response.Content.Headers.ContentType?.ToString() ?? "unknown",
-                elapsedMs = stopwatch.ElapsedMilliseconds,
-                succeeded,
-                body = Truncate(responseBody, bodyLimit),
+                Index = request.Index,
+                Name = request.Name,
+                Line = request.Line,
+                Method = request.Method,
+                Url = url,
+                StatusCode = (int)response.StatusCode,
+                StatusText = response.StatusCode.ToString(),
+                ContentType = response.Content.Headers.ContentType?.ToString() ?? "unknown",
+                ElapsedMs = stopwatch.ElapsedMilliseconds,
+                Succeeded = succeeded,
+                Body = Truncate(responseBody, bodyLimit),
             };
 
             return (result, succeeded);
@@ -329,31 +333,31 @@ public sealed class HttpFileService : IHttpFileService
         catch (OperationCanceledException)
         {
             stopwatch.Stop();
-            return (new
+            return (new HttpFileRequestResult
             {
-                index = request.Index,
-                name = request.Name,
-                line = request.Line,
-                method = request.Method,
-                url,
-                succeeded = false,
-                error = $"Timed out after {timeoutSeconds}s.",
-                elapsedMs = stopwatch.ElapsedMilliseconds,
+                Index = request.Index,
+                Name = request.Name,
+                Line = request.Line,
+                Method = request.Method,
+                Url = url,
+                Succeeded = false,
+                Error = $"Timed out after {timeoutSeconds}s.",
+                ElapsedMs = stopwatch.ElapsedMilliseconds,
             }, false);
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            return (new
+            return (new HttpFileRequestResult
             {
-                index = request.Index,
-                name = request.Name,
-                line = request.Line,
-                method = request.Method,
-                url,
-                succeeded = false,
-                error = ex.Message,
-                elapsedMs = stopwatch.ElapsedMilliseconds,
+                Index = request.Index,
+                Name = request.Name,
+                Line = request.Line,
+                Method = request.Method,
+                Url = url,
+                Succeeded = false,
+                Error = ex.Message,
+                ElapsedMs = stopwatch.ElapsedMilliseconds,
             }, false);
         }
     }

@@ -140,7 +140,7 @@ public sealed class LineEndingsTests : IDisposable
         var result = await service.FixAsync("directory", _directory, null, null, ".cs", dryRun: false);
         ResultAssert.Succeeded(result);
 
-        var json = ResultAssert.Json(result);
+        var json = ResultAssert.Wire(result);
         Assert.Equal(1, json.GetProperty("filesChanged").GetInt32());
         Assert.Equal(1, json.GetProperty("alreadyCorrect").GetInt32());
 
@@ -159,12 +159,12 @@ public sealed class LineEndingsTests : IDisposable
 
         var preview = await service.FixAsync("file", path, null, "lf", null, dryRun: true);
         ResultAssert.Succeeded(preview);
-        Assert.Equal(1, ResultAssert.Json(preview).GetProperty("filesChanged").GetInt32());
+        Assert.Equal(1, ResultAssert.Wire(preview).GetProperty("filesChanged").GetInt32());
         Assert.Contains("\r\n", File.ReadAllText(path)); // nothing written
 
         var applied = await service.FixAsync("file", path, null, "lf", null, dryRun: false);
         ResultAssert.Succeeded(applied);
-        Assert.Equal("lf", ResultAssert.Json(applied).GetProperty("style").GetString());
+        Assert.Equal("lf", ResultAssert.Wire(applied).GetProperty("style").GetString());
         Assert.DoesNotContain("\r", File.ReadAllText(path));
     }
 

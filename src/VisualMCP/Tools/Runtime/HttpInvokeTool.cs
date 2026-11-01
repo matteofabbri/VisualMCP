@@ -12,7 +12,7 @@ public static class HttpInvokeTool
         "content-type and elapsed time. Use this to call REST APIs of running applications — no browser or " +
         "terminal needed. Supports all HTTP methods, custom request headers, and JSON/text bodies. " +
         "Self-signed certificates on localhost are accepted automatically.")]
-    public static Task<object> HttpInvoke(
+    public static Task<HttpInvokeResult> HttpInvoke(
         IHttpInvokeService svc,
         [Description("HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS.")] string method,
         [Description("Full URL, e.g. https://localhost:5001/api/products/42.")] string url,

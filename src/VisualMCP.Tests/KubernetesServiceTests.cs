@@ -179,7 +179,7 @@ public sealed class KubernetesServiceTests
         Assert.Contains("Unknown action", ResultAssert.Error(
             await _service.HelmAsync("upgrade", "api", null, null, null, null, 30)));
 
-        var result = ResultAssert.Json(await _service.HelmAsync("list", null, null, null, null, null, 30));
+        var result = ResultAssert.Wire(await _service.HelmAsync("list", null, null, null, null, null, 30));
         // helm is optional: either it answers, or the call reports that it is missing.
         Assert.True(result.TryGetProperty("available", out _) || result.TryGetProperty("succeeded", out _));
     }
@@ -188,7 +188,7 @@ public sealed class KubernetesServiceTests
     public void HelmLintOutputIsSummarizedBySeverity()
     {
         // The shape helm lint prints: bracketed severities, then a summary line.
-        var summary = ResultAssert.Json(KubernetesService.SummarizeLintOutput("""
+        var summary = ResultAssert.Wire(KubernetesService.SummarizeLintOutput("""
             ==> Linting ./chart
             [INFO] Chart.yaml: icon is recommended
             [WARNING] templates/deployment.yaml: object name does not conform to Kubernetes naming requirements
@@ -204,7 +204,7 @@ public sealed class KubernetesServiceTests
             finding => finding.GetProperty("severity").GetString() == "error" &&
                        finding.GetProperty("message").GetString()!.Contains("ports[0]"));
 
-        var clean = ResultAssert.Json(KubernetesService.SummarizeLintOutput("1 chart(s) linted, 0 chart(s) failed"));
+        var clean = ResultAssert.Wire(KubernetesService.SummarizeLintOutput("1 chart(s) linted, 0 chart(s) failed"));
         Assert.Empty(clean.GetProperty("findings").EnumerateArray());
         Assert.Contains("0 chart(s) failed", clean.GetProperty("summary").GetString());
     }
@@ -245,7 +245,7 @@ public sealed class KubernetesServiceTests
     [Fact]
     public void ACompleteDeploymentProducesNoError()
     {
-        var result = ResultAssert.Json(KubernetesManifestValidator.Validate(ValidDeployment, "deployment.yaml"));
+        var result = ResultAssert.Wire(KubernetesManifestValidator.Validate(ValidDeployment, "deployment.yaml"));
 
         Assert.Equal(1, result.GetProperty("documentCount").GetInt32());
         Assert.Equal(0, result.GetProperty("counts").GetProperty("error").GetInt32());
@@ -253,8 +253,8 @@ public sealed class KubernetesServiceTests
             finding => finding.GetProperty("severity").GetString() == "error");
 
         var document = Assert.Single(result.GetProperty("documents").EnumerateArray());
-        Assert.Equal("Deployment", document.GetProperty("Kind").GetString());
-        Assert.Equal("api", document.GetProperty("Name").GetString());
+        Assert.Equal("Deployment", document.GetProperty("kind").GetString());
+        Assert.Equal("api", document.GetProperty("name").GetString());
     }
 
     [Fact]
@@ -276,10 +276,10 @@ public sealed class KubernetesServiceTests
                     image: api:1.0
             """, "no-selector.yaml");
 
-        Assert.Contains(ResultAssert.Json(noSelector).GetProperty("findings").EnumerateArray(),
-            finding => finding.GetProperty("RuleId").GetString() == "K8S008");
+        Assert.Contains(ResultAssert.Wire(noSelector).GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("ruleId").GetString() == "K8S008");
 
-        var mismatch = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+        var mismatch = ResultAssert.Wire(KubernetesManifestValidator.Validate("""
             apiVersion: apps/v1
             kind: Deployment
             metadata:
@@ -300,14 +300,14 @@ public sealed class KubernetesServiceTests
             """, "mismatch.yaml"));
 
         var finding = Assert.Single(mismatch.GetProperty("findings").EnumerateArray(),
-            candidate => candidate.GetProperty("RuleId").GetString() == "K8S009");
-        Assert.Contains("tier", finding.GetProperty("Message").GetString());
+            candidate => candidate.GetProperty("ruleId").GetString() == "K8S009");
+        Assert.Contains("tier", finding.GetProperty("message").GetString());
     }
 
     [Fact]
     public void AContainerWithoutAnImageAndAnUnpinnedImageAreDifferentFindings()
     {
-        var missing = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+        var missing = ResultAssert.Wire(KubernetesManifestValidator.Validate("""
             apiVersion: v1
             kind: Pod
             metadata:
@@ -318,9 +318,9 @@ public sealed class KubernetesServiceTests
             """, "pod.yaml"));
 
         Assert.Contains(missing.GetProperty("findings").EnumerateArray(),
-            finding => finding.GetProperty("RuleId").GetString() == "K8S006");
+            finding => finding.GetProperty("ruleId").GetString() == "K8S006");
 
-        var unpinned = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+        var unpinned = ResultAssert.Wire(KubernetesManifestValidator.Validate("""
             apiVersion: v1
             kind: Pod
             metadata:
@@ -332,13 +332,13 @@ public sealed class KubernetesServiceTests
             """, "pod.yaml"));
 
         Assert.Contains(unpinned.GetProperty("findings").EnumerateArray(),
-            finding => finding.GetProperty("RuleId").GetString() == "K8S016");
+            finding => finding.GetProperty("ruleId").GetString() == "K8S016");
     }
 
     [Fact]
     public void IdentityAndDuplicatesAreReportedPerDocument()
     {
-        var result = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+        var result = ResultAssert.Wire(KubernetesManifestValidator.Validate("""
             apiVersion: v1
             kind: ConfigMap
             metadata:
@@ -369,7 +369,7 @@ public sealed class KubernetesServiceTests
         Assert.Equal(4, result.GetProperty("documentCount").GetInt32());
 
         var ids = result.GetProperty("findings").EnumerateArray()
-            .Select(finding => finding.GetProperty("RuleId").GetString())
+            .Select(finding => finding.GetProperty("ruleId").GetString())
             .ToList();
 
         Assert.Contains("K8S018", ids); // 'Settings' is not a DNS label
@@ -380,7 +380,7 @@ public sealed class KubernetesServiceTests
     [Fact]
     public void AServiceWithNoPortsAndAClusterScopedKindWithANamespaceAreReported()
     {
-        var service = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+        var service = ResultAssert.Wire(KubernetesManifestValidator.Validate("""
             apiVersion: v1
             kind: Service
             metadata:
@@ -391,9 +391,9 @@ public sealed class KubernetesServiceTests
             """, "service.yaml"));
 
         Assert.Contains(service.GetProperty("findings").EnumerateArray(),
-            finding => finding.GetProperty("RuleId").GetString() == "K8S010");
+            finding => finding.GetProperty("ruleId").GetString() == "K8S010");
 
-        var namespaceKind = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+        var namespaceKind = ResultAssert.Wire(KubernetesManifestValidator.Validate("""
             apiVersion: v1
             kind: Namespace
             metadata:
@@ -402,13 +402,13 @@ public sealed class KubernetesServiceTests
             """, "namespace.yaml"));
 
         Assert.Contains(namespaceKind.GetProperty("findings").EnumerateArray(),
-            finding => finding.GetProperty("RuleId").GetString() == "K8S019");
+            finding => finding.GetProperty("ruleId").GetString() == "K8S019");
     }
 
     [Fact]
     public async Task ValidateReadsContentAFileAndAFolder()
     {
-        var fromContent = ResultAssert.Json(await _service.ValidateAsync(null, ValidDeployment));
+        var fromContent = ResultAssert.Wire(await _service.ValidateAsync(null, ValidDeployment));
         Assert.Equal(1, fromContent.GetProperty("documentCount").GetInt32());
 
         var folder = Path.Combine(Path.GetTempPath(), "vmcp-k8s-validate-" + Guid.NewGuid().ToString("N"));
@@ -416,10 +416,10 @@ public sealed class KubernetesServiceTests
         try
         {
             File.WriteAllText(Path.Combine(folder, "deployment.yaml"), ValidDeployment);
-            var fromFile = ResultAssert.Json(await _service.ValidateAsync(Path.Combine(folder, "deployment.yaml"), null));
+            var fromFile = ResultAssert.Wire(await _service.ValidateAsync(Path.Combine(folder, "deployment.yaml"), null));
             Assert.Equal(1, fromFile.GetProperty("documentCount").GetInt32());
 
-            var fromFolder = ResultAssert.Json(await _service.ValidateAsync(folder, null));
+            var fromFolder = ResultAssert.Wire(await _service.ValidateAsync(folder, null));
             Assert.Single(fromFolder.GetProperty("files").EnumerateArray());
             Assert.Equal(1, fromFolder.GetProperty("results").GetArrayLength());
         }
@@ -436,7 +436,7 @@ public sealed class KubernetesServiceTests
     [Fact]
     public async Task ValidateWithServerKeepsTheOfflineAnswerAndReportsTheDryRun()
     {
-        var result = ResultAssert.Json(await _service.ValidateAsync(null, ValidDeployment, server: true));
+        var result = ResultAssert.Wire(await _service.ValidateAsync(null, ValidDeployment, server: true));
 
         Assert.True(result.TryGetProperty("offline", out var offline));
         Assert.Equal(1, offline.GetProperty("documentCount").GetInt32());
@@ -478,7 +478,7 @@ public sealed class KubernetesServiceTests
         Assert.Contains("No port-forward session", ResultAssert.Error(
             await _service.PortForwardAsync("status", "pf-nope", null, null, null, 5)));
 
-        var list = ResultAssert.Json(await _service.PortForwardAsync("list", null, null, null, null, 5));
+        var list = ResultAssert.Wire(await _service.PortForwardAsync("list", null, null, null, null, 5));
         Assert.Equal(0, list.GetProperty("sessions").GetArrayLength());
     }
 }

@@ -4,7 +4,7 @@ namespace Snitch.Web;
 
 public interface IDownloadFileService
 {
-    Task<object> RunAsync(string url, string? outputPath, string? userAgent, int timeoutSeconds, int maxPreviewChars);
+    Task<DownloadFileResult> RunAsync(string url, string? outputPath, string? userAgent, int timeoutSeconds, int maxPreviewChars);
 }
 
 public sealed class DownloadFileService : IDownloadFileService
@@ -12,12 +12,12 @@ public sealed class DownloadFileService : IDownloadFileService
     private readonly SnitchOptions _options;
     public DownloadFileService(SnitchOptions options) => _options = options;
 
-    public async Task<object> RunAsync(string url, string? outputPath, string? userAgent, int timeoutSeconds, int maxPreviewChars)
+    public async Task<DownloadFileResult> RunAsync(string url, string? outputPath, string? userAgent, int timeoutSeconds, int maxPreviewChars)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return new { error = $"Invalid URL: {url}" };
+            return new DownloadFileResult { Error = $"Invalid URL: {url}" };
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-            return new { error = $"Only http/https URLs are supported (got '{uri.Scheme}')." };
+            return new DownloadFileResult { Error = $"Only http/https URLs are supported (got '{uri.Scheme}')." };
 
         if (timeoutSeconds < 1) timeoutSeconds = 1;
         if (timeoutSeconds > 600) timeoutSeconds = 600;
@@ -36,7 +36,14 @@ public sealed class DownloadFileService : IDownloadFileService
             var contentType = response.Content.Headers.ContentType?.ToString();
 
             if (!response.IsSuccessStatusCode)
-                return new { url, statusCode = (int)response.StatusCode, status = response.ReasonPhrase, contentType, downloaded = false };
+                return new DownloadFileResult
+                {
+                    Url = url,
+                    StatusCode = (int)response.StatusCode,
+                    Status = response.ReasonPhrase,
+                    ContentType = contentType,
+                    Downloaded = false,
+                };
 
             long bytes;
             string? savedTo = null;
@@ -67,26 +74,26 @@ public sealed class DownloadFileService : IDownloadFileService
                 }
             }
 
-            return new
+            return new DownloadFileResult
             {
-                url,
-                finalUrl = response.RequestMessage?.RequestUri?.ToString(),
-                statusCode = (int)response.StatusCode,
-                contentType,
-                downloaded = true,
-                bytes,
-                sizeMB = Math.Round(bytes / 1024d / 1024d, 3),
-                savedTo,
-                preview,
+                Url = url,
+                FinalUrl = response.RequestMessage?.RequestUri?.ToString(),
+                StatusCode = (int)response.StatusCode,
+                ContentType = contentType,
+                Downloaded = true,
+                Bytes = bytes,
+                SizeMB = Math.Round(bytes / 1024d / 1024d, 3),
+                SavedTo = savedTo,
+                Preview = preview,
             };
         }
         catch (TaskCanceledException)
         {
-            return new { url, error = $"Download timed out after {timeoutSeconds}s." };
+            return new DownloadFileResult { Url = url, Error = $"Download timed out after {timeoutSeconds}s." };
         }
         catch (Exception ex)
         {
-            return new { url, error = $"Download failed: {ex.Message}" };
+            return new DownloadFileResult { Url = url, Error = $"Download failed: {ex.Message}" };
         }
     }
 

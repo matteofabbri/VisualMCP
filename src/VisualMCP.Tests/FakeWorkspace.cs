@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
+using ModelContextProtocol;
 using Snitch.Workspace;
 
 namespace VisualMCP.Tests;
@@ -239,13 +240,18 @@ internal sealed class FakeWorkspace : IRoslynWorkspace
     }
 }
 
-/// <summary>Result assertions shared by the refactoring tests.</summary>
+/// <summary>Result assertions shared by the service tests.</summary>
+/// <remarks>
+/// <see cref="Json"/> keeps the default serializer, so a test written against an anonymous object's
+/// own member names still reads the shape it always did. <see cref="Wire"/> is the serializer the MCP
+/// server uses: a typed result is asserted there, on the members the client actually receives.
+/// </remarks>
 internal static class ResultAssert
 {
     /// <summary>Fails with the service's own error text when the call reported one.</summary>
     public static void Succeeded(object result)
     {
-        var json = JsonSerializer.SerializeToElement(result);
+        var json = JsonSerializer.SerializeToElement(result, McpJsonUtilities.DefaultOptions);
         if (json.TryGetProperty("error", out var error))
             throw new Xunit.Sdk.XunitException(
                 "service returned an error: " + error.GetString() + Environment.NewLine + json.GetRawText());
@@ -254,13 +260,17 @@ internal static class ResultAssert
     /// <summary>The error text of a call that was expected to be refused.</summary>
     public static string Error(object result)
     {
-        var json = JsonSerializer.SerializeToElement(result);
+        var json = JsonSerializer.SerializeToElement(result, McpJsonUtilities.DefaultOptions);
         if (!json.TryGetProperty("error", out var error) || error.GetString() is not { } text)
             throw new Xunit.Sdk.XunitException("expected a refusal, got: " + json.GetRawText());
 
         return text;
     }
 
-    /// <summary>The result as JSON, for assertions on individual fields.</summary>
+    /// <summary>The result as JSON, through the default serializer (an anonymous object's own names).</summary>
     public static JsonElement Json(object result) => JsonSerializer.SerializeToElement(result);
+
+    /// <summary>The result as the MCP client receives it: camelCase, with a null member omitted.</summary>
+    public static JsonElement Wire(object result) =>
+        JsonSerializer.SerializeToElement(result, McpJsonUtilities.DefaultOptions);
 }

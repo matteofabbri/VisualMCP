@@ -13,14 +13,14 @@ namespace Snitch.Node;
 /// </summary>
 public interface INodeService
 {
-    Task<object> InfoAsync(string? directory);
-    Task<object> InstallAsync(string? directory, string[]? packages, bool dev, bool remove, bool frozenLockfile,
+    Task<NodeInfoResult> InfoAsync(string? directory);
+    Task<NodeInstallResult> InstallAsync(string? directory, string[]? packages, bool dev, bool remove, bool frozenLockfile,
         int timeoutSeconds);
-    Task<object> RunScriptAsync(string script, string? directory, string[]? args, int timeoutSeconds);
-    Task<object> TypecheckAsync(string? directory, string? project, bool emit, int timeoutSeconds);
-    Task<object> LintAsync(string? directory, string? pattern, bool fix, int timeoutSeconds);
-    Task<object> OutdatedAsync(string? directory, int timeoutSeconds);
-    Task<object> AuditAsync(string? directory, int timeoutSeconds);
+    Task<NodeScriptResult> RunScriptAsync(string script, string? directory, string[]? args, int timeoutSeconds);
+    Task<NodeTypecheckResult> TypecheckAsync(string? directory, string? project, bool emit, int timeoutSeconds);
+    Task<NodeLintResult> LintAsync(string? directory, string? pattern, bool fix, int timeoutSeconds);
+    Task<NodeOutdatedResult> OutdatedAsync(string? directory, int timeoutSeconds);
+    Task<NodeAuditResult> AuditAsync(string? directory, int timeoutSeconds);
 }
 
 /// <summary>One diagnostic line of <c>tsc --pretty false</c>.</summary>
@@ -40,14 +40,14 @@ public sealed class NodeService : INodeService
         RegexOptions.Compiled);
 
     // ── info ─────────────────────────────────────────────────────────────────
-    public async Task<object> InfoAsync(string? directory)
+    public async Task<NodeInfoResult> InfoAsync(string? directory)
     {
         var project = FindProjectDirectory(directory);
         if (project is null)
-            return new
+            return new NodeInfoResult
             {
-                error = "No package.json was found in this directory or above it.",
-                directory = directory ?? Directory.GetCurrentDirectory(),
+                Error = "No package.json was found in this directory or above it.",
+                Directory = directory ?? Directory.GetCurrentDirectory(),
             };
 
         var package = await ReadPackageJsonAsync(project);
@@ -55,39 +55,39 @@ public sealed class NodeService : INodeService
         var managerVersion = await ExternalTool.VersionAsync(manager, "--version", project);
 
         var bin = Path.Combine(project, "node_modules", ".bin");
-        return new
+        return new NodeInfoResult
         {
-            projectDirectory = project,
-            packageJson = Path.Combine(project, "package.json"),
-            name = package?.Name,
-            version = package?.Version,
-            packageManager = manager,
-            declaredPackageManager = package?.PackageManager,
-            packageManagerVersion = managerVersion,
-            lockfile = package?.Lockfile,
-            scripts = package?.Scripts,
-            dependencyCount = package?.DependencyCount ?? 0,
-            devDependencyCount = package?.DevDependencyCount ?? 0,
-            nodeVersion = await ExternalTool.VersionAsync("node", "--version", project),
-            typescriptInstalled = ExternalTool.Exists("tsc", project, [bin]),
-            eslintInstalled = ExternalTool.Exists("eslint", project, [bin]),
-            nodeModulesPresent = Directory.Exists(Path.Combine(project, "node_modules")),
-            hint = package?.Scripts.Count > 0
+            ProjectDirectory = project,
+            PackageJson = Path.Combine(project, "package.json"),
+            Name = package?.Name,
+            Version = package?.Version,
+            PackageManager = manager,
+            DeclaredPackageManager = package?.PackageManager,
+            PackageManagerVersion = managerVersion,
+            Lockfile = package?.Lockfile,
+            Scripts = package?.Scripts,
+            DependencyCount = package?.DependencyCount ?? 0,
+            DevDependencyCount = package?.DevDependencyCount ?? 0,
+            NodeVersion = await ExternalTool.VersionAsync("node", "--version", project),
+            TypescriptInstalled = ExternalTool.Exists("tsc", project, [bin]),
+            EslintInstalled = ExternalTool.Exists("eslint", project, [bin]),
+            NodeModulesPresent = Directory.Exists(Path.Combine(project, "node_modules")),
+            Hint = package?.Scripts.Count > 0
                 ? "Run one with node_script; typecheck with node_typecheck; lint with node_lint."
                 : "No scripts in package.json; node_install installs dependencies.",
         };
     }
 
     // ── install ──────────────────────────────────────────────────────────────
-    public async Task<object> InstallAsync(string? directory, string[]? packages, bool dev, bool remove,
+    public async Task<NodeInstallResult> InstallAsync(string? directory, string[]? packages, bool dev, bool remove,
         bool frozenLockfile, int timeoutSeconds)
     {
         var project = FindProjectDirectory(directory);
-        if (project is null) return new { error = "No package.json was found in this directory or above it." };
+        if (project is null) return new NodeInstallResult { Error = "No package.json was found in this directory or above it." };
 
         foreach (var package in packages ?? [])
             if (!IsSafePackage(package))
-                return new { error = $"'{package}' is not a package name (or name@version)." };
+                return new NodeInstallResult { Error = $"'{package}' is not a package name (or name@version)." };
 
         var manager = DetectPackageManager(project);
         var names = (packages ?? []).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()).ToList();
@@ -95,7 +95,7 @@ public sealed class NodeService : INodeService
         string args;
         if (remove)
         {
-            if (names.Count == 0) return new { error = "remove=true needs at least one package name." };
+            if (names.Count == 0) return new NodeInstallResult { Error = "remove=true needs at least one package name." };
             args = manager == "yarn" ? $"remove {string.Join(' ', names)}" : $"uninstall {string.Join(' ', names)}";
         }
         else if (names.Count == 0)
@@ -114,81 +114,81 @@ public sealed class NodeService : INodeService
         }
 
         var run = await RunManagerAsync(manager, args, project, Math.Clamp(timeoutSeconds, 10, 3600));
-        return new
+        return new NodeInstallResult
         {
-            projectDirectory = project,
-            packageManager = manager,
-            action = remove ? "remove" : names.Count == 0 ? "install" : "add",
-            packages = names,
-            dev,
-            frozenLockfile,
-            command = $"{manager} {args}",
-            succeeded = run.Succeeded,
-            durationMs = (long)run.Elapsed.TotalMilliseconds,
-            output = ProcessRunner.Truncate(run.Text, 12_000),
-            error = run.Succeeded ? null : FirstNonEmpty(run.Stderr, run.Stdout) ?? $"{manager} {args} failed (exit {run.ExitCode}).",
+            ProjectDirectory = project,
+            PackageManager = manager,
+            Action = remove ? "remove" : names.Count == 0 ? "install" : "add",
+            Packages = names,
+            Dev = dev,
+            FrozenLockfile = frozenLockfile,
+            Command = $"{manager} {args}",
+            Succeeded = run.Succeeded,
+            DurationMs = (long)run.Elapsed.TotalMilliseconds,
+            Output = ProcessRunner.Truncate(run.Text, 12_000),
+            Error = run.Succeeded ? null : FirstNonEmpty(run.Stderr, run.Stdout) ?? $"{manager} {args} failed (exit {run.ExitCode}).",
         };
     }
 
     // ── run a script ─────────────────────────────────────────────────────────
-    public async Task<object> RunScriptAsync(string script, string? directory, string[]? args, int timeoutSeconds)
+    public async Task<NodeScriptResult> RunScriptAsync(string script, string? directory, string[]? args, int timeoutSeconds)
     {
         if (!IsSafeScript(script))
-            return new { error = "A script name is required (letters, digits, '-', '_', ':', '.')." };
+            return new NodeScriptResult { Error = "A script name is required (letters, digits, '-', '_', ':', '.')." };
 
         var project = FindProjectDirectory(directory);
-        if (project is null) return new { error = "No package.json was found in this directory or above it." };
+        if (project is null) return new NodeScriptResult { Error = "No package.json was found in this directory or above it." };
 
         var package = await ReadPackageJsonAsync(project);
         if (package is not null && !package.Scripts.ContainsKey(script))
-            return new
+            return new NodeScriptResult
             {
-                error = $"package.json has no script named '{script}'.",
-                scripts = package.Scripts.Keys.OrderBy(name => name).ToList(),
+                Error = $"package.json has no script named '{script}'.",
+                Scripts = package.Scripts.Keys.OrderBy(name => name).ToList(),
             };
 
         var manager = DetectPackageManager(project, package?.PackageManager);
         var forwarded = (args ?? []).Where(arg => !string.IsNullOrWhiteSpace(arg)).ToList();
         foreach (var argument in forwarded)
             if (argument.Contains('"') || argument.Contains('\n'))
-                return new { error = $"'{argument}' cannot be forwarded as an argument." };
+                return new NodeScriptResult { Error = $"'{argument}' cannot be forwarded as an argument." };
 
         var command = $"run {script}";
         if (forwarded.Count > 0) command += " -- " + string.Join(' ', forwarded);
 
         var run = await RunManagerAsync(manager, command, project, Math.Clamp(timeoutSeconds, 10, 1800));
-        return new
+        return new NodeScriptResult
         {
-            projectDirectory = project,
-            packageManager = manager,
-            script,
-            arguments = forwarded,
-            command = $"{manager} {command}",
-            succeeded = run.Succeeded,
-            exitCode = run.TimedOut ? (int?)null : run.ExitCode,
-            timedOut = run.TimedOut,
-            durationMs = (long)run.Elapsed.TotalMilliseconds,
-            stdout = ProcessRunner.Truncate(run.Stdout, 24_000),
-            stderr = ProcessRunner.Truncate(run.Stderr, 12_000),
-            error = run.TimedOut ? $"The script timed out after {timeoutSeconds}s."
+            ProjectDirectory = project,
+            PackageManager = manager,
+            Script = script,
+            Arguments = forwarded,
+            Command = $"{manager} {command}",
+            Succeeded = run.Succeeded,
+            ExitCode = run.TimedOut ? (int?)null : run.ExitCode,
+            TimedOut = run.TimedOut,
+            DurationMs = (long)run.Elapsed.TotalMilliseconds,
+            Stdout = ProcessRunner.Truncate(run.Stdout, 24_000),
+            Stderr = ProcessRunner.Truncate(run.Stderr, 12_000),
+            Error = run.TimedOut ? $"The script timed out after {timeoutSeconds}s."
                 : run.Succeeded ? null
                 : FirstNonEmpty(run.Stderr, run.Stdout) ?? $"The script exited with {run.ExitCode}.",
         };
     }
 
     // ── typecheck (tsc) ──────────────────────────────────────────────────────
-    public async Task<object> TypecheckAsync(string? directory, string? project, bool emit, int timeoutSeconds)
+    public async Task<NodeTypecheckResult> TypecheckAsync(string? directory, string? project, bool emit, int timeoutSeconds)
     {
         var projectDirectory = FindProjectDirectory(directory);
-        if (projectDirectory is null) return new { error = "No package.json was found in this directory or above it." };
+        if (projectDirectory is null) return new NodeTypecheckResult { Error = "No package.json was found in this directory or above it." };
 
         var bin = Path.Combine(projectDirectory, "node_modules", ".bin");
         var tsc = ExternalTool.Resolve("tsc", projectDirectory, [bin]);
         if (tsc is null)
-            return new
+            return new NodeTypecheckResult
             {
-                error = "TypeScript is not installed in this project (node_modules/.bin/tsc is missing).",
-                suggestedCommand = $"{DetectPackageManager(projectDirectory)} install -D typescript",
+                Error = "TypeScript is not installed in this project (node_modules/.bin/tsc is missing).",
+                SuggestedCommand = $"{DetectPackageManager(projectDirectory)} install -D typescript",
             };
 
         var args = "--pretty false";
@@ -198,37 +198,37 @@ public sealed class NodeService : INodeService
         var run = await ExternalTool.RunAsync(tsc, args, projectDirectory, Math.Clamp(timeoutSeconds, 10, 900));
         var diagnostics = ParseTscOutput(run.stdout + "\n" + run.stderr);
 
-        return new
+        return new NodeTypecheckResult
         {
-            projectDirectory,
-            project,
-            command = $"tsc {args}",
-            succeeded = run.exitCode == 0 && !run.timedOut,
-            timedOut = run.timedOut,
-            durationMs = (long)run.elapsed.TotalMilliseconds,
-            errorCount = diagnostics.Count(diagnostic => diagnostic.Severity == "error"),
-            warningCount = diagnostics.Count(diagnostic => diagnostic.Severity == "warning"),
-            diagnostics = diagnostics.Take(500).ToList(),
-            truncated = diagnostics.Count > 500,
-            rawOutput = diagnostics.Count == 0 && run.exitCode != 0
+            ProjectDirectory = projectDirectory,
+            Project = project,
+            Command = $"tsc {args}",
+            Succeeded = run.exitCode == 0 && !run.timedOut,
+            TimedOut = run.timedOut,
+            DurationMs = (long)run.elapsed.TotalMilliseconds,
+            ErrorCount = diagnostics.Count(diagnostic => diagnostic.Severity == "error"),
+            WarningCount = diagnostics.Count(diagnostic => diagnostic.Severity == "warning"),
+            Diagnostics = diagnostics.Take(500).ToList(),
+            Truncated = diagnostics.Count > 500,
+            RawOutput = diagnostics.Count == 0 && run.exitCode != 0
                 ? ProcessRunner.Truncate(run.stdout + "\n" + run.stderr, 8_000)
                 : null,
         };
     }
 
     // ── lint (eslint) ────────────────────────────────────────────────────────
-    public async Task<object> LintAsync(string? directory, string? pattern, bool fix, int timeoutSeconds)
+    public async Task<NodeLintResult> LintAsync(string? directory, string? pattern, bool fix, int timeoutSeconds)
     {
         var projectDirectory = FindProjectDirectory(directory);
-        if (projectDirectory is null) return new { error = "No package.json was found in this directory or above it." };
+        if (projectDirectory is null) return new NodeLintResult { Error = "No package.json was found in this directory or above it." };
 
         var bin = Path.Combine(projectDirectory, "node_modules", ".bin");
         var eslint = ExternalTool.Resolve("eslint", projectDirectory, [bin]);
         if (eslint is null)
-            return new
+            return new NodeLintResult
             {
-                error = "ESLint is not installed in this project (node_modules/.bin/eslint is missing).",
-                suggestedCommand = $"{DetectPackageManager(projectDirectory)} install -D eslint",
+                Error = "ESLint is not installed in this project (node_modules/.bin/eslint is missing).",
+                SuggestedCommand = $"{DetectPackageManager(projectDirectory)} install -D eslint",
             };
 
         var args = "--format json";
@@ -245,70 +245,70 @@ public sealed class NodeService : INodeService
             .Take(15)
             .ToDictionary(group => group.Key, group => group.Count());
 
-        return new
+        return new NodeLintResult
         {
-            projectDirectory,
-            pattern = pattern ?? ".",
-            fix,
-            command = $"eslint {args}",
-            succeeded = run.exitCode == 0 && !run.timedOut,
-            timedOut = run.timedOut,
-            errorCount = findings.Count(finding => finding.Severity == "error"),
-            warningCount = findings.Count(finding => finding.Severity == "warning"),
-            fileCount = findings.Select(finding => finding.File).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-            topRules = byRule,
-            findings = findings.Take(500).ToList(),
-            truncated = findings.Count > 500,
-            rawOutput = findings.Count == 0 && run.exitCode != 0
+            ProjectDirectory = projectDirectory,
+            Pattern = pattern ?? ".",
+            Fix = fix,
+            Command = $"eslint {args}",
+            Succeeded = run.exitCode == 0 && !run.timedOut,
+            TimedOut = run.timedOut,
+            ErrorCount = findings.Count(finding => finding.Severity == "error"),
+            WarningCount = findings.Count(finding => finding.Severity == "warning"),
+            FileCount = findings.Select(finding => finding.File).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            TopRules = byRule,
+            Findings = findings.Take(500).ToList(),
+            Truncated = findings.Count > 500,
+            RawOutput = findings.Count == 0 && run.exitCode != 0
                 ? ProcessRunner.Truncate(run.stdout + "\n" + run.stderr, 8_000)
                 : null,
         };
     }
 
     // ── outdated / audit ─────────────────────────────────────────────────────
-    public async Task<object> OutdatedAsync(string? directory, int timeoutSeconds)
+    public async Task<NodeOutdatedResult> OutdatedAsync(string? directory, int timeoutSeconds)
     {
         var projectDirectory = FindProjectDirectory(directory);
-        if (projectDirectory is null) return new { error = "No package.json was found in this directory or above it." };
+        if (projectDirectory is null) return new NodeOutdatedResult { Error = "No package.json was found in this directory or above it." };
 
         var manager = DetectPackageManager(projectDirectory);
         var run = await RunManagerAsync(manager, "outdated --json", projectDirectory, Math.Clamp(timeoutSeconds, 10, 600));
         var packages = ParseOutdatedJson(run.Stdout, manager);
 
-        return new
+        return new NodeOutdatedResult
         {
-            projectDirectory,
-            packageManager = manager,
-            command = $"{manager} outdated --json",
-            count = packages.Count,
-            upToDate = packages.Count == 0,
-            packages = packages.Take(300).ToList(),
-            truncated = packages.Count > 300,
-            error = packages.Count == 0 && !run.Succeeded && run.Stdout.Trim().Length == 0
+            ProjectDirectory = projectDirectory,
+            PackageManager = manager,
+            Command = $"{manager} outdated --json",
+            Count = packages.Count,
+            UpToDate = packages.Count == 0,
+            Packages = packages.Take(300).ToList(),
+            Truncated = packages.Count > 300,
+            Error = packages.Count == 0 && !run.Succeeded && run.Stdout.Trim().Length == 0
                 ? FirstNonEmpty(run.Stderr, run.Stdout)
                 : null,
         };
     }
 
-    public async Task<object> AuditAsync(string? directory, int timeoutSeconds)
+    public async Task<NodeAuditResult> AuditAsync(string? directory, int timeoutSeconds)
     {
         var projectDirectory = FindProjectDirectory(directory);
-        if (projectDirectory is null) return new { error = "No package.json was found in this directory or above it." };
+        if (projectDirectory is null) return new NodeAuditResult { Error = "No package.json was found in this directory or above it." };
 
         var manager = DetectPackageManager(projectDirectory);
         var run = await RunManagerAsync(manager, "audit --json", projectDirectory, Math.Clamp(timeoutSeconds, 10, 600));
         var audit = ParseAuditJson(run.Stdout, manager);
 
-        return new
+        return new NodeAuditResult
         {
-            projectDirectory,
-            packageManager = manager,
-            command = $"{manager} audit --json",
-            counts = audit.Counts,
-            total = audit.Counts.Total,
-            vulnerabilities = audit.Packages.Take(200).ToList(),
-            truncated = audit.Packages.Count > 200,
-            error = audit.Packages.Count == 0 && !run.Succeeded && run.Stdout.Trim().Length == 0
+            ProjectDirectory = projectDirectory,
+            PackageManager = manager,
+            Command = $"{manager} audit --json",
+            Counts = audit.Counts,
+            Total = audit.Counts.Total,
+            Vulnerabilities = audit.Packages.Take(200).ToList(),
+            Truncated = audit.Packages.Count > 200,
+            Error = audit.Packages.Count == 0 && !run.Succeeded && run.Stdout.Trim().Length == 0
                 ? FirstNonEmpty(run.Stderr, run.Stdout)
                 : null,
         };

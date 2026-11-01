@@ -193,7 +193,7 @@ public sealed class NodeServiceTests
             }
             """);
 
-        var result = ResultAssert.Json(await _service.InfoAsync(project.Root));
+        var result = ResultAssert.Wire(await _service.InfoAsync(project.Root));
 
         Assert.Equal("web", result.GetProperty("name").GetString());
         Assert.Equal("pnpm", result.GetProperty("packageManager").GetString());
@@ -212,7 +212,7 @@ public sealed class NodeServiceTests
         var error = ResultAssert.Error(await _service.RunScriptAsync("deploy", project.Root, null, 30));
 
         Assert.Contains("no script named 'deploy'", error);
-        var result = ResultAssert.Json(await _service.RunScriptAsync("deploy", project.Root, null, 30));
+        var result = ResultAssert.Wire(await _service.RunScriptAsync("deploy", project.Root, null, 30));
         Assert.Contains("build", result.GetProperty("scripts").EnumerateArray().Select(item => item.GetString()));
     }
 
@@ -253,7 +253,7 @@ public sealed class NodeServiceTests
             }
             """);
 
-        var result = ResultAssert.Json(await _service.RunScriptAsync("hello", project.Root, null, 120));
+        var result = ResultAssert.Wire(await _service.RunScriptAsync("hello", project.Root, null, 120));
 
         Assert.True(result.GetProperty("succeeded").GetBoolean(), result.GetRawText());
         Assert.Contains("hello from npm", result.GetProperty("stdout").GetString() ?? string.Empty);

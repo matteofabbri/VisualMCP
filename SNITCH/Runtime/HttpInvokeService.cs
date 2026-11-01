@@ -7,7 +7,7 @@ namespace Snitch.Runtime;
 /// <summary>Sends an HTTP request to any URL and returns status, body, content-type and timing.</summary>
 public interface IHttpInvokeService
 {
-    Task<object> HttpInvoke(string method, string url, string? body, string? headersJson, int timeoutSeconds);
+    Task<HttpInvokeResult> HttpInvoke(string method, string url, string? body, string? headersJson, int timeoutSeconds);
 }
 
 public sealed class HttpInvokeService : IHttpInvokeService
@@ -20,7 +20,7 @@ public sealed class HttpInvokeService : IHttpInvokeService
             HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
     }) { Timeout = Timeout.InfiniteTimeSpan };  // per-request CancellationToken controls timeout
 
-    public async Task<object> HttpInvoke(
+    public async Task<HttpInvokeResult> HttpInvoke(
         string method,
         string url,
         string? body = null,
@@ -67,25 +67,25 @@ public sealed class HttpInvokeService : IHttpInvokeService
             var responseBody = await response.Content.ReadAsStringAsync(cts.Token);
             var contentType   = response.Content.Headers.ContentType?.ToString() ?? "unknown";
 
-            return new
+            return new HttpInvokeResult
             {
-                statusCode  = (int)response.StatusCode,
-                statusText  = response.StatusCode.ToString(),
-                contentType,
-                elapsedMs   = sw.ElapsedMilliseconds,
-                body        = Truncate(responseBody),
-                headers     = response.Headers
-                                      .Concat(response.Content.Headers)
-                                      .ToDictionary(h => h.Key, h => string.Join(", ", h.Value)),
+                StatusCode = (int)response.StatusCode,
+                StatusText = response.StatusCode.ToString(),
+                ContentType = contentType,
+                ElapsedMs = sw.ElapsedMilliseconds,
+                Body = Truncate(responseBody),
+                Headers = response.Headers
+                    .Concat(response.Content.Headers)
+                    .ToDictionary(h => h.Key, h => string.Join(", ", h.Value)),
             };
         }
         catch (OperationCanceledException)
         {
-            return new { error = $"Request timed out after {timeoutSeconds}s.", elapsedMs = sw.ElapsedMilliseconds };
+            return new HttpInvokeResult { Error = $"Request timed out after {timeoutSeconds}s.", ElapsedMs = sw.ElapsedMilliseconds };
         }
         catch (Exception ex)
         {
-            return new { error = ex.Message, elapsedMs = sw.ElapsedMilliseconds };
+            return new HttpInvokeResult { Error = ex.Message, ElapsedMs = sw.ElapsedMilliseconds };
         }
     }
 

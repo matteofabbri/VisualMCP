@@ -13,7 +13,7 @@ public static class RunHttpFileTool
         "substitution, ### separators, an optional '# @name' per request, headers and a body — one call for " +
         "a whole request file instead of one http_invoke per request. Variables that stay unresolved are " +
         "listed, and failFast stops at the first non-2xx response.")]
-    public static Task<object> RunHttpFile(
+    public static Task<HttpFileRunResult> RunHttpFile(
         IHttpFileService httpFile,
         [Description("Path of the .http/.rest file (absolute, or relative to the solution).")] string path,
         [Description("Stop at the first failed request (default false: every request is sent).")] bool failFast = false,

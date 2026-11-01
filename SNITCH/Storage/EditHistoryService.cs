@@ -10,7 +10,7 @@ namespace Snitch.Storage;
 /// </summary>
 public interface IEditHistoryService
 {
-    Task<object> RevertAsync(long editId, CancellationToken cancellationToken = default);
+    Task<RevertEditResult> RevertAsync(long editId, CancellationToken cancellationToken = default);
 }
 
 public sealed class EditHistoryService : IEditHistoryService
@@ -24,31 +24,32 @@ public sealed class EditHistoryService : IEditHistoryService
         _store = store;
     }
 
-    public async Task<object> RevertAsync(long editId, CancellationToken cancellationToken = default)
+    public async Task<RevertEditResult> RevertAsync(long editId, CancellationToken cancellationToken = default)
     {
         var edit = _store.Edit(editId);
-        if (edit is null) return new { error = $"No edit #{editId} in the history." };
-        if (!File.Exists(edit.File)) return new { error = $"The file no longer exists: {edit.File}", editId };
+        if (edit is null) return new RevertEditResult { Error = $"No edit #{editId} in the history." };
+        if (!File.Exists(edit.File))
+            return new RevertEditResult { Error = $"The file no longer exists: {edit.File}", EditId = editId };
 
         var previous = _store.EditBeforeText(editId);
         if (previous is null)
-            return new
+            return new RevertEditResult
             {
-                error = "That edit was recorded without its previous text, so it cannot be reverted.",
-                editId,
-                hint = "Only edits written after the history started keeping content are revertible.",
+                Error = "That edit was recorded without its previous text, so it cannot be reverted.",
+                EditId = editId,
+                Hint = "Only edits written after the history started keeping content are revertible.",
             };
 
         var current = await File.ReadAllTextAsync(edit.File, cancellationToken);
 
         // The guard: the file must still be exactly what that edit left behind.
         if (VisualMcpStore.ContentHash(current) != edit.AfterHash)
-            return new
+            return new RevertEditResult
             {
-                error = "The file changed after that edit: reverting would overwrite newer work.",
-                editId,
-                file = edit.File,
-                hint = "Read edit_history for that file to see what happened since.",
+                Error = "The file changed after that edit: reverting would overwrite newer work.",
+                EditId = editId,
+                File = edit.File,
+                Hint = "Read edit_history for that file to see what happened since.",
             };
 
         Platform.FileText.Write(edit.File, previous);
@@ -65,16 +66,16 @@ public sealed class EditHistoryService : IEditHistoryService
         // The revert is itself a write: it goes into the history like any other.
         _store.RecordEdit("revert_edit", edit.File, edit.Rules, current, previous);
 
-        return new
+        return new RevertEditResult
         {
-            reverted = editId,
-            file = edit.File,
-            restoredChars = previous.Length,
-            discardedChars = current.Length,
-            undoneTool = edit.Tool,
-            undoneRules = edit.Rules,
-            appliedAt = edit.AppliedAt.ToString("O"),
-            note = "The file now holds the text it had before that edit; the revert is recorded as a new edit.",
+            Reverted = editId,
+            File = edit.File,
+            RestoredChars = previous.Length,
+            DiscardedChars = current.Length,
+            UndoneTool = edit.Tool,
+            UndoneRules = edit.Rules,
+            AppliedAt = edit.AppliedAt.ToString("O"),
+            Note = "The file now holds the text it had before that edit; the revert is recorded as a new edit.",
         };
     }
 }

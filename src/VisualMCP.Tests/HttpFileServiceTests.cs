@@ -59,7 +59,7 @@ public sealed class HttpFileServiceTests
 
         try
         {
-            var result = ResultAssert.Json(await new HttpFileService().RunAsync(path, failFast: false, timeoutSeconds: 10, maxBodyChars: 2000));
+            var result = ResultAssert.Wire(await new HttpFileService().RunAsync(path, failFast: false, timeoutSeconds: 10, maxBodyChars: 2000));
 
             Assert.True(result.GetProperty("succeeded").GetBoolean());
             Assert.Equal(2, result.GetProperty("requestCount").GetInt32());

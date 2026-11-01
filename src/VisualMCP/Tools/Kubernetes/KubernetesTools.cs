@@ -12,7 +12,7 @@ public static class KubernetesTools
         "the current context and whether a cluster actually answers, plus the helm version when helm is present. " +
         "Use it FIRST when a cluster call fails — it says which half is missing. Use this INSTEAD OF shell " +
         "'kubectl version' / 'kubectl config current-context'. Read-only.")]
-    public static Task<object> KubernetesStatus(
+    public static Task<KubernetesStatusResult> KubernetesStatus(
         IKubernetesService k8s,
         [Description("Timeout in seconds (default 30, max 900).")] int timeoutSeconds = 30)
         => k8s.StatusAsync(timeoutSeconds);
@@ -21,7 +21,7 @@ public static class KubernetesTools
         "The kubeconfig contexts: action=current (the selected context), action=list (all of them, the table " +
         "kubectl prints) or action=use (switch to `name`). Changing context changes which cluster every later call " +
         "talks to. Use this INSTEAD OF shell 'kubectl config ...'.")]
-    public static Task<object> KubernetesContext(
+    public static Task<KubernetesContextResult> KubernetesContext(
         IKubernetesService k8s,
         [Description("current | list | use")] string action = "current",
         [Description("Context name, for action=use.")] string? name = null,
@@ -34,7 +34,7 @@ public static class KubernetesTools
         "summary parsed from 'kubectl get -o json' — name, namespace, phase or N/M ready, restarts, age — which is " +
         "what makes a list readable; pass output=yaml|json|wide|name|jsonpath=… to get the client's own view " +
         "instead. Use this INSTEAD OF shell 'kubectl get'. Read-only.")]
-    public static Task<object> KubernetesGet(
+    public static Task<KubernetesGetResult> KubernetesGet(
         IKubernetesService k8s,
         [Description("Resource kind, e.g. pods, deployments, services, statefulsets, nodes.")] string kind,
         [Description("One resource name; omit to list them all.")] string? name = null,
@@ -49,7 +49,7 @@ public static class KubernetesTools
         "The full 'kubectl describe' text of one resource, or of every resource of a kind: events, conditions, " +
         "containers, volumes, the scheduler's decisions. This is the call that explains WHY a pod is not ready. " +
         "Use this INSTEAD OF shell 'kubectl describe'. Read-only.")]
-    public static Task<object> KubernetesDescribe(
+    public static Task<KubernetesDescribeResult> KubernetesDescribe(
         IKubernetesService k8s,
         [Description("Resource kind, e.g. pod, deployment.")] string kind,
         [Description("Resource name; omit to describe every resource of the kind.")] string? name = null,
@@ -61,7 +61,7 @@ public static class KubernetesTools
     [McpServerTool(Name = "k8s_logs"), Description(
         "A pod's logs (stdout and stderr, tail-limited): --tail, --since and --previous for the container that " +
         "crashed are exposed. Use this INSTEAD OF shell 'kubectl logs'. Read-only.")]
-    public static Task<object> KubernetesLogs(
+    public static Task<KubernetesLogsResult> KubernetesLogs(
         IKubernetesService k8s,
         [Description("Pod name.")] string pod,
         [Description("Container name, when the pod has several.")] string? container = null,
@@ -77,7 +77,7 @@ public static class KubernetesTools
         "this answers what an overlay produces before anything is applied (the rendered YAML and the document " +
         "count). A local directory is checked and made absolute; a git/URL kustomization reference is passed " +
         "through. Use this INSTEAD OF shell 'kubectl kustomize'. Read-only.")]
-    public static Task<object> KubernetesKustomize(
+    public static Task<KubernetesKustomizeResult> KubernetesKustomize(
         IKubernetesService k8s,
         [Description("A kustomization directory on disk, or a kustomize git/URL reference.")] string path,
         [Description("Override the namespace of the rendered resources.")] string? namespaceName = null,
@@ -96,7 +96,7 @@ public static class KubernetesTools
         "resource is reported as having no built-in schema. Pass server=true to ALSO send the same text to the " +
         "configured cluster with kubectl apply --dry-run=server, which is the authority for a CRD's OpenAPI schema " +
         "and an admission webhook; a missing kubectl or an unreachable cluster is reported, not raised. Read-only.")]
-    public static Task<object> KubernetesValidate(
+    public static Task<KubernetesValidateResult> KubernetesValidate(
         IKubernetesService k8s,
         [Description("A manifest on disk, or a folder of .yaml/.yml files.")] string? file = null,
         [Description("The manifest text itself.")] string? content = null,
@@ -109,7 +109,7 @@ public static class KubernetesTools
         "returns the sessionId, the local port and the pid; action=list shows the live sessions, status one of " +
         "them, stop ends it (the process tree is killed). The forward ends when the server does. Use this INSTEAD OF " +
         "shell 'kubectl port-forward'.")]
-    public static Task<object> KubernetesPortForward(
+    public static Task<KubernetesPortForwardResult> KubernetesPortForward(
         IKubernetesService k8s,
         [Description("start | list | status | stop")] string action = "list",
         [Description("The session id from action=start, for status and stop.")] string? sessionId = null,
@@ -128,7 +128,7 @@ public static class KubernetesChangeTools
         "defaults to true and runs the SERVER-side validation ('kubectl apply --dry-run=server'), which catches what " +
         "the API server would reject without changing anything; set dryRun=false AND confirm=true to really apply. " +
         "Use this INSTEAD OF shell 'kubectl apply'.")]
-    public static Task<object> KubernetesApply(
+    public static Task<KubernetesApplyResult> KubernetesApply(
         IKubernetesService k8s,
         [Description("Path of the manifest (yaml/json, or a directory of them).")] string? file = null,
         [Description("The manifest text itself; written to a temporary file and removed afterwards.")] string? content = null,
@@ -141,7 +141,7 @@ public static class KubernetesChangeTools
     [McpServerTool(Name = "k8s_delete"), Description(
         "Delete one Kubernetes resource. Destructive and irreversible, so it refuses unless confirm=true; " +
         "ignoreNotFound makes a re-run idempotent. Use this INSTEAD OF shell 'kubectl delete'.")]
-    public static Task<object> KubernetesDelete(
+    public static Task<KubernetesDeleteResult> KubernetesDelete(
         IKubernetesService k8s,
         [Description("Resource kind, e.g. pod, deployment, job.")] string kind,
         [Description("Resource name.")] string name,
@@ -155,7 +155,7 @@ public static class KubernetesChangeTools
         "The rollout lifecycle of a workload: action=status waits for the deployment to finish rolling, action=restart " +
         "rolls it (a new ReplicaSet), action=undo goes back a revision (optionally `toRevision`). restart and undo " +
         "change the cluster and require confirm=true. Use this INSTEAD OF shell 'kubectl rollout ...'.")]
-    public static Task<object> KubernetesRollout(
+    public static Task<KubernetesRolloutResult> KubernetesRollout(
         IKubernetesService k8s,
         [Description("status | restart | undo")] string action = "status",
         [Description("Workload kind: deployment, statefulset, daemonset.")] string kind = "deployment",
@@ -171,7 +171,7 @@ public static class KubernetesChangeTools
         "get-values, template (render a chart with valuesFile/setValues, which is offline and safe), lint (check a " +
         "chart's templates, values and Chart.yaml with no cluster) or repo-list. Reports that helm is missing instead " +
         "of failing the call. Use this INSTEAD OF shell 'helm ...'.")]
-    public static Task<object> KubernetesHelm(
+    public static Task<KubernetesHelmResult> KubernetesHelm(
         IKubernetesService k8s,
         [Description("list | status | history | get-values | template | lint | repo-list")] string action = "list",
         [Description("Release name (required by status, history, get-values, template).")] string? release = null,
@@ -186,7 +186,7 @@ public static class KubernetesChangeTools
         "Run ONE command inside a pod's container ('kubectl exec': the part after '--'). It changes state inside " +
         "the container, so it refuses unless confirm=true. No shell is involved, so a pipe or a redirection needs " +
         "an explicit '/bin/sh -c \"…\"'. Use this INSTEAD OF shell 'kubectl exec'; for logs use k8s_logs.")]
-    public static Task<object> KubernetesExec(
+    public static Task<KubernetesExecResult> KubernetesExec(
         IKubernetesService k8s,
         [Description("Pod name.")] string pod,
         [Description("The command and its arguments, e.g. 'ls -la /app'.")] string command,

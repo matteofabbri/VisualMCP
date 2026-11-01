@@ -16,7 +16,7 @@ public static class LocalHistoryTool
         "snapshot with otherId. action=restore writes a snapshot back: the text it replaces is snapshotted first " +
         "and the restore is recorded in the edit history, so it is reversible. Build and VCS folders are pruned, and " +
         "files over 1.5 MB are skipped.")]
-    public static Task<object> LocalHistory(
+    public static async Task<object> LocalHistory(
         ILocalHistoryService history,
         [Description("snapshot | history | diff | restore (default: snapshot).")] string action = "snapshot",
         [Description("The file for history, diff and restore (absolute or relative).")] string? path = null,
@@ -29,25 +29,25 @@ public static class LocalHistoryTool
         switch (action.Trim().ToLowerInvariant())
         {
             case "snapshot":
-                return history.SnapshotAsync(cancellationToken);
+                return await history.SnapshotAsync(cancellationToken);
 
             case "history":
                 return string.IsNullOrWhiteSpace(path)
-                    ? Task.FromResult<object>(new { error = "history needs a path." })
-                    : history.HistoryAsync(path, limit);
+                    ? new { error = "history needs a path." }
+                    : await history.HistoryAsync(path, limit);
 
             case "diff":
                 if (string.IsNullOrWhiteSpace(path) || id is null)
-                    return Task.FromResult<object>(new { error = "diff needs path and id." });
-                return history.DiffAsync(path, id.Value, otherId, cancellationToken);
+                    return new { error = "diff needs path and id." };
+                return await history.DiffAsync(path, id.Value, otherId, cancellationToken);
 
             case "restore":
                 if (string.IsNullOrWhiteSpace(path) || id is null)
-                    return Task.FromResult<object>(new { error = "restore needs path and id." });
-                return history.RestoreAsync(path, id.Value, dryRun, cancellationToken);
+                    return new { error = "restore needs path and id." };
+                return await history.RestoreAsync(path, id.Value, dryRun, cancellationToken);
 
             default:
-                return Task.FromResult<object>(new { error = "action must be snapshot, history, diff or restore." });
+                return new { error = "action must be snapshot, history, diff or restore." };
         }
     }
 }

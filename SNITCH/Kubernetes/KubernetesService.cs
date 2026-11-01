@@ -14,31 +14,31 @@ namespace Snitch.Kubernetes;
 public interface IKubernetesService
 {
     /// <summary>Client/server versions, the current context and whether a cluster answers.</summary>
-    Task<object> StatusAsync(int timeoutSeconds);
+    Task<KubernetesStatusResult> StatusAsync(int timeoutSeconds);
 
-    Task<object> ContextAsync(string action, string? name, int timeoutSeconds);
-    Task<object> GetAsync(string kind, string? name, string? namespaceName, bool allNamespaces,
+    Task<KubernetesContextResult> ContextAsync(string action, string? name, int timeoutSeconds);
+    Task<KubernetesGetResult> GetAsync(string kind, string? name, string? namespaceName, bool allNamespaces,
         string? selector, string? output, int timeoutSeconds);
-    Task<object> DescribeAsync(string kind, string? name, string? namespaceName, bool allNamespaces, int timeoutSeconds);
-    Task<object> LogsAsync(string pod, string? container, string? namespaceName, int tail, string? since,
+    Task<KubernetesDescribeResult> DescribeAsync(string kind, string? name, string? namespaceName, bool allNamespaces, int timeoutSeconds);
+    Task<KubernetesLogsResult> LogsAsync(string pod, string? container, string? namespaceName, int tail, string? since,
         bool previous, int timeoutSeconds);
-    Task<object> KustomizeAsync(string path, string? namespaceName, int timeoutSeconds);
-    Task<object> ExecAsync(string pod, string? container, string? namespaceName, string command, bool confirm,
+    Task<KubernetesKustomizeResult> KustomizeAsync(string path, string? namespaceName, int timeoutSeconds);
+    Task<KubernetesExecResult> ExecAsync(string pod, string? container, string? namespaceName, string command, bool confirm,
         int timeoutSeconds);
-    Task<object> ApplyAsync(string? file, string? content, string? namespaceName, bool dryRun, bool confirm,
+    Task<KubernetesApplyResult> ApplyAsync(string? file, string? content, string? namespaceName, bool dryRun, bool confirm,
         int timeoutSeconds);
-    Task<object> DeleteAsync(string kind, string name, string? namespaceName, bool ignoreNotFound, bool confirm,
+    Task<KubernetesDeleteResult> DeleteAsync(string kind, string name, string? namespaceName, bool ignoreNotFound, bool confirm,
         int timeoutSeconds);
-    Task<object> RolloutAsync(string action, string kind, string name, string? namespaceName, int? toRevision,
+    Task<KubernetesRolloutResult> RolloutAsync(string action, string kind, string name, string? namespaceName, int? toRevision,
         bool confirm, int timeoutSeconds);
-    Task<object> HelmAsync(string action, string? release, string? chart, string? namespaceName,
+    Task<KubernetesHelmResult> HelmAsync(string action, string? release, string? chart, string? namespaceName,
         string? valuesFile, string[]? setValues, int timeoutSeconds);
 
     /// <summary>Validation of a manifest: the built-in kinds' required fields, and — with <c>server=true</c> — the cluster's own dry run.</summary>
-    Task<object> ValidateAsync(string? file, string? content, bool server = false);
+    Task<KubernetesValidateResult> ValidateAsync(string? file, string? content, bool server = false);
 
     /// <summary>Port-forward sessions: start, list, status, stop.</summary>
-    Task<object> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
+    Task<KubernetesPortForwardResult> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
         string? namespaceName, int timeoutSeconds);
 }
 
@@ -53,15 +53,15 @@ public sealed class KubernetesService : IKubernetesService
     private static readonly string[] HelmActions = ["list", "status", "history", "get-values", "template", "lint", "repo-list"];
 
     // ── status ───────────────────────────────────────────────────────────────
-    public async Task<object> StatusAsync(int timeoutSeconds)
+    public async Task<KubernetesStatusResult> StatusAsync(int timeoutSeconds)
     {
         if (!ExternalTool.Exists("kubectl"))
-            return new
+            return new KubernetesStatusResult
             {
-                available = false,
-                error = "kubectl was not found on PATH. Install it (https://kubernetes.io/docs/tasks/tools/) " +
+                Available = false,
+                Error = "kubectl was not found on PATH. Install it (https://kubernetes.io/docs/tasks/tools/) " +
                         "and let it see a kubeconfig; helm is optional and reported separately.",
-                helmVersion = await ExternalTool.VersionAsync("helm", "version --short"),
+                HelmVersion = await ExternalTool.VersionAsync("helm", "version --short"),
             };
 
         var timeout = Clamp(timeoutSeconds);
@@ -80,18 +80,18 @@ public sealed class KubernetesService : IKubernetesService
             kubeconfig = Path.Combine(home, ".kube", "config");
         }
 
-        return new
+        return new KubernetesStatusResult
         {
-            available = true,
-            clientVersion,
-            serverVersion,
-            clusterReachable = serverVersion is not null,
-            currentContext = context.Succeeded ? FirstLine(context.Stdout) : null,
-            contextError = context.Succeeded ? null : FirstLine(context.Stderr),
-            kubeconfig,
-            kubeconfigExists = kubeconfig is not null && File.Exists(kubeconfig.Split(Path.PathSeparator)[0]),
-            helmVersion = helm,
-            reason = serverVersion is null
+            Available = true,
+            ClientVersion = clientVersion,
+            ServerVersion = serverVersion,
+            ClusterReachable = serverVersion is not null,
+            CurrentContext = context.Succeeded ? FirstLine(context.Stdout) : null,
+            ContextError = context.Succeeded ? null : FirstLine(context.Stderr),
+            Kubeconfig = kubeconfig,
+            KubeconfigExists = kubeconfig is not null && File.Exists(kubeconfig.Split(Path.PathSeparator)[0]),
+            HelmVersion = helm,
+            Reason = serverVersion is null
                 ? (string.IsNullOrWhiteSpace(server.Stderr)
                     ? "The cluster did not answer: no current context is set, or the API server is unreachable."
                     : FirstLine(server.Stderr))
@@ -100,7 +100,7 @@ public sealed class KubernetesService : IKubernetesService
     }
 
     // ── contexts ─────────────────────────────────────────────────────────────
-    public async Task<object> ContextAsync(string action, string? name, int timeoutSeconds)
+    public async Task<KubernetesContextResult> ContextAsync(string action, string? name, int timeoutSeconds)
     {
         var verb = (action ?? string.Empty).Trim().ToLowerInvariant();
         switch (verb)
@@ -108,13 +108,13 @@ public sealed class KubernetesService : IKubernetesService
             case "current":
             {
                 var run = await KubectlAsync("config current-context", Clamp(timeoutSeconds));
-                return new
+                return new KubernetesContextResult
                 {
-                    action = verb,
-                    succeeded = run.Succeeded,
-                    context = run.Succeeded ? FirstLine(run.Stdout) : null,
-                    error = run.Succeeded ? null : FirstLine(run.Stderr),
-                    hint = run.Succeeded
+                    Action = verb,
+                    Succeeded = run.Succeeded,
+                    Context = run.Succeeded ? FirstLine(run.Stdout) : null,
+                    Error = run.Succeeded ? null : FirstLine(run.Stderr),
+                    Hint = run.Succeeded
                         ? null
                         : "No context is selected. 'kubectl config get-contexts' lists the available ones.",
                 };
@@ -122,42 +122,42 @@ public sealed class KubernetesService : IKubernetesService
             case "list":
             {
                 var run = await KubectlAsync("config get-contexts", Clamp(timeoutSeconds));
-                return new
+                return new KubernetesContextResult
                 {
-                    action = verb,
-                    succeeded = run.Succeeded,
-                    output = ProcessRunner.Truncate(run.Text, 12_000),
-                    error = run.Succeeded ? null : FirstLine(run.Stderr),
+                    Action = verb,
+                    Succeeded = run.Succeeded,
+                    Output = ProcessRunner.Truncate(run.Text, 12_000),
+                    Error = run.Succeeded ? null : FirstLine(run.Stderr),
                 };
             }
             case "use":
             {
                 if (!IsSafeToken(name))
-                    return new { error = "The use action needs a context name." };
+                    return new KubernetesContextResult { Error = "The use action needs a context name." };
                 var run = await KubectlAsync($"config use-context {Quote(name!)}", Clamp(timeoutSeconds));
-                return new
+                return new KubernetesContextResult
                 {
-                    action = verb,
-                    context = name,
-                    succeeded = run.Succeeded,
-                    output = ProcessRunner.Truncate(run.Text, 4_000),
-                    error = run.Succeeded ? null : FirstLine(run.Stderr),
+                    Action = verb,
+                    Context = name,
+                    Succeeded = run.Succeeded,
+                    Output = ProcessRunner.Truncate(run.Text, 4_000),
+                    Error = run.Succeeded ? null : FirstLine(run.Stderr),
                 };
             }
             default:
-                return new { error = $"Unknown action '{action}'. Use one of: current, list, use." };
+                return new KubernetesContextResult { Error = $"Unknown action '{action}'. Use one of: current, list, use." };
         }
     }
 
     // ── get / describe ───────────────────────────────────────────────────────
-    public async Task<object> GetAsync(string kind, string? name, string? namespaceName, bool allNamespaces,
+    public async Task<KubernetesGetResult> GetAsync(string kind, string? name, string? namespaceName, bool allNamespaces,
         string? selector, string? output, int timeoutSeconds)
     {
-        if (!IsSafeKind(kind)) return new { error = "A resource kind is required, e.g. pods, deployments, services (comma-separated kinds are allowed)." };
-        if (!string.IsNullOrWhiteSpace(name) && !IsSafeToken(name)) return new { error = $"'{name}' is not a resource name." };
+        if (!IsSafeKind(kind)) return new KubernetesGetResult { Error = "A resource kind is required, e.g. pods, deployments, services (comma-separated kinds are allowed)." };
+        if (!string.IsNullOrWhiteSpace(name) && !IsSafeToken(name)) return new KubernetesGetResult { Error = $"'{name}' is not a resource name." };
         if (!string.IsNullOrWhiteSpace(selector) && !IsSafeSelector(selector!))
-            return new { error = "The selector must be a label selector such as 'app=api,tier=web'." };
-        if (!IsSafeOutput(output)) return new { error = $"'{output}' is not an output format." };
+            return new KubernetesGetResult { Error = "The selector must be a label selector such as 'app=api,tier=web'." };
+        if (!IsSafeOutput(output)) return new KubernetesGetResult { Error = $"'{output}' is not an output format." };
 
         var format = string.IsNullOrWhiteSpace(output) ? "summary" : output!.Trim();
         var args = $"get {kind}";
@@ -168,69 +168,69 @@ public sealed class KubernetesService : IKubernetesService
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
         if (!run.Succeeded)
-            return new
+            return new KubernetesGetResult
             {
-                error = $"kubectl get failed: {FirstLine(run.Stderr)}",
-                command = $"kubectl {args}",
-                output = ProcessRunner.Truncate(run.Text, 8_000),
+                Error = $"kubectl get failed: {FirstLine(run.Stderr)}",
+                Command = $"kubectl {args}",
+                Output = ProcessRunner.Truncate(run.Text, 8_000),
             };
 
         if (format != "summary")
-            return new
+            return new KubernetesGetResult
             {
-                kind,
-                name,
-                namespaceName,
-                allNamespaces,
-                format,
-                command = $"kubectl {args}",
-                raw = ProcessRunner.Truncate(run.Stdout, 32_000),
+                Kind = kind,
+                Name = name,
+                NamespaceName = namespaceName,
+                AllNamespaces = allNamespaces,
+                Format = format,
+                Command = $"kubectl {args}",
+                Raw = ProcessRunner.Truncate(run.Stdout, 32_000),
             };
 
         var items = SummarizeItems(run.Stdout);
-        return new
+        return new KubernetesGetResult
         {
-            kind,
-            name,
-            namespaceName,
-            allNamespaces,
-            selector,
-            count = items.Count,
-            items,
-            command = $"kubectl {args}",
-            note = "Summary of 'kubectl get -o json'; pass output=yaml|json|wide|name|jsonpath=… for the client's own view.",
+            Kind = kind,
+            Name = name,
+            NamespaceName = namespaceName,
+            AllNamespaces = allNamespaces,
+            Selector = selector,
+            Count = items.Count,
+            Items = items,
+            Command = $"kubectl {args}",
+            Note = "Summary of 'kubectl get -o json'; pass output=yaml|json|wide|name|jsonpath=… for the client's own view.",
         };
     }
 
-    public async Task<object> DescribeAsync(string kind, string? name, string? namespaceName, bool allNamespaces,
+    public async Task<KubernetesDescribeResult> DescribeAsync(string kind, string? name, string? namespaceName, bool allNamespaces,
         int timeoutSeconds)
     {
-        if (!IsSafeKind(kind)) return new { error = "A resource kind is required, e.g. pods, deployments." };
-        if (!string.IsNullOrWhiteSpace(name) && !IsSafeToken(name)) return new { error = $"'{name}' is not a resource name." };
+        if (!IsSafeKind(kind)) return new KubernetesDescribeResult { Error = "A resource kind is required, e.g. pods, deployments." };
+        if (!string.IsNullOrWhiteSpace(name) && !IsSafeToken(name)) return new KubernetesDescribeResult { Error = $"'{name}' is not a resource name." };
 
         var args = $"describe {kind}";
         if (!string.IsNullOrWhiteSpace(name)) args += $" {Quote(name!)}";
         args += NamespaceArgs(namespaceName, allNamespaces);
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
-        return new
+        return new KubernetesDescribeResult
         {
-            kind,
-            name,
-            succeeded = run.Succeeded,
-            command = $"kubectl {args}",
-            output = ProcessRunner.Truncate(run.Text, 32_000),
-            error = run.Succeeded ? null : FirstLine(run.Stderr),
+            Kind = kind,
+            Name = name,
+            Succeeded = run.Succeeded,
+            Command = $"kubectl {args}",
+            Output = ProcessRunner.Truncate(run.Text, 32_000),
+            Error = run.Succeeded ? null : FirstLine(run.Stderr),
         };
     }
 
     // ── logs ─────────────────────────────────────────────────────────────────
-    public async Task<object> LogsAsync(string pod, string? container, string? namespaceName, int tail, string? since,
+    public async Task<KubernetesLogsResult> LogsAsync(string pod, string? container, string? namespaceName, int tail, string? since,
         bool previous, int timeoutSeconds)
     {
-        if (!IsSafeToken(pod)) return new { error = "A pod name is required." };
-        if (!string.IsNullOrWhiteSpace(container) && !IsSafeToken(container)) return new { error = $"'{container}' is not a container name." };
-        if (!string.IsNullOrWhiteSpace(since) && !IsSafeToken(since)) return new { error = "since must look like '10m' or '2026-10-31T10:00:00Z'." };
+        if (!IsSafeToken(pod)) return new KubernetesLogsResult { Error = "A pod name is required." };
+        if (!string.IsNullOrWhiteSpace(container) && !IsSafeToken(container)) return new KubernetesLogsResult { Error = $"'{container}' is not a container name." };
+        if (!string.IsNullOrWhiteSpace(since) && !IsSafeToken(since)) return new KubernetesLogsResult { Error = "since must look like '10m' or '2026-10-31T10:00:00Z'." };
 
         var args = $"logs {Quote(pod)}";
         if (!string.IsNullOrWhiteSpace(container)) args += $" -c {Quote(container!)}";
@@ -241,18 +241,18 @@ public sealed class KubernetesService : IKubernetesService
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
         var text = (run.Stdout + "\n" + run.Stderr).Trim();
-        return new
+        return new KubernetesLogsResult
         {
-            pod,
-            container,
-            namespaceName,
-            tail,
-            since,
-            previous,
-            empty = string.IsNullOrWhiteSpace(text),
-            logs = ProcessRunner.Truncate(text, 64_000),
-            command = $"kubectl {args}",
-            error = run.Succeeded || !string.IsNullOrWhiteSpace(run.Stdout) ? null : FirstLine(run.Stderr),
+            Pod = pod,
+            Container = container,
+            NamespaceName = namespaceName,
+            Tail = tail,
+            Since = since,
+            Previous = previous,
+            Empty = string.IsNullOrWhiteSpace(text),
+            Logs = ProcessRunner.Truncate(text, 64_000),
+            Command = $"kubectl {args}",
+            Error = run.Succeeded || !string.IsNullOrWhiteSpace(run.Stdout) ? null : FirstLine(run.Stderr),
         };
     }
 
@@ -261,17 +261,17 @@ public sealed class KubernetesService : IKubernetesService
     /// Renders a kustomization without touching a cluster: <c>kubectl kustomize</c> is the client-side
     /// build step, so this answers what the overlay produces before anything is applied.
     /// </summary>
-    public async Task<object> KustomizeAsync(string path, string? namespaceName, int timeoutSeconds)
+    public async Task<KubernetesKustomizeResult> KustomizeAsync(string path, string? namespaceName, int timeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(path))
-            return new { error = "A kustomization directory (or a git/URL reference) is required." };
+            return new KubernetesKustomizeResult { Error = "A kustomization directory (or a git/URL reference) is required." };
         if (path.Contains('\r') || path.Contains('\n'))
-            return new { error = "The path must be a single line." };
+            return new KubernetesKustomizeResult { Error = "The path must be a single line." };
         if (!string.IsNullOrWhiteSpace(namespaceName) && !IsSafeToken(namespaceName))
-            return new { error = $"'{namespaceName}' is not a namespace name." };
+            return new KubernetesKustomizeResult { Error = $"'{namespaceName}' is not a namespace name." };
 
         if (!ExternalTool.Exists("kubectl"))
-            return new { available = false, error = "kubectl was not found on PATH: kustomize is a kubectl subcommand." };
+            return new KubernetesKustomizeResult { Available = false, Error = "kubectl was not found on PATH: kustomize is a kubectl subcommand." };
 
         // A local path is checked and made absolute; anything else (a git reference) is passed through.
         var target = path;
@@ -282,17 +282,17 @@ public sealed class KubernetesService : IKubernetesService
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
         var rendered = run.Succeeded ? run.Stdout.Trim() : null;
-        return new
+        return new KubernetesKustomizeResult
         {
-            action = "kustomize",
-            path = target,
-            namespaceName,
-            succeeded = run.Succeeded,
-            command = $"kubectl {args}",
-            documents = rendered is null ? 0 : CountDocuments(rendered),
-            rendered = rendered is null ? ProcessRunner.Truncate(run.Text, 4_000) : ProcessRunner.Truncate(rendered, 64_000),
-            error = run.Succeeded ? null : FirstLine(run.Stderr),
-            note = "A client-side render: no cluster was contacted. Apply the result with k8s_apply (dryRun first).",
+            Action = "kustomize",
+            Path = target,
+            NamespaceName = namespaceName,
+            Succeeded = run.Succeeded,
+            Command = $"kubectl {args}",
+            Documents = rendered is null ? 0 : CountDocuments(rendered),
+            Rendered = rendered is null ? ProcessRunner.Truncate(run.Text, 4_000) : ProcessRunner.Truncate(rendered, 64_000),
+            Error = run.Succeeded ? null : FirstLine(run.Stderr),
+            Note = "A client-side render: no cluster was contacted. Apply the result with k8s_apply (dryRun first).",
         };
     }
 
@@ -302,21 +302,21 @@ public sealed class KubernetesService : IKubernetesService
     /// <c>confirm=true</c>; the command goes after <c>--</c> exactly as the shell would pass it,
     /// except that no shell is involved, so redirection and pipes do not work.
     /// </summary>
-    public async Task<object> ExecAsync(string pod, string? container, string? namespaceName, string command,
+    public async Task<KubernetesExecResult> ExecAsync(string pod, string? container, string? namespaceName, string command,
         bool confirm, int timeoutSeconds)
     {
-        if (!IsSafeToken(pod)) return new { error = "A pod name is required." };
+        if (!IsSafeToken(pod)) return new KubernetesExecResult { Error = "A pod name is required." };
         if (!string.IsNullOrWhiteSpace(container) && !IsSafeToken(container))
-            return new { error = $"'{container}' is not a container name." };
+            return new KubernetesExecResult { Error = $"'{container}' is not a container name." };
         if (string.IsNullOrWhiteSpace(command))
-            return new { error = "A command is required: the part kubectl receives after '--'." };
+            return new KubernetesExecResult { Error = "A command is required: the part kubectl receives after '--'." };
         if (command.Contains('\r') || command.Contains('\n'))
-            return new { error = "The command must be a single line." };
+            return new KubernetesExecResult { Error = "The command must be a single line." };
         if (!confirm)
-            return new { error = "exec runs a command inside the container (it can change state). Pass confirm=true to proceed." };
+            return new KubernetesExecResult { Error = "exec runs a command inside the container (it can change state). Pass confirm=true to proceed." };
 
         if (!ExternalTool.Exists("kubectl"))
-            return new { available = false, error = "kubectl was not found on PATH." };
+            return new KubernetesExecResult { Available = false, Error = "kubectl was not found on PATH." };
 
         var args = $"exec {Quote(pod)}";
         if (!string.IsNullOrWhiteSpace(container)) args += $" -c {Quote(container!)}";
@@ -324,37 +324,37 @@ public sealed class KubernetesService : IKubernetesService
         args += $" -- {command}";
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
-        return new
+        return new KubernetesExecResult
         {
-            pod,
-            container,
-            namespaceName,
-            command = $"kubectl {args}",
-            succeeded = run.Succeeded,
-            exitCode = run.TimedOut ? (int?)null : run.ExitCode,
-            stdout = ProcessRunner.Truncate(run.Stdout, 32_000),
-            stderr = ProcessRunner.Truncate(run.Stderr, 8_000),
-            error = run.Succeeded ? null : FirstLine(run.Stderr),
-            note = "kubectl exec runs the program directly: a pipe or a redirection inside it needs a shell " +
+            Pod = pod,
+            Container = container,
+            NamespaceName = namespaceName,
+            Command = $"kubectl {args}",
+            Succeeded = run.Succeeded,
+            ExitCode = run.TimedOut ? (int?)null : run.ExitCode,
+            Stdout = ProcessRunner.Truncate(run.Stdout, 32_000),
+            Stderr = ProcessRunner.Truncate(run.Stderr, 8_000),
+            Error = run.Succeeded ? null : FirstLine(run.Stderr),
+            Note = "kubectl exec runs the program directly: a pipe or a redirection inside it needs a shell " +
                    "(/bin/sh -c \"…\").",
         };
     }
 
     // ── apply / delete / rollout (the state-changing half) ───────────────────
-    public async Task<object> ApplyAsync(string? file, string? content, string? namespaceName, bool dryRun,
+    public async Task<KubernetesApplyResult> ApplyAsync(string? file, string? content, string? namespaceName, bool dryRun,
         bool confirm, int timeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(file) == string.IsNullOrWhiteSpace(content))
-            return new { error = "Pass exactly one of file (a manifest on disk) or content (the manifest itself)." };
+            return new KubernetesApplyResult { Error = "Pass exactly one of file (a manifest on disk) or content (the manifest itself)." };
 
         if (!string.IsNullOrWhiteSpace(file) && !File.Exists(file))
-            return new { error = $"Manifest not found: {file}" };
+            return new KubernetesApplyResult { Error = $"Manifest not found: {file}" };
 
         if (!dryRun && !confirm)
-            return new
+            return new KubernetesApplyResult
             {
-                error = "Apply changes the cluster. Pass confirm=true, or keep dryRun=true for a server-side validation.",
-                dryRun,
+                Error = "Apply changes the cluster. Pass confirm=true, or keep dryRun=true for a server-side validation.",
+                DryRun = dryRun,
             };
 
         string? temporary = null;
@@ -373,16 +373,16 @@ public sealed class KubernetesService : IKubernetesService
             args += dryRun ? " --dry-run=server" : string.Empty;
 
             var run = await KubectlAsync(args, Clamp(timeoutSeconds));
-            return new
+            return new KubernetesApplyResult
             {
-                file = temporary is null ? file : null,
-                namespaceName,
-                dryRun,
-                confirmed = confirm,
-                succeeded = run.Succeeded,
-                command = $"kubectl {args}",
-                output = ProcessRunner.Truncate(run.Text, 12_000),
-                error = run.Succeeded ? null : FirstLine(run.Stderr),
+                File = temporary is null ? file : null,
+                NamespaceName = namespaceName,
+                DryRun = dryRun,
+                Confirmed = confirm,
+                Succeeded = run.Succeeded,
+                Command = $"kubectl {args}",
+                Output = ProcessRunner.Truncate(run.Text, 12_000),
+                Error = run.Succeeded ? null : FirstLine(run.Stderr),
             };
         }
         finally
@@ -392,58 +392,58 @@ public sealed class KubernetesService : IKubernetesService
         }
     }
 
-    public async Task<object> DeleteAsync(string kind, string name, string? namespaceName, bool ignoreNotFound,
+    public async Task<KubernetesDeleteResult> DeleteAsync(string kind, string name, string? namespaceName, bool ignoreNotFound,
         bool confirm, int timeoutSeconds)
     {
-        if (!IsSafeKind(kind)) return new { error = "A resource kind is required, e.g. pods, deployments." };
-        if (!IsSafeToken(name)) return new { error = "A resource name is required." };
+        if (!IsSafeKind(kind)) return new KubernetesDeleteResult { Error = "A resource kind is required, e.g. pods, deployments." };
+        if (!IsSafeToken(name)) return new KubernetesDeleteResult { Error = "A resource name is required." };
         if (!confirm)
-            return new { error = "Delete removes cluster state that cannot be recovered. Pass confirm=true to proceed." };
+            return new KubernetesDeleteResult { Error = "Delete removes cluster state that cannot be recovered. Pass confirm=true to proceed." };
 
         var args = $"delete {kind} {Quote(name)}";
         args += NamespaceArgs(namespaceName, allNamespaces: false);
         if (ignoreNotFound) args += " --ignore-not-found";
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
-        return new
+        return new KubernetesDeleteResult
         {
-            kind,
-            name,
-            namespaceName,
-            deleted = run.Succeeded,
-            command = $"kubectl {args}",
-            output = ProcessRunner.Truncate(run.Text, 4_000),
-            error = run.Succeeded ? null : FirstLine(run.Stderr),
+            Kind = kind,
+            Name = name,
+            NamespaceName = namespaceName,
+            Deleted = run.Succeeded,
+            Command = $"kubectl {args}",
+            Output = ProcessRunner.Truncate(run.Text, 4_000),
+            Error = run.Succeeded ? null : FirstLine(run.Stderr),
         };
     }
 
-    public async Task<object> RolloutAsync(string action, string kind, string name, string? namespaceName,
+    public async Task<KubernetesRolloutResult> RolloutAsync(string action, string kind, string name, string? namespaceName,
         int? toRevision, bool confirm, int timeoutSeconds)
     {
         var verb = (action ?? string.Empty).Trim().ToLowerInvariant();
         if (!RolloutActions.Contains(verb))
-            return new { error = $"Unknown action '{action}'. Use one of: {string.Join(", ", RolloutActions)}." };
-        if (!IsSafeToken(kind)) return new { error = "A workload kind is required, e.g. deployment, statefulset, daemonset." };
-        if (!IsSafeToken(name)) return new { error = "A workload name is required." };
+            return new KubernetesRolloutResult { Error = $"Unknown action '{action}'. Use one of: {string.Join(", ", RolloutActions)}." };
+        if (!IsSafeToken(kind)) return new KubernetesRolloutResult { Error = "A workload kind is required, e.g. deployment, statefulset, daemonset." };
+        if (!IsSafeToken(name)) return new KubernetesRolloutResult { Error = "A workload name is required." };
         if (verb is "restart" or "undo" && !confirm)
-            return new { error = $"{verb} changes the cluster (it rolls the pods). Pass confirm=true to proceed." };
+            return new KubernetesRolloutResult { Error = $"{verb} changes the cluster (it rolls the pods). Pass confirm=true to proceed." };
 
         var args = $"rollout {verb} {kind}/{name}";
         args += NamespaceArgs(namespaceName, allNamespaces: false);
         if (verb == "undo" && toRevision is > 0) args += $" --to-revision {toRevision.Value}";
 
         var run = await KubectlAsync(args, Clamp(timeoutSeconds));
-        return new
+        return new KubernetesRolloutResult
         {
-            action = verb,
-            kind,
-            name,
-            namespaceName,
-            toRevision,
-            succeeded = run.Succeeded,
-            command = $"kubectl {args}",
-            output = ProcessRunner.Truncate(run.Text, 8_000),
-            error = run.Succeeded ? null : FirstLine(run.Stderr),
+            Action = verb,
+            Kind = kind,
+            Name = name,
+            NamespaceName = namespaceName,
+            ToRevision = toRevision,
+            Succeeded = run.Succeeded,
+            Command = $"kubectl {args}",
+            Output = ProcessRunner.Truncate(run.Text, 8_000),
+            Error = run.Succeeded ? null : FirstLine(run.Stderr),
         };
     }
 
@@ -452,24 +452,24 @@ public sealed class KubernetesService : IKubernetesService
     /// Helm through its own CLI. <c>lint</c> and <c>template</c> are the offline half: a chart is checked
     /// and rendered without a cluster, which is the chart validation the raw manifest tools cannot give.
     /// </summary>
-    public async Task<object> HelmAsync(string action, string? release, string? chart, string? namespaceName,
+    public async Task<KubernetesHelmResult> HelmAsync(string action, string? release, string? chart, string? namespaceName,
         string? valuesFile, string[]? setValues, int timeoutSeconds)
     {
         var verb = (action ?? string.Empty).Trim().ToLowerInvariant();
         if (!HelmActions.Contains(verb))
-            return new { error = $"Unknown action '{action}'. Use one of: {string.Join(", ", HelmActions)}." };
+            return new KubernetesHelmResult { Error = $"Unknown action '{action}'. Use one of: {string.Join(", ", HelmActions)}." };
 
         // The arguments are checked first, so a malformed call is reported as such whether or not helm is installed.
         if (verb is "status" or "history" or "get-values" or "template" && !IsSafeToken(release))
-            return new { error = $"The {verb} action needs a release name." };
+            return new KubernetesHelmResult { Error = $"The {verb} action needs a release name." };
         if (verb is "template" or "lint" && !IsSafeToken(chart))
-            return new { error = $"The {verb} action needs a chart (a local path or a repo/chart reference)." };
+            return new KubernetesHelmResult { Error = $"The {verb} action needs a chart (a local path or a repo/chart reference)." };
 
         if (!ExternalTool.Exists("helm"))
-            return new
+            return new KubernetesHelmResult
             {
-                available = false,
-                error = "helm was not found on PATH. Install it (https://helm.sh/docs/intro/install/) for release " +
+                Available = false,
+                Error = "helm was not found on PATH. Install it (https://helm.sh/docs/intro/install/) for release " +
                         "listing, status and history; kubectl covers the raw resources without it.",
             };
 
@@ -489,31 +489,31 @@ public sealed class KubernetesService : IKubernetesService
         if (verb is "list" or "history") args += " -o json";
         if (!string.IsNullOrWhiteSpace(valuesFile))
         {
-            if (!File.Exists(valuesFile)) return new { error = $"Values file not found: {valuesFile}" };
+            if (!File.Exists(valuesFile)) return new KubernetesHelmResult { Error = $"Values file not found: {valuesFile}" };
             args += $" -f {Quote(valuesFile!)}";
         }
         foreach (var value in setValues ?? [])
         {
             if (!IsSafeToken(value) || !value.Contains('='))
-                return new { error = $"'{value}' is not a --set assignment (key=value)." };
+                return new KubernetesHelmResult { Error = $"'{value}' is not a --set assignment (key=value)." };
             args += $" --set {Quote(value)}";
         }
 
         var run = await ExternalTool.RunAsync("helm", args, Directory.GetCurrentDirectory(), Clamp(timeoutSeconds));
         var succeeded = !run.timedOut && run.exitCode == 0;
 
-        return new
+        return new KubernetesHelmResult
         {
-            action = verb,
-            release,
-            chart,
-            namespaceName,
-            succeeded,
-            command = $"helm {args}",
-            raw = ProcessRunner.Truncate(run.stdout, 32_000),
-            lint = verb == "lint" ? SummarizeLintOutput(run.stdout + "\n" + run.stderr) : null,
-            error = succeeded ? null : FirstLine(run.stderr),
-            note = verb == "lint"
+            Action = verb,
+            Release = release,
+            Chart = chart,
+            NamespaceName = namespaceName,
+            Succeeded = succeeded,
+            Command = $"helm {args}",
+            Raw = ProcessRunner.Truncate(run.stdout, 32_000),
+            Lint = verb == "lint" ? SummarizeLintOutput(run.stdout + "\n" + run.stderr) : null,
+            Error = succeeded ? null : FirstLine(run.stderr),
+            Note = verb == "lint"
                 ? "chart lints require no cluster: the chart's templates, values and Chart.yaml are checked locally. " +
                   "For a manifest, kubectl apply --dry-run=server validates it against the API server (k8s_apply, dryRun=true)."
                 : null,
@@ -524,9 +524,9 @@ public sealed class KubernetesService : IKubernetesService
     /// The <c>helm lint</c> findings: its <c>[INFO]</c>/<c>[WARNING]</c>/<c>[ERROR]</c> lines, counted by
     /// severity, plus the summary line it prints at the end.
     /// </summary>
-    public static object SummarizeLintOutput(string output)
+    public static KubernetesHelmLintResult SummarizeLintOutput(string output)
     {
-        var findings = new List<object>();
+        var findings = new List<KubernetesHelmLintFinding>();
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         string? summary = null;
 
@@ -548,15 +548,15 @@ public sealed class KubernetesService : IKubernetesService
 
             counts[severity] = counts.TryGetValue(severity, out var seen) ? seen + 1 : 1;
             if (findings.Count < 200)
-                findings.Add(new { severity, message = text[text.IndexOf(']')..].TrimStart(' ', ']').Trim() });
+                findings.Add(new KubernetesHelmLintFinding(severity, text[text.IndexOf(']')..].TrimStart(' ', ']').Trim()));
         }
 
-        return new
+        return new KubernetesHelmLintResult
         {
-            summary,
-            counts,
-            findings,
-            linter = "helm lint: templates render, values are valid for the chart, Chart.yaml is well formed. " +
+            Summary = summary,
+            Counts = counts,
+            Findings = findings,
+            Linter = "helm lint: templates render, values are valid for the chart, Chart.yaml is well formed. " +
                      "It does not validate a rendered manifest against the Kubernetes API schema.",
         };
     }
@@ -570,10 +570,10 @@ public sealed class KubernetesService : IKubernetesService
     /// configured cluster through <c>kubectl apply --dry-run=server</c>, which is the authority for a CRD's
     /// OpenAPI schema and an admission webhook.
     /// </summary>
-    public async Task<object> ValidateAsync(string? file, string? content, bool server = false)
+    public async Task<KubernetesValidateResult> ValidateAsync(string? file, string? content, bool server = false)
     {
         if (string.IsNullOrWhiteSpace(file) == string.IsNullOrWhiteSpace(content))
-            return new { error = "Pass exactly one of file (a manifest or a folder of them) or content (the manifest itself)." };
+            return new KubernetesValidateResult { Error = "Pass exactly one of file (a manifest or a folder of them) or content (the manifest itself)." };
 
         var sources = new List<(string Name, string Text)>();
         if (!string.IsNullOrWhiteSpace(content))
@@ -593,14 +593,14 @@ public sealed class KubernetesService : IKubernetesService
                 .ToList();
 
             if (files.Count == 0)
-                return new { error = $"No .yaml or .yml file in {file}." };
+                return new KubernetesValidateResult { Error = $"No .yaml or .yml file in {file}." };
 
             foreach (var path in files)
                 sources.Add((path, await File.ReadAllTextAsync(path)));
         }
         else
         {
-            return new { error = $"Not found: {file}" };
+            return new KubernetesValidateResult { Error = $"Not found: {file}" };
         }
 
         var results = sources
@@ -609,19 +609,19 @@ public sealed class KubernetesService : IKubernetesService
 
         if (server)
         {
-            var serverResults = new List<object>();
+            var serverResults = new List<KubernetesServerValidationResult>();
             foreach (var source in sources)
                 serverResults.Add(await ValidateOnServerAsync(source));
 
             if (results.Count == 1 && !Directory.Exists(file))
-                return new { offline = results[0], server = serverResults[0] };
+                return new KubernetesServerValidateResult { Offline = results[0], Server = serverResults[0] };
 
-            return new
+            return new KubernetesFolderValidateResult
             {
-                files = sources.Select(source => source.Name).ToList(),
-                results,
-                server = serverResults,
-                note = "Each file was validated on its own offline; the server result is the API server's own " +
+                Files = sources.Select(source => source.Name).ToList(),
+                Results = results,
+                Server = serverResults,
+                Note = "Each file was validated on its own offline; the server result is the API server's own " +
                        "dry run (OpenAPI schema and admission chain).",
             };
         }
@@ -630,11 +630,11 @@ public sealed class KubernetesService : IKubernetesService
         // keeps the per-file answers apart.
         if (results.Count == 1 && !Directory.Exists(file)) return results[0];
 
-        return new
+        return new KubernetesFolderValidateResult
         {
-            files = sources.Select(source => source.Name).ToList(),
-            results,
-            note = "Each file was validated on its own; K8S023 (a volume naming a ConfigMap or Secret) is " +
+            Files = sources.Select(source => source.Name).ToList(),
+            Results = results,
+            Note = "Each file was validated on its own; K8S023 (a volume naming a ConfigMap or Secret) is " +
                    "checked within one file.",
         };
     }
@@ -643,7 +643,7 @@ public sealed class KubernetesService : IKubernetesService
     /// Writes the manifest to the store's temporary folder and asks the cluster to dry-run it. A missing
     /// kubectl or an unreachable cluster is a structured result, not a failure of the call.
     /// </summary>
-    private static async Task<object> ValidateOnServerAsync((string Name, string Text) source)
+    private static async Task<KubernetesServerValidationResult> ValidateOnServerAsync((string Name, string Text) source)
     {
         var directory = Path.Combine(Directory.GetCurrentDirectory(), ".visualMCP", "tmp");
         Directory.CreateDirectory(directory);
@@ -655,18 +655,18 @@ public sealed class KubernetesService : IKubernetesService
             var run = await KubectlAsync($"apply --dry-run=server -f \"{path}\"", 60);
 
             if (run.ExitCode == 127)
-                return new { file = source.Name, ran = false, error = run.Stderr.Trim() };
+                return new KubernetesServerValidationResult { File = source.Name, Ran = false, Error = run.Stderr.Trim() };
 
             var output = string.IsNullOrWhiteSpace(run.Stdout) ? run.Stderr : run.Stdout;
-            return new
+            return new KubernetesServerValidationResult
             {
-                file = source.Name,
-                ran = true,
-                valid = run.ExitCode == 0 && !run.TimedOut,
-                exitCode = run.ExitCode,
-                timedOut = run.TimedOut,
-                output = output.Length > 4_000 ? output[..4_000] : output,
-                note = run.ExitCode == 0
+                File = source.Name,
+                Ran = true,
+                Valid = run.ExitCode == 0 && !run.TimedOut,
+                ExitCode = run.ExitCode,
+                TimedOut = run.TimedOut,
+                Output = output.Length > 4_000 ? output[..4_000] : output,
+                Note = run.ExitCode == 0
                     ? "The cluster accepted it: the OpenAPI schema and the admission chain were applied."
                     : "The cluster refused it: the output is the API server's own message — a CRD's schema, " +
                       "an admission webhook or a missing namespace.",
@@ -708,7 +708,7 @@ public sealed class KubernetesService : IKubernetesService
     /// <c>stop</c> act on that session. The forward lives in this server process, so it ends when the
     /// server does.
     /// </summary>
-    public Task<object> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
+    public Task<KubernetesPortForwardResult> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
         string? namespaceName, int timeoutSeconds)
     {
         var verb = (action ?? string.Empty).Trim().ToLowerInvariant();
@@ -716,22 +716,22 @@ public sealed class KubernetesService : IKubernetesService
         {
             case "list":
                 PruneFinishedForwards();
-                return Task.FromResult<object>(new
+                return Task.FromResult<KubernetesPortForwardResult>(new KubernetesPortForwardSessionsResult
                 {
-                    action = verb,
-                    sessions = _portForwards.Values
+                    Action = verb,
+                    Sessions = _portForwards.Values
                         .OrderBy(session => session.StartedAt)
-                        .Select(session => new
+                        .Select(session => new KubernetesPortForwardSession
                         {
-                            sessionId = session.Id,
-                            session.Target,
-                            session.Ports,
-                            session.NamespaceName,
-                            localPort = FirstLocalPort(session.Ports),
-                            pid = session.Process.Id,
-                            alive = session.Alive,
-                            startedAt = session.StartedAt,
-                            output = session.Output.ToArray().TakeLast(10).ToList(),
+                            SessionId = session.Id,
+                            Target = session.Target,
+                            Ports = session.Ports,
+                            NamespaceName = session.NamespaceName,
+                            LocalPort = FirstLocalPort(session.Ports),
+                            Pid = session.Process.Id,
+                            Alive = session.Alive,
+                            StartedAt = session.StartedAt,
+                            Output = session.Output.ToArray().TakeLast(10).ToList(),
                         })
                         .ToList(),
                 });
@@ -740,32 +740,33 @@ public sealed class KubernetesService : IKubernetesService
             case "stop":
             {
                 if (string.IsNullOrWhiteSpace(sessionId) || !_portForwards.TryGetValue(sessionId!, out var session))
-                    return Task.FromResult<object>(new { error = $"No port-forward session '{sessionId}'." });
+                    return Task.FromResult<KubernetesPortForwardResult>(
+                        new KubernetesPortForwardResult { Error = $"No port-forward session '{sessionId}'." });
 
                 if (verb == "stop")
                 {
                     StopForward(session);
-                    return Task.FromResult<object>(new
+                    return Task.FromResult<KubernetesPortForwardResult>(new KubernetesPortForwardStatusResult
                     {
-                        action = verb,
-                        sessionId = session.Id,
-                        target = session.Target,
-                        stopped = true,
+                        Action = verb,
+                        SessionId = session.Id,
+                        Target = session.Target,
+                        Stopped = true,
                     });
                 }
 
-                return Task.FromResult<object>(new
+                return Task.FromResult<KubernetesPortForwardResult>(new KubernetesPortForwardStatusResult
                 {
-                    action = verb,
-                    sessionId = session.Id,
-                    session.Target,
-                    session.Ports,
-                    session.NamespaceName,
-                    localPort = FirstLocalPort(session.Ports),
-                    pid = session.Process.Id,
-                    alive = session.Alive,
-                    startedAt = session.StartedAt,
-                    output = session.Output.ToArray().TakeLast(20).ToList(),
+                    Action = verb,
+                    SessionId = session.Id,
+                    Target = session.Target,
+                    Ports = session.Ports,
+                    NamespaceName = session.NamespaceName,
+                    LocalPort = FirstLocalPort(session.Ports),
+                    Pid = session.Process.Id,
+                    Alive = session.Alive,
+                    StartedAt = session.StartedAt,
+                    Output = session.Output.ToArray().TakeLast(20).ToList(),
                 });
             }
 
@@ -773,21 +774,22 @@ public sealed class KubernetesService : IKubernetesService
                 return StartForwardAsync(target, ports, namespaceName, timeoutSeconds);
 
             default:
-                return Task.FromResult<object>(new { error = $"Unknown action '{action}'. Use start, list, status or stop." });
+                return Task.FromResult<KubernetesPortForwardResult>(
+                    new KubernetesPortForwardResult { Error = $"Unknown action '{action}'. Use start, list, status or stop." });
         }
     }
 
-    private async Task<object> StartForwardAsync(string? target, string? ports, string? namespaceName,
+    private async Task<KubernetesPortForwardResult> StartForwardAsync(string? target, string? ports, string? namespaceName,
         int timeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(target) || !target.Contains('/') || !IsSafeToken(target))
-            return new { error = "A target is required: pod/name, svc/name, deployment/name or statefulset/name." };
+            return new KubernetesPortForwardResult { Error = "A target is required: pod/name, svc/name, deployment/name or statefulset/name." };
         if (!IsSafePorts(ports))
-            return new { error = "The ports must look like 8080:80, 8080:80/udp or a comma-separated list of those." };
+            return new KubernetesPortForwardResult { Error = "The ports must look like 8080:80, 8080:80/udp or a comma-separated list of those." };
         if (!string.IsNullOrWhiteSpace(namespaceName) && !IsSafeToken(namespaceName))
-            return new { error = $"'{namespaceName}' is not a namespace name." };
+            return new KubernetesPortForwardResult { Error = $"'{namespaceName}' is not a namespace name." };
         if (!ExternalTool.Exists("kubectl"))
-            return new { available = false, error = "kubectl was not found on PATH." };
+            return new KubernetesPortForwardResult { Available = false, Error = "kubectl was not found on PATH." };
 
         var startInfo = new ProcessStartInfo("kubectl")
         {
@@ -813,7 +815,7 @@ public sealed class KubernetesService : IKubernetesService
         }
         catch (Exception exception)
         {
-            return new { error = $"kubectl could not be started: {exception.Message}" };
+            return new KubernetesPortForwardResult { Error = $"kubectl could not be started: {exception.Message}" };
         }
 
         var output = new ConcurrentQueue<string>();
@@ -834,14 +836,14 @@ public sealed class KubernetesService : IKubernetesService
         {
             var text = string.Join(Environment.NewLine, output.ToArray());
             process.Dispose();
-            return new
+            return new KubernetesPortForwardStartFailureResult
             {
-                action = "start",
-                target,
-                ports,
-                succeeded = false,
-                output = ProcessRunner.Truncate(text, 4_000),
-                error = string.IsNullOrWhiteSpace(text)
+                Action = "start",
+                Target = target,
+                Ports = ports,
+                Succeeded = false,
+                Output = ProcessRunner.Truncate(text, 4_000),
+                Error = string.IsNullOrWhiteSpace(text)
                     ? "kubectl port-forward exited before it forwarded anything."
                     : FirstLine(text),
             };
@@ -860,17 +862,17 @@ public sealed class KubernetesService : IKubernetesService
         };
 
         _portForwards[sessionId] = session;
-        return new
+        return new KubernetesPortForwardStartResult
         {
-            action = "start",
-            sessionId,
-            target,
-            ports,
-            namespaceName,
-            localPort = FirstLocalPort(ports!),
-            pid = process.Id,
-            forwarding = output.ToArray().ToList(),
-            note = "The forward runs in this server process and ends when it does; k8s_port_forward " +
+            Action = "start",
+            SessionId = sessionId,
+            Target = target,
+            Ports = ports,
+            NamespaceName = namespaceName,
+            LocalPort = FirstLocalPort(ports!),
+            Pid = process.Id,
+            Forwarding = output.ToArray().ToList(),
+            Note = "The forward runs in this server process and ends when it does; k8s_port_forward " +
                    "action=stop ends it earlier. The local port is bound on 127.0.0.1 by kubectl.",
         };
     }

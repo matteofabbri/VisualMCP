@@ -7,6 +7,49 @@ public sealed record ManifestFinding(string RuleId, string Severity, string Mess
 public sealed record ManifestDocument(
     int Index, string? ApiVersion, string? Kind, string? Name, string? NamespaceName, string? File);
 
+/// <summary>What validating one manifest input reports.</summary>
+/// <remarks>
+/// Every member is nullable so a branch leaves the others unset: the MCP serializer drops a null
+/// member, and an empty input therefore serializes to the source, the zero count, an empty finding
+/// list and the error, exactly as it did when this was an anonymous object.
+/// </remarks>
+public record ManifestValidationResult : KubernetesValidateResult
+{
+    /// <summary>The file the manifest came from, or <c>null</c> for <c>content</c>.</summary>
+    public string? Source { get; init; }
+
+    /// <summary>How many YAML documents the input held.</summary>
+    public int? DocumentCount { get; init; }
+
+    /// <summary>The findings counted by severity.</summary>
+    public ManifestFindingCounts? Counts { get; init; }
+
+    /// <summary>The findings counted by rule id.</summary>
+    public IReadOnlyDictionary<string, int>? ByRule { get; init; }
+
+    /// <summary>The identity of every document that was read.</summary>
+    public IReadOnlyList<ManifestDocument>? Documents { get; init; }
+
+    /// <summary>The findings, ordered by document and rule.</summary>
+    public IReadOnlyList<ManifestFinding>? Findings { get; init; }
+
+    /// <summary>What the validation proves, and what it does not.</summary>
+    public string? Note { get; init; }
+}
+
+/// <summary>How many findings the offline validation reported, per severity.</summary>
+public sealed record ManifestFindingCounts
+{
+    /// <summary>How many findings are errors.</summary>
+    public int Error { get; init; }
+
+    /// <summary>How many findings are warnings.</summary>
+    public int Warning { get; init; }
+
+    /// <summary>How many findings are informational.</summary>
+    public int Info { get; init; }
+}
+
 /// <summary>
 /// Offline validation of Kubernetes manifests: the required fields of the built-in kinds, the
 /// selector/template agreement a Deployment needs, the image tag a container should pin, a name that is not
@@ -51,10 +94,16 @@ public static class KubernetesManifestValidator
     /// <summary>The rule catalogue: id to what the rule proves.</summary>
     public static IReadOnlyDictionary<string, string> Catalogue => Rules;
 
-    public static object Validate(string yaml, string? source)
+    public static ManifestValidationResult Validate(string yaml, string? source)
     {
         if (string.IsNullOrWhiteSpace(yaml))
-            return new { source, documentCount = 0, findings = Array.Empty<ManifestFinding>(), error = "The manifest is empty." };
+            return new ManifestValidationResult
+            {
+                Source = source,
+                DocumentCount = 0,
+                Findings = Array.Empty<ManifestFinding>(),
+                Error = "The manifest is empty.",
+            };
 
         var documents = ReadDocuments(yaml);
         var findings = new List<ManifestFinding>();
@@ -122,24 +171,24 @@ public static class KubernetesManifestValidator
                     "Define it in the same file, or ignore this if it is created elsewhere."));
         }
 
-        return new
+        return new ManifestValidationResult
         {
-            source,
-            documentCount = documents.Count,
-            counts = new
+            Source = source,
+            DocumentCount = documents.Count,
+            Counts = new ManifestFindingCounts
             {
-                error = findings.Count(finding => finding.Severity == "error"),
-                warning = findings.Count(finding => finding.Severity == "warning"),
-                info = findings.Count(finding => finding.Severity == "info"),
+                Error = findings.Count(finding => finding.Severity == "error"),
+                Warning = findings.Count(finding => finding.Severity == "warning"),
+                Info = findings.Count(finding => finding.Severity == "info"),
             },
-            byRule = findings.GroupBy(finding => finding.RuleId)
+            ByRule = findings.GroupBy(finding => finding.RuleId)
                 .OrderByDescending(group => group.Count())
                 .ToDictionary(group => group.Key, group => group.Count()),
-            documents = summaries,
-            findings = findings.OrderBy(finding => finding.Document)
+            Documents = summaries,
+            Findings = findings.OrderBy(finding => finding.Document)
                 .ThenBy(finding => finding.RuleId, StringComparer.Ordinal)
                 .ToList(),
-            note = "A table of the built-in kinds, not the Kubernetes OpenAPI schema: a custom resource " +
+            Note = "A table of the built-in kinds, not the Kubernetes OpenAPI schema: a custom resource " +
                    "names no schema here, and a field the table does not name is not checked. " +
                    "k8s_apply with dryRun=true is the server-side authority.",
         };

@@ -18,10 +18,10 @@ public sealed class LocalHistoryTests
         using var history = new LocalHistoryService(workspace, store);
         var path = workspace.PathOf("C.cs");
 
-        var first = ResultAssert.Json(await history.SnapshotAsync());
+        var first = ResultAssert.Wire(await history.SnapshotAsync());
         Assert.True(first.GetProperty("captured").GetInt32() >= 1);
 
-        var before = ResultAssert.Json(await history.HistoryAsync(path));
+        var before = ResultAssert.Wire(await history.HistoryAsync(path));
         var snapshot = Assert.Single(before.GetProperty("snapshots").EnumerateArray());
         var id = snapshot.GetProperty("id").GetInt64();
         Assert.Equal(
@@ -31,15 +31,15 @@ public sealed class LocalHistoryTests
         // The change goes through the same writer the tools use, which keeps the modelled text in step.
         await RefactoringFileWriter.WriteAndUpdateAsync(workspace, path, "internal class C { public int Value = 2; }");
 
-        var second = ResultAssert.Json(await history.SnapshotAsync());
+        var second = ResultAssert.Wire(await history.SnapshotAsync());
         Assert.Equal(1, second.GetProperty("captured").GetInt32());
         Assert.Contains(second.GetProperty("files").EnumerateArray(),
             file => file.GetProperty("file").GetString() == path);
 
-        var after = ResultAssert.Json(await history.HistoryAsync(path));
+        var after = ResultAssert.Wire(await history.HistoryAsync(path));
         Assert.Equal(2, after.GetProperty("snapshots").GetArrayLength());
 
-        var diff = ResultAssert.Json(await history.DiffAsync(path, id));
+        var diff = ResultAssert.Wire(await history.DiffAsync(path, id));
         Assert.Contains("Value = 1", diff.GetProperty("diff").GetString());
         Assert.Contains("Value = 2", diff.GetProperty("diff").GetString());
     }
@@ -53,13 +53,13 @@ public sealed class LocalHistoryTests
         var path = workspace.PathOf("C.cs");
 
         await history.SnapshotAsync();
-        var before = ResultAssert.Json(await history.HistoryAsync(path));
+        var before = ResultAssert.Wire(await history.HistoryAsync(path));
         var id = before.GetProperty("snapshots")[0].GetProperty("id").GetInt64();
 
         await RefactoringFileWriter.WriteAndUpdateAsync(workspace, path, "internal class C { public int Value = 2; }");
         await history.SnapshotAsync();
 
-        var restored = ResultAssert.Json(await history.RestoreAsync(path, id, dryRun: false));
+        var restored = ResultAssert.Wire(await history.RestoreAsync(path, id, dryRun: false));
         Assert.True(restored.GetProperty("applied").GetBoolean());
         Assert.Equal("internal class C { public int Value = 1; }", workspace.Read("C.cs"));
 
@@ -76,12 +76,12 @@ public sealed class LocalHistoryTests
         var path = workspace.PathOf("C.cs");
 
         await history.SnapshotAsync();
-        var before = ResultAssert.Json(await history.HistoryAsync(path));
+        var before = ResultAssert.Wire(await history.HistoryAsync(path));
         var id = before.GetProperty("snapshots")[0].GetProperty("id").GetInt64();
 
         await RefactoringFileWriter.WriteAndUpdateAsync(workspace, path, "internal class C { public int Value = 2; }");
 
-        var preview = ResultAssert.Json(await history.RestoreAsync(path, id));
+        var preview = ResultAssert.Wire(await history.RestoreAsync(path, id));
         Assert.False(preview.GetProperty("applied").GetBoolean());
         Assert.Contains("Value = 1", preview.GetProperty("diff").GetString());
         Assert.Equal("internal class C { public int Value = 2; }", workspace.Read("C.cs"));
@@ -94,7 +94,7 @@ public sealed class LocalHistoryTests
         using var store = new VisualMcpStore(workspace);
         using var history = new LocalHistoryService(workspace, store);
 
-        var result = ResultAssert.Json(await history.HistoryAsync(Path.Combine(workspace.RootDirectory, "missing.cs")));
+        var result = ResultAssert.Wire(await history.HistoryAsync(Path.Combine(workspace.RootDirectory, "missing.cs")));
 
         Assert.False(result.GetProperty("exists").GetBoolean());
         Assert.Equal(0, result.GetProperty("returned").GetInt32());

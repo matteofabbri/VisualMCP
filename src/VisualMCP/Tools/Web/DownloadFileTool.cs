@@ -11,7 +11,7 @@ public static class DownloadFileTool
         "Download a file from an http/https URL (follows redirects, sets a User-Agent) and either save it to a " +
         "path or return a text preview, reporting status, content-type and size. Use this INSTEAD OF a shell " +
         "'Invoke-WebRequest'/'curl' to fetch a dataset, asset or release artifact and verify it.")]
-    public static Task<object> DownloadFile(
+    public static Task<DownloadFileResult> DownloadFile(
         IDownloadFileService download,
         [Description("The http/https URL to download.")] string url,
         [Description("Optional: file path to save to. If omitted, a text preview of the content is returned instead of saving.")] string? outputPath = null,
