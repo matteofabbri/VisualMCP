@@ -34,4 +34,22 @@ public static class FSharpTools
         [Description("Maximum files to read (default 500).")] int maxFiles = 500,
         [Description("Maximum findings to return (default 200; the total is always reported).")] int maxFindings = 200)
         => svc.AnalyzeAsync(path, minSeverity, rule, maxFiles, maxFindings);
+
+    [McpServerTool(Name = "fsharp_symbols"), Description(
+        "The lexical symbol table of the solution's F# files: which declarations a file makes (modules, " +
+        "namespaces, types, union cases, record fields, let bindings and members, with their positions), which " +
+        "declaration a name resolves to, every reference to it — before it in the same file, and in the files " +
+        "that `open` its module — and the declarations nothing reads. F# has no Roslyn model, so this is a " +
+        "name table over the masked source, not a type model: shadowing inside a match arm, a module " +
+        "abbreviation and anything the compiled assembly exports are outside it. action=outline (needs file), " +
+        "find (name), refs (name, optional file) or unused. Read-only.")]
+    public static Task<object> FSharpSymbols(
+        IFSharpSymbolService svc,
+        [Description("outline | find | refs | unused")] string action = "find",
+        [Description("The name to find or follow (find and refs).")] string? name = null,
+        [Description("The declaring file, for outline and to disambiguate refs.")] string? file = null,
+        [Description("A file or a directory to scan (default: the solution directory).")] string? path = null,
+        [Description("Match the name as a substring instead of exactly (find).")] bool partial = false,
+        [Description("Maximum rows to return (default 200).")] int maxResults = 200)
+        => svc.SymbolsAsync(action, name, file, path, partial, maxResults);
 }

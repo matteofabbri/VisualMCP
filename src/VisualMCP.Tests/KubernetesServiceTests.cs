@@ -216,4 +216,248 @@ public sealed class KubernetesServiceTests
         Assert.Contains("chart", ResultAssert.Error(
             await _service.HelmAsync("lint", "api", null, null, null, null, 30)));
     }
+
+    // ── offline manifest validation (k8s_validate) ───────────────────────────
+
+    private const string ValidDeployment = """
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: api
+          namespace: shop
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: api
+          template:
+            metadata:
+              labels:
+                app: api
+            spec:
+              containers:
+              - name: api
+                image: ghcr.io/example/api:1.4.2
+                ports:
+                - containerPort: 8080
+        """;
+
+    [Fact]
+    public void ACompleteDeploymentProducesNoError()
+    {
+        var result = ResultAssert.Json(KubernetesManifestValidator.Validate(ValidDeployment, "deployment.yaml"));
+
+        Assert.Equal(1, result.GetProperty("documentCount").GetInt32());
+        Assert.Equal(0, result.GetProperty("counts").GetProperty("error").GetInt32());
+        Assert.DoesNotContain(result.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("severity").GetString() == "error");
+
+        var document = Assert.Single(result.GetProperty("documents").EnumerateArray());
+        Assert.Equal("Deployment", document.GetProperty("Kind").GetString());
+        Assert.Equal("api", document.GetProperty("Name").GetString());
+    }
+
+    [Fact]
+    public void ADeploymentWithNoSelectorAndAMismatchedSelectorAreBothReported()
+    {
+        var noSelector = KubernetesManifestValidator.Validate("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: api
+            spec:
+              template:
+                metadata:
+                  labels:
+                    app: api
+                spec:
+                  containers:
+                  - name: api
+                    image: api:1.0
+            """, "no-selector.yaml");
+
+        Assert.Contains(ResultAssert.Json(noSelector).GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("RuleId").GetString() == "K8S008");
+
+        var mismatch = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: api
+            spec:
+              selector:
+                matchLabels:
+                  app: api
+                  tier: web
+              template:
+                metadata:
+                  labels:
+                    app: api
+                spec:
+                  containers:
+                  - name: api
+                    image: api:1.0
+            """, "mismatch.yaml"));
+
+        var finding = Assert.Single(mismatch.GetProperty("findings").EnumerateArray(),
+            candidate => candidate.GetProperty("RuleId").GetString() == "K8S009");
+        Assert.Contains("tier", finding.GetProperty("Message").GetString());
+    }
+
+    [Fact]
+    public void AContainerWithoutAnImageAndAnUnpinnedImageAreDifferentFindings()
+    {
+        var missing = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+            apiVersion: v1
+            kind: Pod
+            metadata:
+              name: api
+            spec:
+              containers:
+              - name: api
+            """, "pod.yaml"));
+
+        Assert.Contains(missing.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("RuleId").GetString() == "K8S006");
+
+        var unpinned = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+            apiVersion: v1
+            kind: Pod
+            metadata:
+              name: api
+            spec:
+              containers:
+              - name: api
+                image: nginx:latest
+            """, "pod.yaml"));
+
+        Assert.Contains(unpinned.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("RuleId").GetString() == "K8S016");
+    }
+
+    [Fact]
+    public void IdentityAndDuplicatesAreReportedPerDocument()
+    {
+        var result = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: settings
+            data:
+              a: b
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: settings
+            data:
+              a: c
+            ---
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: Settings
+            data:
+              a: d
+            ---
+            apiVersion: example.com/v1
+            kind: Widget
+            metadata:
+              name: w
+            """, "bundle.yaml"));
+
+        Assert.Equal(4, result.GetProperty("documentCount").GetInt32());
+
+        var ids = result.GetProperty("findings").EnumerateArray()
+            .Select(finding => finding.GetProperty("RuleId").GetString())
+            .ToList();
+
+        Assert.Contains("K8S018", ids); // 'Settings' is not a DNS label
+        Assert.Contains("K8S017", ids); // the same ConfigMap twice
+        Assert.Contains("K8S004", ids); // Widget has no built-in schema
+    }
+
+    [Fact]
+    public void AServiceWithNoPortsAndAClusterScopedKindWithANamespaceAreReported()
+    {
+        var service = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: api
+            spec:
+              selector:
+                app: api
+            """, "service.yaml"));
+
+        Assert.Contains(service.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("RuleId").GetString() == "K8S010");
+
+        var namespaceKind = ResultAssert.Json(KubernetesManifestValidator.Validate("""
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: shop
+              namespace: prod
+            """, "namespace.yaml"));
+
+        Assert.Contains(namespaceKind.GetProperty("findings").EnumerateArray(),
+            finding => finding.GetProperty("RuleId").GetString() == "K8S019");
+    }
+
+    [Fact]
+    public async Task ValidateReadsContentAFileAndAFolder()
+    {
+        var fromContent = ResultAssert.Json(await _service.ValidateAsync(null, ValidDeployment));
+        Assert.Equal(1, fromContent.GetProperty("documentCount").GetInt32());
+
+        var folder = Path.Combine(Path.GetTempPath(), "vmcp-k8s-validate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "deployment.yaml"), ValidDeployment);
+            var fromFile = ResultAssert.Json(await _service.ValidateAsync(Path.Combine(folder, "deployment.yaml"), null));
+            Assert.Equal(1, fromFile.GetProperty("documentCount").GetInt32());
+
+            var fromFolder = ResultAssert.Json(await _service.ValidateAsync(folder, null));
+            Assert.Single(fromFolder.GetProperty("files").EnumerateArray());
+            Assert.Equal(1, fromFolder.GetProperty("results").GetArrayLength());
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+
+        Assert.Contains("exactly one", ResultAssert.Error(await _service.ValidateAsync(null, null)));
+        Assert.Contains("exactly one", ResultAssert.Error(await _service.ValidateAsync("a.yaml", "kind: Pod")));
+        Assert.Contains("Not found", ResultAssert.Error(await _service.ValidateAsync("missing.yaml", null)));
+    }
+
+    // ── port-forward sessions ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PortForwardValidatesBeforeItStartsAnything()
+    {
+        Assert.Contains("target is required", ResultAssert.Error(
+            await _service.PortForwardAsync("start", null, null, "8080:80", null, 5)));
+
+        Assert.Contains("ports", ResultAssert.Error(
+            await _service.PortForwardAsync("start", null, "svc/api", "eighty", null, 5)));
+
+        Assert.Contains("ports", ResultAssert.Error(
+            await _service.PortForwardAsync("start", null, "svc/api", "8080:99999", null, 5)));
+
+        Assert.Contains("Unknown action", ResultAssert.Error(
+            await _service.PortForwardAsync("restart", null, null, null, null, 5)));
+    }
+
+    [Fact]
+    public async Task AnUnknownSessionAndAnEmptyListAreAnswers()
+    {
+        Assert.Contains("No port-forward session", ResultAssert.Error(
+            await _service.PortForwardAsync("status", "pf-nope", null, null, null, 5)));
+
+        var list = ResultAssert.Json(await _service.PortForwardAsync("list", null, null, null, null, 5));
+        Assert.Equal(0, list.GetProperty("sessions").GetArrayLength());
+    }
 }

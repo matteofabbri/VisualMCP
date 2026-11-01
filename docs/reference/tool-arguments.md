@@ -705,6 +705,21 @@ k8s_kustomize(path, namespaceName?, timeoutSeconds=120)
                   rendered YAML and the document count; a local path is checked
                   and made absolute, a git/URL reference is passed through
 
+k8s_validate(file?, content?)
+                → exactly one of file/content; file may be a manifest or a
+                  folder of .yaml/.yml (then each file is validated on its own
+                  and the answer holds one result per file); K8S001–K8S023 are
+                  a table of the built-in kinds, not the OpenAPI schema, and
+                  k8s_apply dryRun=true stays the server-side authority
+
+k8s_port_forward(action=start|list|status|stop, sessionId?, target?, ports?,
+                  namespaceName?, timeoutSeconds=10)
+                → start needs target (pod/name, svc/name, deployment/name) and
+                  ports (8080:80, 8080:80/udp or a comma-separated list); it
+                  waits for the forwarding line and returns sessionId, local
+                  port and pid; the forward lives in the server process, so
+                  stop it or let the server end
+
 k8s_exec(pod, command, container?, namespaceName?, confirm=false, timeoutSeconds=120)
                 → one command inside the container, the part after `--`; it
                   changes state, so it needs confirm=true; no shell is involved,
@@ -782,6 +797,20 @@ analyze_js(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
                   file (a package specifier is not resolved). Unknown rule ids
                   return the catalogue.
 
+js_symbols(action=find|outline|refs|unused, name?, file?, path?, partial=false,
+           maxResults=200)
+                → a lexical symbol table over the same files: outline needs a
+                  file and lists its declarations (name, kind, line, column,
+                  container, exportedAs, uses) with its imports and exports;
+                  find and refs need a name (partial=true makes it a substring);
+                  refs follows a declaration's own uses and the uses in the
+                  modules that import it (via names the specifier); unused lists
+                  the declarations nothing reads. A name resolves to the
+                  declaration in the innermost enclosing scope; an imported name
+                  resolves through its binding when the specifier is relative;
+                  JSX component tags are references; a member through an untyped
+                  object and eval are not resolved
+
 markup_files(path?, kind=both, maxFiles=500)
                 → kind is html|css|both; per file: lines, elements, id count,
                   how many repeat, finding count
@@ -810,6 +839,16 @@ fsharp_files(path?, maxFiles=500)
 analyze_fsharp(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
                 → FS0001-FS0010 over masked source; comments (including
                   (* … *)) and string literals are blanked first
+
+fsharp_symbols(action=find|outline|refs|unused, name?, file?, path?,
+               partial=false, maxResults=200)
+                → the lexical name table: outline needs a file and lists its
+                  modules, types, union cases, record fields, let bindings and
+                  members with line/column/container; find and refs need a name;
+                  refs counts a use before the declaration in the same file and,
+                  across files, only in a file that opens the declaring module;
+                  unused refuses to call a name dead when it occurs somewhere
+                  the scan could not resolve
 
 trace_data_flow(projectName?, cwe?, depth=2, maxResults=200)
                 → flows from a source (query/form/header/cookie/body/route data,

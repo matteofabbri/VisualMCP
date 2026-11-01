@@ -16,7 +16,7 @@ Three kinds of absence are kept apart, because they need different decisions:
 | ⚠️ | Partial. Something exists, and the row says exactly what is missing. | Extend the existing tool |
 | 💀 | Not applicable by design. The feature belongs to an editor UI, not to a headless MCP server. | Nothing — the client supplies the UI |
 
-Last updated: 2026-11-01 — **416 tools** in the running build (`capability_report` prints the live
+Last updated: 2026-11-01 — **420 tools** in the running build (`capability_report` prints the live
 count). Version control and collaboration is not on this page: it is a feature section of
 [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md), because none of it is a gap. The
 batches that closed rows here, each with the count it produced, are in
@@ -28,7 +28,7 @@ batches that closed rows here, each with the count it produced, are in
 
 | Area | State | Priority | Why this priority |
 |---|---|:---:|---|
-| [Language and platform scope](#1-language-and-platform-scope) | ⚠️ | Low if your solution uses them | C#, VB, XAML, Razor, EF Core, Kubernetes and the Node toolchain are covered semantically or by a wrapper; SQL, JS/TS, HTML/CSS, YAML and F# each have a **scanned** layer with an inventory and a rule set. What none of the scanners does is resolve a symbol or type-check |
+| [Language and platform scope](#1-language-and-platform-scope) | ⚠️ | Low if your solution uses them | C#, VB, XAML, Razor, EF Core, Kubernetes and the Node toolchain are covered semantically or by a wrapper; SQL, JS/TS, HTML/CSS, YAML and F# each have a **scanned** layer with an inventory and a rule set, and JS/TS and F# also have a **lexical symbol table** (`js_symbols`, `fsharp_symbols`: declarations, the declaration a name resolves to, its references). What none of the scanners does is type-check an expression |
 | [Debugger](#2-debugger) | ✅ | — | Implemented: 20 `debug_*` tools over netcoredbg (DAP) — line, function and data breakpoints, per-exception-type filters, value editing and restart. Edit-and-continue is the one thing the adapter exposes only over GDB/MI, so it is an engine limit ([reference/limits.md](reference/limits.md#debugger)) rather than a missing tool; the windows are the client's ([section 10](#10-ui-bound-features--not-applicable-by-design)) |
 | [Inspection administration](#3-inspection-administration-and-background-analysis) | ✅ | — | Severity, suppression, custom rules, `.DotSettings` reading, naming rules, spelling and a warm analysis loop exist; only the proprietary ReSharper id set is absent |
 | [Test workflow](#4-test-workflow) | ✅ | — | Running, discovery, debugging a test, continuous testing, affected tests, flaky detection and mutation testing all exist; only the explorer UI is the client's |
@@ -44,7 +44,7 @@ batches that closed rows here, each with the count it produced, are in
 ## 1. Language and platform scope
 
 The semantic engine is **Roslyn**, and it reads the two languages a .NET solution can be written in:
-**C#** and **Visual Basic**. Everything else is one of five things:
+**C#** and **Visual Basic**. Everything else is one of six things:
 
 - a dedicated **Razor/Blazor markup scanner** (heuristics over `.cshtml`/`.razor`),
 - a **markup layer** for XAML, with the C# code-behind analysed through Roslyn,
@@ -54,6 +54,9 @@ The semantic engine is **Roslyn**, and it reads the two languages a .NET solutio
 - an **inventory** per file kind (`sql_files`, `js_files`, `markup_files`, `yaml_files`,
   `fsharp_files`): what the file declares, which modules it imports, the ids of a page, the
   `kind`/`apiVersion` of a manifest,
+- a **lexical symbol table** for the two scanned languages a token can follow — `js_symbols` and
+  `fsharp_symbols`: the declarations, the declaration a name resolves to, and its references, with no
+  type model behind them,
 - **text** — `search_text`, `text_index` (FTS5), `read_file`, and any tool that does not need a syntax
   tree.
 
@@ -63,21 +66,22 @@ wrapper reports a missing client instead of installing one.
 
 The full-text index deliberately accepts many extensions, so every file a repository carries is
 *findable*. A scanned language is the next step: its rules are read from masked source and stated one
-by one. What no scanner does is resolve a symbol or type-check an expression — that is the distinction
-this section keeps.
+by one, and where a token can prove a binding, a **lexical** symbol table resolves it — which is a name
+resolution over masked source, not a type model. What no scanner here does is type-check an expression;
+that is the distinction this section keeps.
 
 | Language / platform | What works today | What is missing |
 |---|---|---|
 | **C#** | The full surface: semantic navigation, references, callers, refactorings, style, inspections, complexity, profiling, decompilation | Only the general limits in [reference/limits.md](reference/limits.md): dynamic dispatch is not modelled, and a static call graph needs `find_reflection_usage` / `framework_entry_points` to cover reflection and framework conventions (both shipped); behaviour is measured by `verify_change` when the suite covers the change |
-| **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup` including member reordering); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`, `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`); **refactorings and generation** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `generate_docs`, `implement_members`, `reduce_complexity`/`fix_complexity`); `simplify_vb_code` (15 ids, 34 refused with a reason); `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; the context actions are C#-shaped and have no VB matcher; `reduce_complexity` reports extract-method as a hand edit |
-| **F#** | `fsharp_files` — the declaration inventory F# has no symbol index for (modules, types, top-level functions, opens); `analyze_fsharp` — FS0001–FS0010 over masked source (tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open`); `build_project` returns the F# compiler's own diagnostics (FS####); `run_tests` runs F# tests | No semantic model: F# is not a Roslyn language, so no symbols, references, refactorings, inspections or complexity. The scanner resolves nothing |
+| **Visual Basic** | The **symbol index** (declarations, uses by kind, hierarchy, outline, metacode, unused); **metacode** (translate, compare, index trees and complexity, generate); the scoped tools over both languages (`structural_search` with VB patterns, `format_code`, `optimize_usings` for `Imports`, `code_cleanup` including member reordering); **inspections** through the packs that ship VB analyzers (.NET analyzers, the VMC0001 house rule) and `inspection_baseline`; **analysis** (`find_dead_code`, `find_code_smells`, `find_async_anti_patterns`, `find_performance_anti_patterns`, `complexity_report`, `get_complexity_hotspots`, `get_metrics`, `analyze_complexity`, `get_cohesion_metrics`, `find_duplicate_code`); **refactorings and generation** (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `generate_docs`, `implement_members`, `reduce_complexity`/`fix_complexity`); `simplify_vb_code` (**41 of the 49 VB ids**, the other 8 refused by id with a reason); `context_action` on a `.vb` document (**33 ids** with a VB spelling) and `apply_code_fix` with the analyzers' VB fixers; `build_project`, `run_tests`, `run_project`, `get_diagnostics`, `run_code_analysis`; text search/index; Git and file tools | The refactorings that are C# syntax or C# idiom (primary constructors, records, file-scoped namespaces, expression bodies, `using` static, the pattern combinators) — they refuse with that language reason; the C#-only inspection packs report that they do not cover a VB project; the declaration-shape refactoring tail listed in §1.2 (`extract_class`/`extract_superclass`, `inline_class`/`inline_parameter`/`inline_symbol`, `move_instance_method`/`move_static_members`, `move_type_to_nested_scope`/`move_type_to_outer_scope`, `function_to_indexer`/`indexer_to_function`); `reduce_complexity` reports extract-method as a hand edit |
+| **F#** | `fsharp_files` — the declaration inventory (modules, types, top-level functions, opens); **`fsharp_symbols`** — the lexical symbol table: the declarations a file makes (modules, namespaces, types, union cases, record fields, `let` bindings and members, with their positions), the declaration a name resolves to (before it in the same file, or in a file that `open`s its module), every reference, and the declarations nothing reads; `analyze_fsharp` — FS0001–FS0010 over masked source (tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open`); `build_project` returns the F# compiler's own diagnostics (FS####); `run_tests` runs F# tests | No semantic model: F# is not a Roslyn language, so there is no type checking, no rename/refactoring, no inspection and no complexity. The symbol table is lexical — shadowing inside a match arm, a module abbreviation and a name the compiled assembly exports are outside it — and the compiler's FS#### diagnostics remain the authority |
 | **XAML — WPF, WinUI 3, MAUI, Avalonia, UWP** | `xaml_pages` (inventory + the project's dialect and target frameworks), `analyze_xaml` (XAML0001–XAML0015, binding paths validated against the data type), `xaml_bindings` (the binding inspector), `xaml_tree` (the element tree), `xaml_navigate`; verified edits `xaml_rename`, `xaml_extract_style`, `xaml_promote_resource`, `format_xaml`; the C# code-behind is fully analysed. The data type comes from `x:DataType`/`DataType` in scope, a code-behind `DataContext = …`/`BindingContext = …`, a design-time `d:DataContext`, or a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element | No rendered preview or designer, and no compiled XAML: a binding whose data type none of those names is `not-checked` rather than guessed, and a key from a referenced assembly's theme dictionary is invisible |
-| **JavaScript / TypeScript / JSX / TSX** | `node_info`, `node_install`, `node_script` (the project's npm/pnpm/yarn); `node_typecheck` (tsc → `TSxxxx` diagnostics with file:line), `node_lint` (eslint → findings with rule and position), `node_outdated`, `node_audit`; `js_files` (imports, exports, functions, classes, JSX, the relative imports resolved into a module graph with its import cycles) and `analyze_js` (JS0001–JS0017 over masked source; a relative specifier is resolved against the file system, a package specifier is not) | The relative specifiers do form a module graph (`js_files` reports the edges and the cycles), but the JS/TS itself has no parser or type model: no symbols, references, rename or refactoring; no bundler or component analysis; no browser preview. The scanner proves the shape of a line, not a binding |
+| **JavaScript / TypeScript / JSX / TSX** | `node_info`, `node_install`, `node_script` (the project's npm/pnpm/yarn); `node_typecheck` (tsc → `TSxxxx` diagnostics with file:line), `node_lint` (eslint → findings with rule and position), `node_outdated`, `node_audit`; `js_files` (imports, exports, functions, classes, JSX, the relative imports resolved into a module graph with its import cycles) and `analyze_js` (JS0001–JS0017 over masked source; a relative specifier is resolved against the file system, a package specifier is not); **`js_symbols`** — the lexical symbol table: the declarations a file makes (functions, classes and their members, variables and destructured bindings, parameters, TypeScript interfaces/types/enums, import bindings), the declaration a name resolves to in the innermost enclosing scope, every reference inside the module and through the imports other modules take from it, JSX component tags as references, and the declarations nothing reads | No type model: an imported name resolves through its binding to the exporting module only when the specifier is relative and the module is in the scan, a member reached through an untyped object, a computed member name and `eval` are not resolved, and there is no rename or refactoring; no bundler or component analysis; no browser preview |
 | **HTML / CSS / SCSS** | `markup_files` (elements, distinct classes, selectors, ids, duplicates) and `analyze_markup`: HTML0001–HTML0015 (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS0001–CSS0009 (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a selector that matches no element in the scanned pages), with the CSS rules and selectors also read from every `<style>` block and the safety rules checked on an inline `style` attribute | A structural scanner, not a renderer. A selector resolves against the page index — compound parts with tag, classes, id, attribute conditions and the structural pseudo-classes `:root`/`:first-child`/`:last-child`/`:only-child`/`:empty`, joined by descendant, child, adjacent-sibling and general-sibling combinators — on the nesting the tags write. A selector whose meaning only a browser can decide (`:hover`, `:checked`, `:nth-child()`, `:has()`) is indexed but never reported; specificity and the cascade are not resolved, and a CDN stylesheet or a style built in JavaScript (CSS-in-JS) is outside the scan; no CSS-isolation analysis, no formatting |
-| **YAML** | `yaml_files` (documents, top-level keys, and `kind`/`apiVersion`/`metadata.name` for a manifest) and `analyze_yaml`: YAML0001–YAML0008 (tab indentation, duplicate key, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collection, an alias with no anchor) and YAML0009–YAML0012 (kind without apiVersion or the reverse, a metadata block with no name, a container with no image, two containers with the same name) | No schema validation (Kubernetes, Helm or CI); port-forward is absent and kustomize is an offline render, not a schema check. An indentation-aware line scan, not a YAML parser |
+| **YAML** | `yaml_files` (documents, top-level keys, and `kind`/`apiVersion`/`metadata.name` for a manifest) and `analyze_yaml`: YAML0001–YAML0008 (tab indentation, duplicate key, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collection, an alias with no anchor) and YAML0009–YAML0012 (kind without apiVersion or the reverse, a metadata block with no name, a container with no image, two containers with the same name); a Kubernetes manifest is also validated field by field offline by `k8s_validate` (K8S001–K8S023) | No schema for a CI pipeline file or a compose file, and no schema at all for YAML that is not a Kubernetes manifest: the structural rules are a line scan, `k8s_validate` is a table of the built-in kinds rather than the OpenAPI schema |
 | **SQL** | `sql_files` (per-file statements, verbs and tables) and `analyze_sql` (SQL0001–SQL0012: lexical, correctness, safety, security and performance rules); the scan reads the DDL the files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) into a schema model and checks a statement's table and column names against it (SQL0011 a table the scan does not declare, SQL0012 a column its declared table does not have), opt-out with `schema=off`; SQL built in C# is followed by `trace_data_flow` (a request value reaching `FromSqlRaw`/`ExecuteSqlRaw`/Dapper/`CommandText`) | No dialect parser and no live database: the schema is the one the scanned files declare, so a table created elsewhere is reported as undeclared, not as invalid. No execution, no query plan, no formatting |
 | **EF Core** | The C# model — `DbContext`, entities, configurations — is analysed like any C#; `ef_migrations` runs the project's own `dotnet ef` (list, add, script, diff, remove, update, info, dbcontext-list, pending-model-changes) and compares the model to the migration snapshot field by field (`model-diff`: the properties added in the model, the snapshot members with no CLR member — usually shadow properties — and the type changes) | Model drift is detected by `pending-model-changes` and explained field by field by `model-diff`; `script` returns the migration SQL and `diff` the SQL between two migrations. No inspection of the SQL a single query will generate (use `profile_database` on a running process), no seeding help |
-| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true`; `k8s_helm` covers releases and lints a chart offline (`lint`); `yaml_files`/`analyze_yaml` read a manifest's identity and its structural mistakes | No schema validation of a rendered manifest beyond `kubectl apply --dry-run=server` (a chart is linted by `helm lint`), no port-forward |
+| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_kustomize` renders an overlay offline; `k8s_validate` validates a manifest offline against a table of the built-in kinds (K8S001–K8S023); `k8s_port_forward` starts, lists, inspects and stops a port-forward session; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true`; `k8s_helm` covers releases and lints a chart offline (`lint`); `yaml_files`/`analyze_yaml` read a manifest's identity and its structural mistakes | No OpenAPI/admission-schema validation: `k8s_validate` checks the required fields of the built-in kinds and the selector/template agreement, and `kubectl apply --dry-run=server` stays the authority for a CRD's schema and a webhook's rules; a port-forward is bound to the server process's lifetime |
 | **Razor / Blazor** | Page inventory, 17 markup/accessibility rules (RZ2001–RZ2017), 11 security rules (RZ1001–RZ1011), verified edits, Razor→metacode | No Razor compilation: `@model` members, tag helpers, component parameters, cascading values, `@bind` types, CSS isolation and JS interop are unchecked |
 | **Python / C++** | `metacode_translate` / `metacode_compare` take a `.py`/`.cpp` path (or `language=python|cpp` with source text) and run the dumper for it, and `translate_python_file` (CPython's `ast`) / `translate_cpp_file` (`clang -ast-dump=json`) return the dump itself; a saved dump is lowered too, with origin lines and a diagnostic per unmodelled construct | No type checker, no symbol navigation, no editing — the readers model syntax for comparison, not a language service |
 | **Java, Rust** | `metacode_translate` / `metacode_compare` read `.java` and `.rs` (and `language=java|rust`): Java through `JavaFrontend`, Rust through `RustFrontend`, both recursive-descent readers over the source | No symbol navigation, no analysis, no editing |
@@ -215,10 +219,10 @@ What is still missing:
 | Metacode translate/generate | ✅ `VisualBasicFrontend` lowers modules, classes, structures, interfaces, enums, properties, methods, events and the statement/expression vocabulary; `With … End With`, `ReDim`, `On Error` and `RaiseEvent` stay `RAW[vb]` with a diagnostic, and `metacode_generate` emits C# from a `.vb` file |
 
 Workaround: what is still C#-shaped is the refactoring catalogue's declaration-shape tail (the extract
-family beyond method and interface, the inline family, the move family beyond the type and its folder,
-the indexer conversions); a VB project keeps the symbol index, the inspections and their fixes, the
-analysis, the metrics, the generation tools, the context actions, the style ids and the fifteen
-refactorings listed above.
+family beyond method and interface, the inline family beyond `inline_field`, the move family beyond the
+type, its folder and its namespace, and the indexer conversions); a VB project keeps the symbol index, the
+inspections and their fixes, the analysis, the metrics, the generation tools, the context actions, the
+style ids and the nineteen refactorings listed above.
 
 
 ### 1.3 F#
@@ -228,10 +232,15 @@ so the semantic engine has no F# model to give. What it does have is the compile
 `dotnet build` and parses the MSBuild log, which is where the F# compiler's own `FS####` diagnostics
 appear; `run_tests` runs an F# test project, and `search_text`/`text_index`/`read_file` read the source.
 
-What is absent, and stays absent as a product boundary rather than as a pending item: symbols, references,
-rename, refactorings, inspections and complexity. Those need FSharp.Compiler.Service — a second compiler
-platform embedded next to Roslyn — and this product is a Roslyn server. The boundary is in section 1's
-table and repeated in section 12 so a comparison with an IDE stays honest.
+What is absent, and stays absent as a product boundary rather than as a pending item: type checking, rename,
+refactorings, inspections and complexity. Those need FSharp.Compiler.Service — a second compiler platform
+embedded next to Roslyn — and this product is a Roslyn server. **What it does have is `fsharp_symbols`
+(2026-11-01)**: a lexical name table over the masked source — modules, namespaces, types, union cases, record
+fields, `let` bindings and members with their positions; a name resolves to the declaration of the same name
+before it in the file, and across files only through an `open` the other file declares. It answers "where is
+this declared, what does this name refer to, who reads it, what is dead" without a compiler, and it says so
+in every answer. The rest of the boundary is in section 1's table and repeated in section 12 so a comparison
+with an IDE stays honest.
 
 ### 1.4 XAML — WPF, WinUI 3, MAUI, Avalonia, UWP
 
@@ -298,11 +307,21 @@ diagnostics with `file(line,col)`, counts and the raw output when nothing parsed
 `node_outdated` and `node_audit` normalise the npm, pnpm and yarn 1 shapes. It never downloads: `tsc` and
 `eslint` are resolved in `node_modules/.bin`, and a missing one is reported with the command that installs it.
 
-Still missing, because it needs a JavaScript/TypeScript frontend:
+**Implemented** (2026-11-01): a **lexical symbol table** over the same files. `js_symbols` tokenises the
+masked source, opens a scope for every brace block and records a declaration for every name a declaration
+position introduces — `function`, `class` (and its members, private ones included), a `const`/`let`/`var`
+declarator with destructuring, a parameter, a TypeScript interface/type/enum, an import binding — with its
+line, column, container and the names it is exported under. Every identifier in a read position resolves to
+the declaration in the innermost enclosing scope that carries its name; an imported name resolves through its
+binding, and a **relative** specifier is resolved against the file system, so a use in one module reaches the
+declaration in the module it imports. `find`, `refs`, `outline` and `unused` answer from that table. JSX
+component tags are references; a regular-expression literal and a string are not code.
 
-- no parser or type model, so no `find_symbol`, references, callers, rename or refactoring *in* the
-  JS/TS — the relative imports do form a module graph (`js_files`), which is what `analyze_js` checks
-  for cycles;
+Still missing, because it needs a type model rather than a tokeniser:
+
+- no type model, so no type checking, no rename or refactoring *in* the JS/TS — a member reached through an
+  untyped object, a computed member name and `eval` are outside the table, and a package specifier is not
+  resolved (the project's own resolver owns that);
 - no JSX/TSX component analysis, props/state checks or bundler configuration understanding;
 - no DOM for HTML/CSS: `markup_files`/`analyze_markup` scan tags and apply HTML0001–HTML0015 and
   CSS0001–CSS0009 (section 1's table) — the CSS rules also run on every `<style>` block — and resolve a
@@ -316,27 +335,31 @@ Still missing, because it needs a JavaScript/TypeScript frontend:
 ### 1.6 SQL, databases and EF Core
 
 **Implemented** (2026-10-31): `sql_files` inventories the `.sql` files (lines, statements, verbs, tables
-named) and `analyze_sql` applies SQL0001–SQL0010. The scanner masks `--`/`/* */` comments, single-quoted
+named) and `analyze_sql` applies SQL0001–SQL0012. The scanner masks `--`/`/* */` comments, single-quoted
 literals (with `''` escapes), dollar-quoted bodies and bracket-quoted identifiers before it matches, so a
 keyword inside a comment or a string does not fire; findings carry `file:line:column`, the source line and
-a fix.
+a fix. It also reads the DDL the scanned files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) into a schema
+model and checks a statement's table and column names against it (SQL0011 a table the scan does not declare,
+SQL0012 a column its declared table does not have), opt-out with `schema=off`.
 
-What it deliberately does not do, because it is a pattern scanner and not a dialect parser: no schema
-object model, no validation against a database, no formatting, no execution, no query-plan capture, no
-schema comparison, and no language injection — SQL embedded in a C# string is reached by `trace_data_flow`
-as a sink, but its text is not parsed or highlighted as SQL.
+What it deliberately does not do, because it is a pattern scanner and not a dialect parser: no reading of
+a database, no formatting, no execution, no query-plan capture, no comparison of a schema against a live
+catalog, and no language injection — SQL embedded in a C# string is reached by `trace_data_flow` as a sink,
+but its text is not parsed or highlighted as SQL.
 
 EF Core is visible only from the C# side: `DbContext`, `DbSet<>`, entity classes and configuration
 classes are ordinary C# and get the full C# tool surface. **Implemented** (2026-10-30): `ef_migrations`
-runs the project's own `dotnet ef` (list, add, script, remove, update, info, dbcontext-list) and
-returns the command, exit code, stdout and stderr as structured data.
+runs the project's own `dotnet ef` (list, add, script, diff, model-diff, remove, update, info,
+dbcontext-list, pending-model-changes) and returns the command, exit code, stdout and stderr as structured
+data; `model-diff` compares the `ModelSnapshot` with the entity classes property by property (properties
+added in the model, shadow properties, type changes), so `pending-model-changes`'s boolean has a
+field-level answer.
 
 Still missing:
 
-- a field-level comparison of the model itself against the snapshot — drift is detected by
-  `ef_migrations action=pending-model-changes` (EF Core 8+) and the SQL between two migrations is
-  `action=diff`, but the model's own fields are not compared against the snapshot's;
-- inspection of the SQL a single query will generate (`action=script` returns the migration SQL);
+- inspection of the SQL a single query will generate (`action=script` returns the migration SQL,
+  `action=diff` the SQL between two migrations; a query's own SQL needs `profile_database` on a running
+  process);
 - seeding and data operations.
 
 What remains outside the tool: the database itself. `ef_migrations` covers the workflow and a migration
@@ -355,10 +378,16 @@ Missing:
 - Dockerfile analysis or linting, image layer/size analysis, build-cache inspection;
 - registry operations (login, tag, push), image vulnerability scanning;
 - Kubernetes: `k8s_*` wraps kubectl (status, context, get as rows, describe, logs, kustomize render,
-  exec, apply/delete/rollout with `confirm`) and `k8s_helm` wraps releases and `helm lint`; still
-  missing are manifest schema validation beyond the server-side dry run and port-forward;
-- YAML schema validation for compose/k8s manifests: `yaml_files`/`analyze_yaml` read the structure
-  (YAML0001–YAML0012) and a manifest's `kind`/`apiVersion`/`name`, but no schema is applied.
+  a validated manifest, port-forward sessions, exec, apply/delete/rollout with `confirm`) and `k8s_helm`
+  wraps releases and `helm lint`; **`k8s_validate`** (2026-11-01) validates a manifest offline against a
+  table of the built-in kinds (K8S001–K8S023: required fields, the selector/template agreement, a pinned
+  image, a DNS-1123 name, a duplicate resource, a cluster-scoped kind with a namespace), and
+  **`k8s_port_forward`** starts, lists, inspects and stops a `kubectl port-forward` session. What remains
+  outside is the OpenAPI schema and an admission webhook's rules — `kubectl apply --dry-run=server` is the
+  authority for those — and a forward that outlives the server process;
+- YAML schema validation for a CI pipeline file or a compose file: `yaml_files`/`analyze_yaml` read the
+  structure (YAML0001–YAML0012), and a Kubernetes manifest gets the field-level validation above; no other
+  YAML dialect has a schema here.
 
 ### 1.8 Razor and Blazor
 
@@ -680,10 +709,10 @@ part of the SonarQube/CodeScene/IDE feature that is still absent. The
 
 ## 12. What to do today
 
-This section used to be a workaround table. **Closed 2026-10-31**: every row is now either a tool in this
-build or a boundary stated with its reason, and the rows whose feature already existed are deleted. The
-table below is that boundary — the first column is the question, the second says which call answers it or
-where the answer stops and why.
+This section used to be a workaround table. **Closed 2026-10-31**, and narrowed again on **2026-11-01**:
+every row is now either a tool in this build or a boundary stated with its reason, and the rows whose
+feature already existed are deleted. The table below is that boundary — the first column is the question,
+the second says which call answers it or where the answer stops and why.
 
 | You need | The tool — or where the boundary is |
 |---|---|
@@ -691,11 +720,11 @@ where the answer stops and why.
 | HTML/CSS/SCSS diagnostics | `markup_files` and `analyze_markup` (HTML0001–HTML0015, CSS0001–CSS0009). Tags are scanned with a quote-aware reader and CSS is masked; a selector resolves against the page index — compound parts with tag, classes, id, attribute conditions and structural pseudo-classes, joined by descendant, child and sibling combinators — while a selector whose meaning only a browser can decide is indexed but never reported, and specificity and the cascade are not resolved (§1.5) |
 | XAML diagnostics, bindings and edits | `xaml_pages`, `analyze_xaml` (XAML0001–XAML0015), `xaml_bindings`, `xaml_tree`, `xaml_navigate`, `xaml_rename`, `xaml_extract_style`, `xaml_promote_resource`, `format_xaml`. A binding path is checked against the type the markup names, a design-time `d:DataContext`, a code-behind `DataContext = …` or a root `<Root.DataContext><local:ViewModel/></Root.DataContext>`; a data type none of those names is `not-checked`, and the XAML itself is not compiled |
 | SQL diagnostics | `sql_files` and `analyze_sql` (SQL0001–SQL0012). A pattern scanner, not a dialect parser: the schema model is the DDL the scanned files carry (`CREATE TABLE`/`ALTER TABLE … ADD`), used for SQL0011/SQL0012, and `schema=off` turns it off. No live database, no execution, no query plan (§1.6) |
-| JS/TS diagnostics and build | `node_info`/`node_install`/`node_script` for the toolchain; `node_typecheck` (tsc → `TSxxxx`) and `node_lint` (eslint → findings) for the diagnostics; `node_outdated`/`node_audit` for the dependency health; `js_files` and `analyze_js` (JS0001–JS0017) for the source itself, with a relative import resolved to a file and a module graph that reports its cycles. No type model or symbol table (§1.5) |
+| JS/TS diagnostics, build and symbols | `node_info`/`node_install`/`node_script` for the toolchain; `node_typecheck` (tsc → `TSxxxx`) and `node_lint` (eslint → findings) for the diagnostics; `node_outdated`/`node_audit` for the dependency health; `js_files` and `analyze_js` (JS0001–JS0017) for the source itself, with a relative import resolved to a file and a module graph that reports its cycles; **`js_symbols`** for the symbol table — `outline` a file, `find` a name, `refs` every occurrence (inside the module and through the modules that import it), `unused` the declarations nothing reads. No type model, so no rename or refactoring, and a member reached through an untyped object is not resolved (§1.5) |
 | EF Core migrations | `ef_migrations` (list/add/script/diff/**model-diff**/remove/update/info/dbcontext-list/pending-model-changes): the migration SQL, the schema delta between two migrations, whether the model still matches the snapshot, and — with `model-diff` — the field-level comparison of the snapshot with the entity classes (properties added in the model, shadow properties, type changes). Per-query SQL inspection is runtime, through `profile_database` (§1.6) |
-| Kubernetes and Helm | `k8s_status`/`k8s_context`/`k8s_get`/`k8s_describe`/`k8s_logs` read; `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`/`k8s_delete`/`k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases and `lint` checks a chart offline. No manifest schema validation beyond the server-side dry run, no port-forward (§1.7) |
+| Kubernetes and Helm | `k8s_status`/`k8s_context`/`k8s_get`/`k8s_describe`/`k8s_logs` read; `k8s_kustomize` renders an overlay offline; `k8s_validate` checks a manifest offline against a table of the built-in kinds (K8S001–K8S023); `k8s_port_forward` starts/lists/status/stops a port-forward session; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`/`k8s_delete`/`k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases and `lint` checks a chart offline. The OpenAPI/admission schema is the server's: `kubectl apply --dry-run=server` remains the authority for a CRD and a webhook, and a forward ends with the server process (§1.7) |
 | VB refactoring and editing | `apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `change_signature` (declaration and every plain call site, call parentheses optional), `change_type`, `use_base_type`, `type_to_partial`, `safe_delete`, `extract_interface` (an `Interface` plus the `Implements` clause on the type and on each member), `extract_method`, `move_type`, `move_to_folder` (the folder derived from the `Namespace` block), `property_to_auto`, `function_to_property` (both call spellings), `inline_field`, `move_to_namespace` and `property_to_function` apply; `context_action` on a `.vb` file implements the 33 ids that have a VB spelling (guards, Try/If/Using wrapping, Imports, interpolation, digit separators, named arguments, use var/explicit type, split declaration, StringBuilder, merge/split checks, conditional access, `Select Case`, LINQ both ways, For Each↔For, invert loop); `apply_code_fix` runs the .NET analyzers' VB fixers. What is still C#-only is the rest of the declaration-shape tail — `extract_class`/`extract_superclass`, the inline family beyond `inline_field`, the move family beyond `move_type`/`move_to_folder`/`move_to_namespace`, and the indexer conversions (§1.2) |
-| F# analysis | `fsharp_files` lists the declarations (modules, types, functions, opens) and `analyze_fsharp` applies FS0001–FS0010; `build_project` returns the compiler's FS#### diagnostics, `run_tests` runs F# tests, `search_text`/`text_index` read the files. No symbols, references or refactorings: F# is not a Roslyn language (§1.3) |
+| F# analysis and symbols | `fsharp_files` lists the declarations (modules, types, functions, opens); **`fsharp_symbols`** answers `outline`/`find`/`refs`/`unused` from a lexical name table — a declaration, the declaration a name resolves to before it in the file, its references in the file and in the files that `open` its module; `analyze_fsharp` applies FS0001–FS0010; `build_project` returns the compiler's FS#### diagnostics, `run_tests` runs F# tests, `search_text`/`text_index` read the files. No type checking, no rename or refactoring: F# is not a Roslyn language (§1.3) |
 | Debug a process | `debug_launch`/`debug_attach` with line, function and data breakpoints, per-exception-type filters, stepping, `debug_stack`, `debug_variables`, `debug_evaluate` (read or write), `debug_restart` (20 `debug_*` tools); `profile_stacks`/`profile_dump`/`profile_slowdown` remain the post-mortem path (§2) |
 | Single test | `run_test` (name, class or raw filter, TRX result) and `rerun_failed`; `debug_test` for the failing one (§4) |
 | Inspection suppression and severity | `suppress_finding` (a `#pragma` around the member or a `SuppressMessage` attribute, compiler-gated) and `configure_inspection` (severity per scope); `inspection_baseline` gates CI (§3) |
@@ -725,6 +754,7 @@ batch (`capability_report` prints the current one); the per-feature record of ea
 
 | # | Date | What closed | Tools |
 |---:|---|---|---|
+| 34 | 2026-11-01 | **The four remaining implementable §12 boundaries**: **`js_symbols`** — a lexical symbol table for JavaScript/TypeScript/JSX/TSX: a tokeniser over the masked source, one scope per brace block, a declaration for every name a declaration position introduces (function, class and its members, declarator incl. destructuring, parameter, TypeScript interface/type/enum, import binding) and a resolution to the innermost scope carrying the name; an imported name resolves through its binding to the exporting module when the specifier is relative, JSX component tags are references, and `outline`/`find`/`refs`/`unused` answer from it. **`fsharp_symbols`** — the same four questions over F#, as a name table: modules, namespaces, types, union cases, record fields, `let` bindings and members, a name resolving before it in its file and, across files, only through an `open`. **`k8s_validate`** — an offline manifest validator for the built-in kinds (K8S001–K8S023: required fields, selector/template agreement, a pinned image, a DNS-1123 name, a duplicate resource, a cluster-scoped kind with a namespace, an empty ConfigMap/Secret, a dangling volume reference), with its own YAML path reader. **`k8s_port_forward`** — `kubectl port-forward` as a session: start (waits for the forwarding line), list, status, stop. Also corrected the stale rows this page still carried: the VB row said 15 style ids (41 now) and no VB context actions (33 ids), and the EF section still called the model-vs-snapshot field diff missing. What stays a boundary: a type model for JS/TS (no rename/refactoring), type checking for F#, a live database, the OpenAPI schema and a forward outliving the server, CSS specificity and the cascade, the VB declaration-shape tail, and the two by design (§5, §10) | 416 → 420 |
 | 33 | 2026-11-01 | **Four §12 boundaries narrowed, from the model instead of a guess**: `analyze_sql` reads the DDL the scanned files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) into a schema model and gains **SQL0011** (a table the scan does not declare) and **SQL0012** (a column its declared table does not have), `schema=off` to turn it off; `ef_migrations action=model-diff` compares the `ModelSnapshot` with the entity classes **property by property** (added in the model, shadow properties, type changes), so `pending-model-changes`'s boolean has a field-level answer; a binding's data context is also read from a root `<Root.DataContext><local:ViewModel/></Root.DataContext>` property element; `trace_data_flow` keys a field by its declaration **and its receiver**, so `a.Value` and `b.Value` are different entries and only `this`/field/property receivers keep an identity across methods. The Visual Basic declaration-shape tail also shrinks by three: `inline_field`, `move_to_namespace` and `property_to_function` now run on a `.vb` document under the same compiler gate. The remaining §12 boundaries are the ones that need a parser rather than a model: JS/TS symbols (§1.5), F# semantics (§1.3), a live database (§1.6), port-forward and manifest schema validation (§1.7), the rest of the VB tail, and the two by design (§5, §10) | 416 (unchanged) |
 | 32 | 2026-11-01 | **The Visual Basic refactoring tail**: six refactorings that used to stop at a C# syntax tree now run on a `.vb` document under the same compiler gate — `extract_interface` (an `Interface` in VB's vocabulary, plus the `Implements` clause VB requires on the class *and* on each member), `extract_method` (a contiguous block into a private `Sub`/`Function`, the locals and parameters it reads becoming its parameters, refused on a jump or a write), `move_type` (the declaration into a file of its own, carrying the file's `Imports` and its `Namespace`), `property_to_auto` (a trivial `Get`/`Set` pair into an auto-`Property`, dropped backing field; refused when the field is read elsewhere), `function_to_property` (a parameterless `Function` into a `ReadOnly Property`, call sites in both VB spellings, `GetCount()` and `GetCount`) and `move_to_folder`, whose folder derivation now reads a VB `Namespace` block. Seven tests, one per path and one refusal | 416 (unchanged) |
 | 31 | 2026-11-01 | **§2 Debugger, closed against the adapter's real surface**: the DAP requests netcoredbg does implement are now all exposed — **per-exception-type filters** (`filterOptions`: full type name, `!Type` to exclude) and the stopped exception's own block (`exceptionInfo`, returned by `debug_exceptions` and by every stop on an exception), **function breakpoints** (`setFunctionBreakpoints`), **Set Value** (`setExpression` through `debug_evaluate newValue`), and **hit conditions counted here** because the adapter ignores them. Two features the adapter has no DAP request for are delivered anyway: **data breakpoints** as the solution's Roslyn-resolved write sites (`debug_data_breakpoints`) and **restart with a rebuild** (`debug_restart`) as the edit → build → run loop. Only edit-and-continue/hot reload stays out — the adapter applies metadata deltas over GDB/MI only — and it is recorded in [reference/limits.md](reference/limits.md#debugger), not here | 413 → 416 |

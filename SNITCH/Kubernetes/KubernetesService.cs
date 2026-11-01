@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Snitch.Execution;
 
@@ -31,6 +33,13 @@ public interface IKubernetesService
         bool confirm, int timeoutSeconds);
     Task<object> HelmAsync(string action, string? release, string? chart, string? namespaceName,
         string? valuesFile, string[]? setValues, int timeoutSeconds);
+
+    /// <summary>Offline validation of a manifest: the built-in kinds' required fields. No cluster is contacted.</summary>
+    Task<object> ValidateAsync(string? file, string? content);
+
+    /// <summary>Port-forward sessions: start, list, status, stop.</summary>
+    Task<object> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
+        string? namespaceName, int timeoutSeconds);
 }
 
 /// <summary>One row of a <c>kubectl get</c>, reduced to what makes a list readable.</summary>
@@ -550,6 +559,304 @@ public sealed class KubernetesService : IKubernetesService
             linter = "helm lint: templates render, values are valid for the chart, Chart.yaml is well formed. " +
                      "It does not validate a rendered manifest against the Kubernetes API schema.",
         };
+    }
+
+    // ── offline manifest validation ──────────────────────────────────────────
+    /// <summary>
+    /// Validates a manifest without a cluster: the required fields of the built-in kinds, the
+    /// selector/template agreement a Deployment needs, a pinned image, a name that is a DNS label, and the
+    /// duplicate resources an apply would silently collapse. <c>file</c> may be one manifest or a folder
+    /// of them; <c>content</c> is the manifest itself.
+    /// </summary>
+    public async Task<object> ValidateAsync(string? file, string? content)
+    {
+        if (string.IsNullOrWhiteSpace(file) == string.IsNullOrWhiteSpace(content))
+            return new { error = "Pass exactly one of file (a manifest or a folder of them) or content (the manifest itself)." };
+
+        var sources = new List<(string Name, string Text)>();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            sources.Add(("(content)", content!));
+        }
+        else if (File.Exists(file))
+        {
+            sources.Add((Path.GetFullPath(file!), await File.ReadAllTextAsync(file!)));
+        }
+        else if (Directory.Exists(file))
+        {
+            var files = Directory.EnumerateFiles(file!, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => Path.GetExtension(path).ToLowerInvariant() is ".yaml" or ".yml")
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Take(200)
+                .ToList();
+
+            if (files.Count == 0)
+                return new { error = $"No .yaml or .yml file in {file}." };
+
+            foreach (var path in files)
+                sources.Add((path, await File.ReadAllTextAsync(path)));
+        }
+        else
+        {
+            return new { error = $"Not found: {file}" };
+        }
+
+        var results = sources
+            .Select(source => KubernetesManifestValidator.Validate(source.Text, source.Name))
+            .ToList();
+
+        // One manifest (text or a single file) is answered on its own; a folder is a set, so the wrapper
+        // keeps the per-file answers apart.
+        if (results.Count == 1 && !Directory.Exists(file)) return results[0];
+
+        return new
+        {
+            files = sources.Select(source => source.Name).ToList(),
+            results,
+            note = "Each file was validated on its own; K8S023 (a volume naming a ConfigMap or Secret) is " +
+                   "checked within one file.",
+        };
+    }
+
+    // ── port-forward sessions ────────────────────────────────────────────────
+    private sealed class PortForwardSession
+    {
+        public required string Id { get; init; }
+        public required string Target { get; init; }
+        public required string Ports { get; init; }
+        public string? NamespaceName { get; init; }
+        public required Process Process { get; init; }
+        public required ConcurrentQueue<string> Output { get; init; }
+        public DateTime StartedAt { get; init; }
+
+        public bool Alive
+        {
+            get
+            {
+                try { return !Process.HasExited; }
+                catch { return false; }
+            }
+        }
+    }
+
+    private readonly ConcurrentDictionary<string, PortForwardSession> _portForwards = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// <c>kubectl port-forward</c> as a session: <c>start</c> launches it detached, waits for its first
+    /// "Forwarding from" line and returns the id, the local port and the pid; <c>list</c>, <c>status</c> and
+    /// <c>stop</c> act on that session. The forward lives in this server process, so it ends when the
+    /// server does.
+    /// </summary>
+    public Task<object> PortForwardAsync(string action, string? sessionId, string? target, string? ports,
+        string? namespaceName, int timeoutSeconds)
+    {
+        var verb = (action ?? string.Empty).Trim().ToLowerInvariant();
+        switch (verb)
+        {
+            case "list":
+                PruneFinishedForwards();
+                return Task.FromResult<object>(new
+                {
+                    action = verb,
+                    sessions = _portForwards.Values
+                        .OrderBy(session => session.StartedAt)
+                        .Select(session => new
+                        {
+                            sessionId = session.Id,
+                            session.Target,
+                            session.Ports,
+                            session.NamespaceName,
+                            localPort = FirstLocalPort(session.Ports),
+                            pid = session.Process.Id,
+                            alive = session.Alive,
+                            startedAt = session.StartedAt,
+                            output = session.Output.ToArray().TakeLast(10).ToList(),
+                        })
+                        .ToList(),
+                });
+
+            case "status":
+            case "stop":
+            {
+                if (string.IsNullOrWhiteSpace(sessionId) || !_portForwards.TryGetValue(sessionId!, out var session))
+                    return Task.FromResult<object>(new { error = $"No port-forward session '{sessionId}'." });
+
+                if (verb == "stop")
+                {
+                    StopForward(session);
+                    return Task.FromResult<object>(new
+                    {
+                        action = verb,
+                        sessionId = session.Id,
+                        target = session.Target,
+                        stopped = true,
+                    });
+                }
+
+                return Task.FromResult<object>(new
+                {
+                    action = verb,
+                    sessionId = session.Id,
+                    session.Target,
+                    session.Ports,
+                    session.NamespaceName,
+                    localPort = FirstLocalPort(session.Ports),
+                    pid = session.Process.Id,
+                    alive = session.Alive,
+                    startedAt = session.StartedAt,
+                    output = session.Output.ToArray().TakeLast(20).ToList(),
+                });
+            }
+
+            case "start":
+                return StartForwardAsync(target, ports, namespaceName, timeoutSeconds);
+
+            default:
+                return Task.FromResult<object>(new { error = $"Unknown action '{action}'. Use start, list, status or stop." });
+        }
+    }
+
+    private async Task<object> StartForwardAsync(string? target, string? ports, string? namespaceName,
+        int timeoutSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(target) || !target.Contains('/') || !IsSafeToken(target))
+            return new { error = "A target is required: pod/name, svc/name, deployment/name or statefulset/name." };
+        if (!IsSafePorts(ports))
+            return new { error = "The ports must look like 8080:80, 8080:80/udp or a comma-separated list of those." };
+        if (!string.IsNullOrWhiteSpace(namespaceName) && !IsSafeToken(namespaceName))
+            return new { error = $"'{namespaceName}' is not a namespace name." };
+        if (!ExternalTool.Exists("kubectl"))
+            return new { available = false, error = "kubectl was not found on PATH." };
+
+        var startInfo = new ProcessStartInfo("kubectl")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        startInfo.ArgumentList.Add("port-forward");
+        startInfo.ArgumentList.Add(target!);
+        startInfo.ArgumentList.Add(ports!);
+        if (!string.IsNullOrWhiteSpace(namespaceName))
+        {
+            startInfo.ArgumentList.Add("-n");
+            startInfo.ArgumentList.Add(namespaceName!);
+        }
+
+        Process process;
+        try
+        {
+            process = Process.Start(startInfo)!;
+        }
+        catch (Exception exception)
+        {
+            return new { error = $"kubectl could not be started: {exception.Message}" };
+        }
+
+        var output = new ConcurrentQueue<string>();
+        process.OutputDataReceived += (_, args) => { if (args.Data is not null) output.Enqueue(args.Data); };
+        process.ErrorDataReceived += (_, args) => { if (args.Data is not null) output.Enqueue(args.Data); };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        var deadline = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSeconds, 3, 60));
+        while (DateTime.UtcNow < deadline)
+        {
+            if (process.HasExited) break;
+            if (output.Any(line => line.Contains("Forwarding from", StringComparison.OrdinalIgnoreCase))) break;
+            await Task.Delay(100);
+        }
+
+        if (process.HasExited)
+        {
+            var text = string.Join(Environment.NewLine, output.ToArray());
+            process.Dispose();
+            return new
+            {
+                action = "start",
+                target,
+                ports,
+                succeeded = false,
+                output = ProcessRunner.Truncate(text, 4_000),
+                error = string.IsNullOrWhiteSpace(text)
+                    ? "kubectl port-forward exited before it forwarded anything."
+                    : FirstLine(text),
+            };
+        }
+
+        var sessionId = "pf-" + Guid.NewGuid().ToString("N")[..8];
+        var session = new PortForwardSession
+        {
+            Id = sessionId,
+            Target = target!,
+            Ports = ports!,
+            NamespaceName = namespaceName,
+            Process = process,
+            Output = output,
+            StartedAt = DateTime.UtcNow,
+        };
+
+        _portForwards[sessionId] = session;
+        return new
+        {
+            action = "start",
+            sessionId,
+            target,
+            ports,
+            namespaceName,
+            localPort = FirstLocalPort(ports!),
+            pid = process.Id,
+            forwarding = output.ToArray().ToList(),
+            note = "The forward runs in this server process and ends when it does; k8s_port_forward " +
+                   "action=stop ends it earlier. The local port is bound on 127.0.0.1 by kubectl.",
+        };
+    }
+
+    private static int? FirstLocalPort(string ports)
+    {
+        var first = ports.Split(',')[0].Split(':')[0].Split('/')[0];
+        return int.TryParse(first, out var port) ? port : null;
+    }
+
+    private void StopForward(PortForwardSession session)
+    {
+        try { session.Process.Kill(entireProcessTree: true); }
+        catch (InvalidOperationException) { /* already gone */ }
+        catch (System.ComponentModel.Win32Exception) { /* already gone */ }
+
+        try { session.Process.Dispose(); }
+        catch (InvalidOperationException) { /* nothing to dispose */ }
+
+        _portForwards.TryRemove(session.Id, out _);
+    }
+
+    private void PruneFinishedForwards()
+    {
+        foreach (var session in _portForwards.Values)
+            if (!session.Alive)
+                _portForwards.TryRemove(session.Id, out _);
+    }
+
+    private static bool IsSafePorts(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        foreach (var part in value.Split(','))
+        {
+            var segments = part.Split('/');
+            if (segments.Length > 2) return false;
+            if (segments.Length == 2 && segments[1] is not ("tcp" or "udp" or "sctp")) return false;
+
+            var numbers = segments[0].Split(':');
+            if (numbers.Length is < 1 or > 2) return false;
+            foreach (var number in numbers)
+                if (!int.TryParse(number, out var port) || port is < 1 or > 65_535)
+                    return false;
+        }
+
+        return true;
     }
 
     // ── parsing ──────────────────────────────────────────────────────────────

@@ -38,4 +38,24 @@ public static class JavaScriptTools
         [Description("Maximum files to read (default 500).")] int maxFiles = 500,
         [Description("Maximum findings to return (default 200; the total is always reported).")] int maxFindings = 200)
         => svc.AnalyzeAsync(path, minSeverity, rule, maxFiles, maxFindings);
+
+    [McpServerTool(Name = "js_symbols"), Description(
+        "The symbol table of the solution's JavaScript/TypeScript: which declarations a file makes, which " +
+        "declaration a name resolves to, every reference to it — inside its module and through the imports " +
+        "other modules take from it — and the declarations nothing reads. Lexical, not a type model: a " +
+        "tokeniser over the masked source plus one scope per brace block resolves a name to the declaration " +
+        "in the innermost enclosing scope, and an imported name through its binding to the exporting module " +
+        "(a relative specifier is resolved against the file system, a package one is not). JSX component " +
+        "tags are references; a member reached through an untyped object, a computed member name and eval " +
+        "are not resolved. action=outline (needs file), find (name), refs (name, optional file) or unused. " +
+        "Read-only.")]
+    public static Task<object> JsSymbols(
+        IJavaScriptSymbolService svc,
+        [Description("outline | find | refs | unused")] string action = "find",
+        [Description("The name to find or follow (find and refs).")] string? name = null,
+        [Description("The declaring file, for outline and to disambiguate refs.")] string? file = null,
+        [Description("A file or a directory to scan (default: the solution directory).")] string? path = null,
+        [Description("Match the name as a substring instead of exactly (find).")] bool partial = false,
+        [Description("Maximum rows to return (default 200).")] int maxResults = 200)
+        => svc.SymbolsAsync(action, name, file, path, partial, maxResults);
 }

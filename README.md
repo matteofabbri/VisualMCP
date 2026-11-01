@@ -6,7 +6,7 @@ C# punishes guessing. Overloads, overrides, generics, partial types, interface d
 misses all of them, so your AI reads the wrong thing, renames the wrong symbol, and breaks the build two
 hours later. You already know the answer to this problem: it is called an IDE. VisualMCP gives the
 agent the IDE's brain — Roslyn's semantic model, the real MSBuild project graph, a debugger, a profiler,
-a decompiler — as **416 tools in one local process** speaking MCP to Claude Code, ZCode, or any MCP
+a decompiler — as **420 tools in one local process** speaking MCP to Claude Code, ZCode, or any MCP
 client.
 
 **Stop your agent from guessing. Give it a compiler.**
@@ -80,7 +80,7 @@ The one after that joins git history with complexity and says which file a refac
 
 ## Safety is the product
 
-You do not hand write access to an AI because it has 416 tools. You hand it over because of four
+You do not hand write access to an AI because it has 420 tools. You hand it over because of four
 invariants that hold across every one of them:
 
 - **Semantic, not textual.** Every write is a Roslyn operation on the real project, never a regex over
@@ -143,9 +143,11 @@ Your agent can reason about a Ghidra recovery and a Razor page with the same voc
 ## The honest bit
 
 C# and Visual Basic get the semantic model; XAML, Razor, SQL, JavaScript/TypeScript, HTML/CSS, YAML
-and F# get a scanner (they are not compilers), each with a rule set that states what it proves; the
-Node, Docker and Kubernetes toolchains are wrapped rather than reimplemented. HTML and CSS are scanned,
-not rendered, and F# has no symbol navigation — on purpose, and stated in the
+and F# get a scanner (they are not compilers), each with a rule set that states what it proves — and
+JavaScript/TypeScript and F# also get a **lexical** symbol table (`js_symbols`, `fsharp_symbols`: names,
+the declaration a name resolves to, its references, no type model); the Node, Docker and Kubernetes
+toolchains are wrapped rather than reimplemented, with an offline manifest validator (`k8s_validate`).
+HTML and CSS are scanned, not rendered, and F# has no semantic model — on purpose, and stated in the
 [limits](docs/reference/limits.md). Everything is static analysis or process instrumentation: no
 tool proves a change preserves behaviour, and none replaces your test suite.
 And it runs on your machine, locally — no hosted service, no account, no daemon. Your code leaves the

@@ -205,6 +205,12 @@ public static class JavaScriptAnalyzer
 
     // ── masking ────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The source with comments, strings and template literals blanked and every offset preserved. The
+    /// symbol table tokenises this text, so a keyword inside a string is never read as code.
+    /// </summary>
+    internal static string Mask(string text) => new(MaskCore(text ?? string.Empty, out _));
+
     /// <summary>Blanks comments, strings and template literals (delimiters kept), reporting lexical damage.</summary>
     private static char[] MaskCore(string text, out List<(int Offset, string Message)> lexical)
     {

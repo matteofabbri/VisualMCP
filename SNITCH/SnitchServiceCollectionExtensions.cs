@@ -137,6 +137,10 @@ public static class SnitchServiceCollectionExtensions
         // need no module graph, and a JSX pass that reads a tag only where the mask says it is code.
         services.AddSingleton<Languages.JavaScript.IJavaScriptService, Languages.JavaScript.JavaScriptService>();
 
+        // The symbol table over the same files: declarations, the declaration a name resolves to, its
+        // references inside the module and through the imports other modules take from it.
+        services.AddSingleton<Languages.JavaScript.IJavaScriptSymbolService, Languages.JavaScript.JavaScriptSymbolService>();
+
         // HTML and stylesheets: tags read by a quote-aware scanner, CSS masked like the other scanners.
         services.AddSingleton<Languages.WebMarkup.IMarkupService, Languages.WebMarkup.MarkupService>();
 
@@ -145,6 +149,9 @@ public static class SnitchServiceCollectionExtensions
 
         // F#: not a Roslyn language, so this is the scanner layer — declarations plus the partial-access rules.
         services.AddSingleton<Languages.FSharp.IFSharpService, Languages.FSharp.FSharpService>();
+
+        // The symbol table over the same files: names, positions, and the references an `open` can prove.
+        services.AddSingleton<Languages.FSharp.IFSharpSymbolService, Languages.FSharp.FSharpSymbolService>();
 
         // C# analysis services (logic moved from the MCP tool layer).
         services.AddSingleton<Languages.CSharp.Analysis.IGetDiagnosticsService, Languages.CSharp.Analysis.GetDiagnosticsService>();

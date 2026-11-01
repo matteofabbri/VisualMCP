@@ -83,6 +83,39 @@ public static class KubernetesTools
         [Description("Override the namespace of the rendered resources.")] string? namespaceName = null,
         [Description("Timeout in seconds (default 120).")] int timeoutSeconds = 120)
         => k8s.KustomizeAsync(path, namespaceName, timeoutSeconds);
+
+    [McpServerTool(Name = "k8s_validate"), Description(
+        "Validate a Kubernetes manifest OFFLINE — no cluster, no kubectl. Pass file (a manifest or a folder of " +
+        ".yaml/.yml) or content (the manifest itself). Rules K8S001–K8S023: a missing apiVersion/kind/metadata.name, " +
+        "a pod template with no containers, a container with no image or no name, a workload with no selector, a " +
+        "selector that does not match its pod template's labels, a Service with no ports or no selector, a CronJob " +
+        "with no schedule, an HPA with no target or minReplicas > maxReplicas, a PVC with no storage request, an " +
+        "unpinned image (:latest or no tag), the same kind/namespace/name twice, a name that is not a DNS label, a " +
+        "cluster-scoped kind carrying a namespace, a ConfigMap or Secret with no data, and a volume naming a " +
+        "ConfigMap/Secret that is not in the input. A table of the built-in kinds, not the OpenAPI schema: a custom " +
+        "resource is reported as having no built-in schema, and k8s_apply dryRun=true stays the server-side " +
+        "authority. Read-only.")]
+    public static Task<object> KubernetesValidate(
+        IKubernetesService k8s,
+        [Description("A manifest on disk, or a folder of .yaml/.yml files.")] string? file = null,
+        [Description("The manifest text itself.")] string? content = null)
+        => k8s.ValidateAsync(file, content);
+
+    [McpServerTool(Name = "k8s_port_forward"), Description(
+        "kubectl port-forward as a session: action=start (target pod/name, svc/name or deployment/name, ports " +
+        "'8080:80') launches the forward detached in this server process, waits for its 'Forwarding from' line and " +
+        "returns the sessionId, the local port and the pid; action=list shows the live sessions, status one of " +
+        "them, stop ends it (the process tree is killed). The forward ends when the server does. Use this INSTEAD OF " +
+        "shell 'kubectl port-forward'.")]
+    public static Task<object> KubernetesPortForward(
+        IKubernetesService k8s,
+        [Description("start | list | status | stop")] string action = "list",
+        [Description("The session id from action=start, for status and stop.")] string? sessionId = null,
+        [Description("The target, for start: pod/name, svc/name, deployment/name or statefulset/name.")] string? target = null,
+        [Description("The ports, for start: '8080:80', '8080:80/udp' or a comma-separated list.")] string? ports = null,
+        [Description("Namespace; omit for the current context's namespace.")] string? namespaceName = null,
+        [Description("Seconds to wait for the forward to report it is listening (default 10).")] int timeoutSeconds = 10)
+        => k8s.PortForwardAsync(action, sessionId, target, ports, namespaceName, timeoutSeconds);
 }
 
 [McpServerToolType]

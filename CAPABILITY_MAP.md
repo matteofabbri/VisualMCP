@@ -799,6 +799,26 @@ family, the move family beyond `move_type`/`move_to_folder`, and the indexer con
 
 ---
 
+## 26. The last implementable §12 boundaries (2026-11-01)
+
+Four tools, each closing a boundary that section 12 of the gap inventory had stated with a reason.
+**416 → 420 tools.**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| JS/TS symbol table | ✅ | `js_symbols` (`JavaScriptSymbols` + `JavaScriptSymbolService`): a tokeniser over the source masked by `JavaScriptAnalyzer.Mask`, one scope per brace block classified as module/function/class/block, and a declaration for every name a declaration position introduces — `function`, `class` and its members (private ones as `#name`), a `const`/`let`/`var` declarator including destructuring (`{ a, b: c, d = 1 }`), a parameter (arrow parameters attach to the block body), a TypeScript `interface`/`type`/`enum`, and an import binding. Every identifier in a read position resolves to the declaration of its name in the innermost enclosing scope; an imported name resolves through its binding and a **relative** specifier is resolved with `JavaScriptPaths.ResolveRelative`, so a use in one module reaches the declaration that exports it. JSX is read by a small element scanner: a component tag is a reference, a host tag is not, and child text is skipped. `outline`/`find`/`refs`/`unused` answer from it |
+| F# symbol table | ✅ | `fsharp_symbols` (`FSharpSymbols` + `FSharpSymbolService`): the masked-line scan reads modules/namespaces, types, union cases (after `=` and after every `|`), record fields, `let` bindings and members; every identifier that is not a declaration position is an occurrence, resolved to the nearest declaration before it in the file; across files only through an `open` whose name matches the declaring module (or a prefix of it). `unused` refuses to call a name dead when it occurs somewhere without resolving |
+| Offline manifest validation | ✅ | `k8s_validate` (`KubernetesManifestValidator`): its own YAML path reader (`spec.template.spec.containers[0].image`, block mappings, block sequences, block scalars skipped, comments and quotes handled), then K8S001–K8S023 over the built-in kinds — required apiVersion/kind/metadata.name, a pod template with no containers, a container with no image/name, a workload with no selector, a selector that does not match the template's labels, a Service with no ports or no selector, a CronJob with no schedule, an HPA with no target or minReplicas > maxReplicas, a PVC with no storage request, an unpinned image, a duplicate kind/namespace/name, a non-DNS-1123 name, a cluster-scoped kind with a namespace, an empty ConfigMap/Secret, a volume naming a ConfigMap/Secret not in the input. A table of the built-in kinds, not the OpenAPI schema |
+| Port-forward sessions | ✅ | `k8s_port_forward` (`KubernetesService.PortForwardAsync`): `start` launches `kubectl port-forward` with `ProcessStartInfo.ArgumentList`, captures stdout/stderr into a `ConcurrentQueue`, waits for the first "Forwarding from" line (or the process exiting, which is reported with its output), and registers a `pf-xxxxxxxx` session; `list`, `status` and `stop` act on it, and `stop` kills the process tree. The session lives in the server process |
+
+The traps: the repo keeps the language sources under `Languages/Implementations/<Language>/`, not under
+`Languages/<Language>/`, so a new file written to the shorter path is compiled from a directory nobody
+expects; a YAML key whose value is a nested mapping has no scalar entry, so "is this key present" needs the
+key set and not the value map; VB and JSX both make "declaration token is also a use" a real case, so the
+use list is pruned once the declarations are known.
+
+---
+
 ## Summary by Category
 
 
@@ -836,7 +856,7 @@ and formatting, the "create" family, the inspection baseline, seven analyses), t
 `launch_settings`, `publish_profile`, `nuget_sources`), the **10 of section 19** (`trace_data_flow`,
 `find_throw_sites`, `js_files`, `analyze_js`, `markup_files`, `analyze_markup`, `yaml_files`,
 `analyze_yaml`, `fsharp_files`, `analyze_fsharp`) or `commit_lint` (section 20), nor `disk_usage`
-(section 21), nor the board pair of section 22. The live count is `capability_report`: **416 tools**.
+(section 21), nor the board pair of section 22. The live count is `capability_report`: **420 tools**.
 
 ---
 

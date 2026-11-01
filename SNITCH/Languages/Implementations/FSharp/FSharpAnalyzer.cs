@@ -137,6 +137,13 @@ public static class FSharpAnalyzer
     }
 
     /// <summary>
+    /// The source split into lines with comments and literals blanked and every offset preserved. The
+    /// symbol table scans this text, so an identifier inside a string is never read as a name.
+    /// </summary>
+    internal static string[] MaskedLines(string text) =>
+        MaskLines((text ?? string.Empty).Replace("\r\n", "\n").Split('\n'));
+
+    /// <summary>
     /// Blanks comments and literals, keeping the line structure: block comments <c>(* … *)</c> (nested),
     /// line comments, ordinary, verbatim and triple-quoted strings, and character literals.
     /// </summary>

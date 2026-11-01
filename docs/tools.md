@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **416 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **420 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -432,6 +432,7 @@ import to a file and no package specifier.
 |---|---|
 | `js_files` | Inventory: lines, TypeScript and JSX flags, modules imported (including `require` and dynamic `import()`), the relative imports resolved into a module graph with its import cycles and unresolved count, names exported, function and class counts, findings per file |
 | `analyze_js` | Findings `JS0001`–`JS0017`: unterminated string/template/comment, `eval`, `new Function`, `innerHTML`/`outerHTML` from a non-literal, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`/`@ts-nocheck`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")`, a relative import that resolves to no file |
+| `js_symbols` | The lexical symbol table: `outline` a file's declarations (kind, line, container, exports, uses), `find` a name across the tree, `refs` every occurrence — inside the module and through the imports other modules take from it — and `unused` the declarations nothing reads. A scope per brace block; a name resolves to the innermost declaration carrying it; an imported name resolves through its binding to the exporting module when the specifier is relative. JSX component tags are references; a member through an untyped object is not resolved |
 
 ## HTML / CSS
 
@@ -462,7 +463,8 @@ compiler's own `FS####` diagnostics.
 
 | Tool | What it does |
 |---|---|
-| `fsharp_files` | Inventory: lines, modules and namespaces, types, top-level functions, number of opens, findings per file — the declaration index F# has no symbol tool for |
+| `fsharp_files` | Inventory: lines, modules and namespaces, types, top-level functions, number of opens, findings per file |
+| `fsharp_symbols` | The lexical symbol table: `outline` a file (modules, namespaces, types, union cases, record fields, `let` bindings and members with their positions), `find` a name, `refs` every occurrence — before it in the same file, and in the files that `open` its module — and `unused` the declarations nothing reads. A name table, not a compiler: shadowing inside a match arm and a module abbreviation are outside it |
 | `analyze_fsharp` | Findings `FS0001`–`FS0010`: a tab in the indentation, `Option.get`/`Option.Value`, `List.head`/`Seq.head` and friends, `Unchecked.defaultof`/`unbox`, comparison with `null`, a catch-all `with _ ->`, `let mutable`, `printf`/`printfn`, `failwith`, a duplicated `open` |
 
 ## Decompilation and reflection
@@ -576,10 +578,10 @@ the other actions change GitHub, and merges/deletes require `confirm=true`.
 ## Kubernetes and Helm
 
 Through the ecosystem's own clients: `kubectl` for the cluster, `helm` for releases. `k8s_status`,
-`k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` and `k8s_kustomize` are read-only (the last is an
-offline render); `k8s_exec`, `k8s_apply`, `k8s_delete` and `k8s_rollout` change state and require
-`confirm=true` (apply defaults to a server-side dry run). A missing client or an unreachable cluster is a
-structured answer, not an exception.
+`k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs`, `k8s_kustomize` and `k8s_validate` are read-only (the
+last two are offline); `k8s_port_forward` starts a process that stays alive until it is stopped; `k8s_exec`,
+`k8s_apply`, `k8s_delete` and `k8s_rollout` change state and require `confirm=true` (apply defaults to a
+server-side dry run). A missing client or an unreachable cluster is a structured answer, not an exception.
 
 | Tool | What it does |
 |---|---|
@@ -589,6 +591,8 @@ structured answer, not an exception.
 | `k8s_describe` | The full `kubectl describe` text: events, conditions, containers, scheduler decisions |
 | `k8s_logs` | A pod's logs with `tail`, `since`, `container` and `previous` |
 | `k8s_kustomize` | Render a kustomization offline (`kubectl kustomize`): the rendered YAML and its document count, with an optional namespace override; no cluster is contacted |
+| `k8s_validate` | Validate a manifest offline — no cluster, no kubectl — from a file, a folder of `.yaml/.yml` or `content`: `K8S001`–`K8S023` (required apiVersion/kind/metadata.name, a pod template with no containers, a container with no image or name, a workload with no selector, a selector that does not match its template's labels, a Service with no ports or no selector, a CronJob with no schedule, an HPA with no target or minReplicas > maxReplicas, a PVC with no storage request, an unpinned image, a duplicate kind/namespace/name, a name that is not a DNS label, a cluster-scoped kind carrying a namespace, an empty ConfigMap/Secret, a dangling volume reference). A table of the built-in kinds, not the OpenAPI schema |
+| `k8s_port_forward` | ✎ `kubectl port-forward` as a session: `start` (target `pod/name`, `svc/name`, `deployment/name`; ports `8080:80`) launches it detached, waits for its forwarding line and returns the sessionId, local port and pid; `list`, `status`, `stop` (the process tree is killed). The forward ends when the server does |
 | `k8s_exec` | ✎ Run one command inside a pod's container (`kubectl exec`, the part after `--`); requires `confirm=true`; no shell is involved |
 | `k8s_apply` | ✎ Apply a manifest from a file or from `content`; server-side dry run unless `dryRun=false` with `confirm=true` |
 | `k8s_delete` | ✎ Delete one resource; requires `confirm=true`, `ignoreNotFound` for idempotence |
