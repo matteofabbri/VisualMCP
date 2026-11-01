@@ -54,6 +54,12 @@ public sealed class FunctionToPropertyService : IFunctionToPropertyService
         if (!string.Equals(diskText, modelledText, StringComparison.Ordinal))
             return new { error = $"{Path.GetFileName(path)} changed on disk after the solution was loaded; the in-memory model is stale. Call load_solution, then retry." };
 
+        // VB has its own MethodBlock, its own two call spellings (with and without parentheses) and its
+        // own ReadOnly Property vocabulary, so it is a separate projection.
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbFunctionToProperty.RunAsync(
+                _workspace, solution, document, methodName, containingType, propertyName, dryRun, cancellationToken);
+
         var root = await document.GetSyntaxRootAsync(cancellationToken);
         var model = await document.GetSemanticModelAsync(cancellationToken);
         if (root is null || model is null) return new { error = $"Could not read the syntax tree of {Path.GetFileName(path)}." };

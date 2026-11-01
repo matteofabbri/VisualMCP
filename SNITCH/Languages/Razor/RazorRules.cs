@@ -61,7 +61,12 @@ public static class RazorRules
 
     // ── Entry point ─────────────────────────────────────────────────────────────
 
-    public static List<RazorFinding> Run(RazorDocument document)
+    /// <summary>
+    /// Runs every rule over one document. <paramref name="resolvePartial"/> is what lets a rule look
+    /// inside what a page renders — today the anti-forgery check, which has to see a token that lives in
+    /// the partial a form includes. Without it the rules stay per file.
+    /// </summary>
+    public static List<RazorFinding> Run(RazorDocument document, Func<string, RazorDocument?>? resolvePartial = null)
     {
         var findings = new List<RazorFinding>();
 
@@ -70,7 +75,7 @@ public static class RazorRules
         CheckScriptExpressions(document, findings);
         CheckInlineEventHandlers(document, findings);
         CheckScriptUris(document, findings);
-        CheckAntiForgery(document, findings);
+        CheckAntiForgery(document, findings, resolvePartial);
         CheckPasswordOverGet(document, findings);
         CheckTargetBlank(document, findings);
         CheckHardcodedSecrets(document, findings);
@@ -194,7 +199,8 @@ public static class RazorRules
         }
     }
 
-    private static void CheckAntiForgery(RazorDocument document, List<RazorFinding> findings)
+    private static void CheckAntiForgery(
+        RazorDocument document, List<RazorFinding> findings, Func<string, RazorDocument?>? resolvePartial)
     {
         if (!IsCshtml(document)) return;
 
@@ -228,7 +234,7 @@ public static class RazorRules
 
             // Any asp-* attribute means the form tag helper ran, and it injects the token by default.
             if (form.HasAttributePrefix("asp-")) continue;
-            if (HasAntiForgeryToken(document, form)) continue;
+            if (HasAntiForgeryToken(document, form, resolvePartial)) continue;
 
             Add(findings, document, "RZ1005",
                 "POST form without @Html.AntiForgeryToken() and without the form tag helper: the request carries no CSRF token.",
@@ -660,7 +666,8 @@ public static class RazorRules
             message, suggestion ?? rule.Suggestion, document.FilePath, line, column, snippet));
     }
 
-    private static bool HasAntiForgeryToken(RazorDocument document, RazorElement form)
+    private static bool HasAntiForgeryToken(
+        RazorDocument document, RazorElement form, Func<string, RazorDocument?>? resolvePartial)
     {
         if (form.Descendants().Any(e => e.HasAttribute("asp-antiforgery")))
             return true;
@@ -670,10 +677,71 @@ public static class RazorRules
                 string.Equals(e.Literal("name")?.Trim(), "__RequestVerificationToken", StringComparison.OrdinalIgnoreCase)))
             return true;
 
-        return document.Expressions.Any(e =>
-            e.Offset >= form.Offset &&
-            e.Offset <= form.EndOffset &&
-            e.Text.Contains("AntiForgeryToken", StringComparison.OrdinalIgnoreCase));
+        if (document.Expressions.Any(e =>
+                e.Offset >= form.Offset &&
+                e.Offset <= form.EndOffset &&
+                e.Text.Contains("AntiForgeryToken", StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        // The token may live in a partial the form renders: <partial name="_X" />, @Html.Partial("_X"),
+        // @await Html.RenderPartialAsync("_X"). The resolver reads those files; without one the rule
+        // stays per file, as before.
+        if (resolvePartial is null) return false;
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var partial in PartialNamesIn(document, form.Offset, form.EndOffset))
+            if (PartialCarriesToken(partial, resolvePartial, visited, depth: 0))
+                return true;
+
+        return false;
+    }
+
+    private static readonly Regex PartialCallPattern = new(
+        @"(?:Html\s*\.\s*)?(?:Render)?Partial(?:Async)?\s*\(\s*""([^""]+)""",
+        RegexOptions.Compiled);
+
+    /// <summary>The partial names a span renders: the <c>&lt;partial name=…&gt;</c> tag and the Html.Partial family.</summary>
+    private static IEnumerable<string> PartialNamesIn(RazorDocument document, int start, int end)
+    {
+        foreach (var element in document.AllElements())
+        {
+            if (!element.Is("partial")) continue;
+            if (element.Offset < start || element.Offset > end) continue;
+
+            var name = element.Literal("name");
+            if (!string.IsNullOrWhiteSpace(name)) yield return name.Trim();
+        }
+
+        foreach (var expression in document.Expressions)
+        {
+            if (expression.Offset < start || expression.Offset > end) continue;
+
+            var match = PartialCallPattern.Match(expression.Text);
+            if (match.Success) yield return match.Groups[1].Value;
+        }
+    }
+
+    /// <summary>
+    /// Whether a partial renders the token, following the partials it includes in turn. A cycle, a name
+    /// that resolves to nothing and a nesting deeper than eight levels all stop the walk and answer no.
+    /// </summary>
+    private static bool PartialCarriesToken(
+        string name, Func<string, RazorDocument?> resolvePartial, HashSet<string> visited, int depth)
+    {
+        if (depth >= 8 || !visited.Add(name)) return false;
+
+        var partial = resolvePartial(name);
+        if (partial is null) return false;
+
+        if (partial.Text.Contains("AntiForgeryToken", StringComparison.OrdinalIgnoreCase) ||
+            partial.Text.Contains("__RequestVerificationToken", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        foreach (var nested in PartialNamesIn(partial, 0, partial.Text.Length))
+            if (PartialCarriesToken(nested, resolvePartial, visited, depth + 1))
+                return true;
+
+        return false;
     }
 
     private static RazorElement? Ancestor(RazorElement element, string name)

@@ -56,6 +56,22 @@ public sealed class ChangeSignatureService : IChangeSignatureService
         var method = methods[0];
         var originalParams = method.Parameters.Select(p => p.Name).ToList();
 
+        // A Visual Basic declaration takes the same operation, written against VB syntax: a call site may
+        // have no parentheses, and an argument is named with ':=' rather than ':'.
+        if (method.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbChangeSignature.ChangeSignatureAsync(
+                       _workspace,
+                       solution,
+                       method,
+                       newParameterOrder,
+                       (additionalParams ?? [])
+                       .Select(parameter => (parameter.Name, parameter.Type, parameter.DefaultValue))
+                       .ToList(),
+                       defaultForRemoved,
+                       dryRun,
+                       CancellationToken.None)
+                   ?? new { error = "The Visual Basic signature change produced no result." };
+
         // Build the target parameter sequence
         var orderedNames = newParameterOrder?.ToList() ?? originalParams;
         var addedParams = additionalParams ?? [];

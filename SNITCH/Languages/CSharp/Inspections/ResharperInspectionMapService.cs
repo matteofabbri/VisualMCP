@@ -7,7 +7,7 @@ namespace Snitch.Languages.CSharp.Inspections;
 /// </summary>
 public interface IResharperInspectionMapService
 {
-    Task<object> ReportAsync(string? riderPath, bool includeInstall, int maxUncovered);
+    Task<object> ReportAsync(string? riderPath, bool includeInstall, int maxUncovered, string? outputPath = null);
 }
 
 public sealed class ResharperInspectionMapService : IResharperInspectionMapService
@@ -29,6 +29,12 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
         ("StringLiteralAsInterpolationArgument", "rider pack: StringLiteralAsInterpolationArgumentAnalyzer", "rider", "a literal inside an interpolation merges into the text"),
         ("RedundantCheckBeforeAssignment", "rider pack: RedundantCheckBeforeAssignmentAnalyzer", "rider", "if (a != b) a = b; writes the value either way"),
         ("UseNameofExpression", "rider pack: UseNameofExpressionAnalyzer", "rider", "a literal naming a parameter → nameof, in the ArgumentException family and paramName arguments"),
+        ("RedundantStringInterpolation", "rider pack: RedundantStringInterpolationAnalyzer", "rider", "an interpolated string with no holes is a plain string; ported from RedundantInterpolatedStringExpressionAnalyzer"),
+        ("MethodOverloadWithOptionalParameter", "rider pack: MethodOverloadWithOptionalParameterAnalyzer", "rider", "an overload that only adds optional parameters is shadowed by the shorter one; ported from MethodOverloadWithOptionalParametersProblemAnalyzer"),
+        ("ReplaceSequenceEqualWithConstantPattern", "rider pack: ReplaceSequenceEqualWithConstantPatternAnalyzer", "rider", "a char span compared to a string literal with SequenceEqual is a C# 11 constant pattern; ported from ReplaceSequenceEqualWithConstantPatternProblemAnalyzer"),
+        ("RedundantPatternParentheses", "rider pack: RedundantPatternParenthesesAnalyzer", "rider", "parentheses pattern precedence does not need; ported from RedundantPatternParenthesesProblemAnalyzer"),
+        ("MergeIntoPattern", "rider pack: MergeIntoPatternAnalyzer", "rider", "x is A && x is B → x is A and B; ported from SequentialPatternCheck / MergeIntoPatternWarning"),
+        ("ReplaceWithStringIsNullOrEmpty", "rider pack: ReplaceWithStringIsNullOrEmptyAnalyzer", "rider", "s == null || s.Length == 0 → string.IsNullOrEmpty(s), and the negated form; ported from ReplaceWithStringIsNullOrEmptyWarning"),
 
         // The style engine rewrites these under their IDE ids.
         ("RedundantCast", "simplify_code IDE0004", "style", "unnecessary cast"),
@@ -69,7 +75,8 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
         ("SuspiciousTypeConversion.Global", "—", "none", "type-conversion analysis, not implemented"),
     ];
 
-    public Task<object> ReportAsync(string? riderPath = null, bool includeInstall = true, int maxUncovered = 100)
+    public Task<object> ReportAsync(
+        string? riderPath = null, bool includeInstall = true, int maxUncovered = 100, string? outputPath = null)
     {
         var entries = Map.Select(entry => new
         {
@@ -89,6 +96,7 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
 
         object? install = null;
         object? coverage = null;
+        object? export = null;
         var catalogueIdCount = 0;
 
         if (includeInstall)
@@ -118,6 +126,23 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
             }
         }
 
+        if (outputPath is { Length: > 0 })
+        {
+            export = catalogue is { Found: true }
+                ? new
+                {
+                    path = ReSharperToCoverExport.Write(catalogue, Map.Select(entry => entry.Id).ToList(), outputPath),
+                    listed = catalogue.Ids.Count,
+                    ids = catalogue.Ids.Count(id => Map.All(entry => entry.Id != id.Id)),
+                }
+                : new
+                {
+                    path = (string?)null,
+                    note = "Nothing was written: the page is the catalogue annotated with the curated map, so it needs " +
+                           "the installation's catalogue (includeInstall=true and a readable Rider installation).",
+                };
+        }
+
         return Task.FromResult<object>(new
         {
             curatedCount = entries.Count,
@@ -129,11 +154,12 @@ public sealed class ResharperInspectionMapService : IResharperInspectionMapServi
             catalogueIdCount,
             coverage,
             install,
+            export,
             note = "Two layers. The catalogue is read from the Rider installation's metadata: each " +
                    "ConfigurableSeverityHighlighting id on a highlighting class, linked to the ElementProblemAnalyzer that " +
                    "produces it. The coverage is curated: each id this product answers, with the capability that answers it, " +
                    "or 'none'. A catalogue id with no entry here is not implemented. 'rider' is an opt-in inspection pack: " +
-                   "inspect_code packs=rider.",
+                   "inspect_code packs=rider. outputPath writes the whole catalogue, every language group, with each id's coverage.",
         });
     }
 

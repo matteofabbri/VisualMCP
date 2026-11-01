@@ -81,11 +81,13 @@ public sealed class CapabilityReportService : ICapabilityReportService
             layers = new
             {
                 csharp = "Snitch.Languages.CSharp (Roslyn: navigation, refactoring, style, inspections, testing)",
-                visualBasic = "Snitch.Languages.VB (style: 41 ids; refactorings change_type, use_base_type, type_to_partial " +
-                              "and safe_delete over VB syntax) + Snitch.Metacode's VisualBasicFrontend " +
+                visualBasic = "Snitch.Languages.VB (style: 41 ids; refactorings change_signature, change_type, use_base_type, " +
+                              "type_to_partial, safe_delete, extract_interface, extract_method, move_type, move_to_folder, " +
+                              "property_to_auto and function_to_property over VB syntax) + Snitch.Metacode's VisualBasicFrontend " +
                               "and VisualBasicSymbolIndexFrontend (trees, symbol index, complexity, C# generation) + the VB halves of " +
                               "structural search, formatting/usings/cleanup, inspections and the analysis tools",
-                razor = "Snitch.Languages.Razor (heuristic markup scanner, 28 rules)",
+                razor = "Snitch.Languages.Razor (heuristic markup scanner, 28 rules; the anti-forgery rule resolves " +
+                        "the partials a form renders)",
                 xaml = "Snitch.Languages.Xaml (markup + Roslyn: dialect detection per project, XAML0001-XAML0015, " +
                        "binding validation against the data type, inventory, navigation, binding inspector, element tree, " +
                        "verified edits)",
@@ -96,14 +98,16 @@ public sealed class CapabilityReportService : ICapabilityReportService
                              "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0017, " +
                              "relative imports resolved into a module graph with its cycles; no type checking)",
                 markup = "Snitch.Languages.WebMarkup (MarkupAnalyzer: quote-aware HTML tag scanner, " +
-                         $"{MarkupRange("HTML")}; CSS/SCSS masked, {MarkupRange("CSS")}; the simple selectors are " +
-                         "matched against the page index and <style> blocks are analysed; no DOM, combinators or cascade)",
+                         $"{MarkupRange("HTML")}; CSS/SCSS masked, {MarkupRange("CSS")}; a selector resolves against " +
+                         "the page's element index (tag, classes, id, attribute conditions, structural pseudo-classes, " +
+                         "descendant/child/sibling combinators) and <style> blocks are analysed; a dynamic pseudo-class " +
+                         "is not reported, and specificity and the cascade are not resolved)",
                 yaml = "Snitch.Languages.Yaml (YamlAnalyzer: indentation-aware line scan, YAML0001-YAML0012, manifest " +
                        "identity and container checks; not a schema validator)",
                 fsharp = "Snitch.Languages.FSharp (FSharpAnalyzer: masked scan, FS0001-FS0010, declaration inventory). " +
                          "No semantic model: F# is not a Roslyn language; build_project still returns the compiler's FS#### lines",
-                kubernetes = "Snitch.Kubernetes (kubectl/helm wrappers: status, context, get/describe/logs, apply/delete/rollout, " +
-                             "helm releases)",
+                kubernetes = "Snitch.Kubernetes (kubectl/helm wrappers: status, context, get/describe/logs, kustomize " +
+                             "render, exec, apply/delete/rollout, helm releases)",
             },
 
             docs = new

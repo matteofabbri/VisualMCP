@@ -142,6 +142,38 @@ public sealed class KubernetesServiceTests
     }
 
     [Fact]
+    public async Task ExecRefusesWithoutConfirmAndWithoutACommand()
+    {
+        Assert.Contains("confirm=true", ResultAssert.Error(
+            await _service.ExecAsync("api-7f9", null, null, "ls -la", confirm: false, 30)));
+
+        Assert.Contains("command", ResultAssert.Error(
+            await _service.ExecAsync("api-7f9", null, null, "  ", confirm: true, 30)));
+
+        Assert.Contains("pod name", ResultAssert.Error(
+            await _service.ExecAsync("--all-pods", null, null, "ls", confirm: true, 30)));
+    }
+
+    [Fact]
+    public async Task KustomizeNeedsAPathAndRendersTheDocumentCount()
+    {
+        Assert.Contains("directory", ResultAssert.Error(await _service.KustomizeAsync("", null, 30)));
+
+        Assert.Equal(3, KubernetesService.CountDocuments("""
+            apiVersion: v1
+            kind: ConfigMap
+            ---
+            apiVersion: v1
+            kind: Service
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            """));
+        Assert.Equal(1, KubernetesService.CountDocuments("kind: Pod"));
+        Assert.Equal(0, KubernetesService.CountDocuments(" "));
+    }
+
+    [Fact]
     public async Task AnUnknownHelmActionAndAKnownOneWithNoHelmAreBothStructured()
     {
         Assert.Contains("Unknown action", ResultAssert.Error(

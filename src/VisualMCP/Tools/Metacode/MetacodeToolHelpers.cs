@@ -35,22 +35,24 @@ internal static class MetacodeToolHelpers
 
         return Normalize(language) is { } textTag
             ? FromText(text, textTag, null, side)
-            : (null, $"{side}: text needs language='cs', 'vb', 'razor', 'ghidra' or 'pseudo' — there is no path to infer it from.");
+            : (null, $"{side}: text needs language='cs', 'vb', 'java', 'razor', 'ghidra' or 'pseudo' — there is no path to infer it from.");
     }
 
-    // The product's source languages are C#, Visual Basic and Razor; pseudocode and a Ghidra snapshot are
-    // this library's own formats. Python and C++ are not offered: their readers need an AST dump that
-    // nothing here produces (see MetacodeTranslator.Default).
+    // The product's source languages are C#, Visual Basic, Java and Razor; pseudocode and a Ghidra
+    // snapshot are this library's own formats. Python and C++ are not offered: their readers need an AST
+    // dump that nothing here produces (see MetacodeTranslator.Default).
     private static (MetacodeSource? Source, string? Error) FromText(
         string text, string tag, string? path, string side) => tag switch
     {
         "cs" => (MetacodeSource.FromCSharp(text, path), null),
         "vb" => (MetacodeSource.FromVisualBasic(text, path), null),
+        // Java source: what JADX writes, and what a Java project's own .java file contains.
+        "java" => (MetacodeSource.FromJava(text, path), null),
         "pseudo" => (MetacodeSource.FromPseudocode(text, path), null),
         "razor" => (MetacodeSource.FromRazor(text, path), null),
         // The snapshot analyze_native_binary leaves behind, and any older one: no Ghidra needed to read it.
         "ghidra" => (MetacodeSource.FromGhidra(text, path), null),
-        _ => (null, $"{side}: unknown language '{tag}'; use 'cs', 'vb', 'razor', 'ghidra' or 'pseudo'."),
+        _ => (null, $"{side}: unknown language '{tag}'; use 'cs', 'vb', 'java', 'razor', 'ghidra' or 'pseudo'."),
     };
 
     /// <summary>
@@ -114,6 +116,7 @@ internal static class MetacodeToolHelpers
         "pseudo" or "pseudocode" or "mc" or "metacode" => "pseudo",
         "razor" or "cshtml" or "blazor" => "razor",
         "ghidra" or "ghidra-snapshot" or "native" => "ghidra",
+        "java" or "jadx" or "jar" => "java",
         "vb" or "vbnet" or "visualbasic" or "visual-basic" => "vb",
         _ => language,
     };

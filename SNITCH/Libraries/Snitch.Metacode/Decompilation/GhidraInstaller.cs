@@ -177,7 +177,7 @@ public sealed class GhidraInstaller : IGhidraInstaller
                 Directory.Delete(target, recursive: true);
             }
 
-            Directory.Move(sourceHome, target);
+            ToolInstall.MoveDirectory(sourceHome, target);
             RestoreUnixModes(target);
 
             var installed = FindHeadless(target)!;

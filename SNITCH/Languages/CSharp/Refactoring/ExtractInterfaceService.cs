@@ -55,6 +55,13 @@ public sealed class ExtractInterfaceService : IExtractInterfaceService
 
         var classSymbol = classSymbols[0];
 
+        // VB writes the interface in its own vocabulary and patches the class with an Implements clause
+        // on the type *and* on every member, so it is a separate projection rather than a base list.
+        if (Snitch.Languages.VB.Refactoring.VbRefactoringSupport.IsVisualBasic(classSymbol))
+            return await Snitch.Languages.VB.Refactoring.VbExtractInterface.RunAsync(
+                _workspace, solution, classSymbol, interfaceName, includeProperties, includeMethods, includeEvents,
+                addToClass, targetDirectory, dryRun, CancellationToken.None);
+
         // Collect members to include
         var members = classSymbol.GetMembers()
             .Where(m =>

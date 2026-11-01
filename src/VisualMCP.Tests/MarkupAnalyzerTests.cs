@@ -237,7 +237,7 @@ public sealed class MarkupAnalyzerTests
     }
 
     [Fact]
-    public void OnlySimpleSelectorsAreIndexedAndComplexOnesStillDefineTheirClasses()
+    public void SelectorsAreIndexedWithTheirCombinatorsAttributesAndPseudoClasses()
     {
         var analysis = MarkupAnalyzer.AnalyzeCss("""
             .card { color: red; }
@@ -246,15 +246,20 @@ public sealed class MarkupAnalyzerTests
             .a .b { color: black; }
             .a:hover { color: grey; }
             [data-x] { color: white; }
+            ul > li:first-child { color: pink; }
             """, "probe.css");
 
-        var texts = analysis.Selectors!.Select(selector => selector.Text).ToArray();
-        Assert.Contains(".card", texts);
-        Assert.Contains("div.card", texts);
-        Assert.Contains("#main", texts);
-        Assert.DoesNotContain(".a .b", texts);
-        Assert.DoesNotContain(".a:hover", texts);
-        Assert.DoesNotContain("[data-x]", texts);
+        var byText = analysis.Selectors!.ToDictionary(selector => selector.Text);
+
+        Assert.True(byText["div.card"].Checkable);
+        Assert.Equal("card", byText["div.card"].Complex!.Parts[^1].Classes!.Single());
+        Assert.Equal(CssCombinator.Descendant, byText[".a .b"].Complex!.Parts[1].Combinator);
+        Assert.Equal(CssCombinator.Child, byText["ul > li:first-child"].Complex!.Parts[1].Combinator);
+        Assert.Equal("first-child", byText["ul > li:first-child"].Complex!.Parts[1].PseudoClasses!.Single());
+
+        // A dynamic state only a browser can decide: indexed (for its classes) but never reported.
+        Assert.False(byText[".a:hover"].Checkable);
+        Assert.True(byText["[data-x]"].Checkable);
 
         var classes = analysis.Classes!;
         Assert.Contains("a", classes);
@@ -284,11 +289,51 @@ public sealed class MarkupAnalyzerTests
             .Select(finding => finding.GetProperty("Snippet").GetString())
             .ToList();
 
-        Assert.Equal(3, json.GetProperty("findingCount").GetInt32());
+        Assert.Equal(4, json.GetProperty("findingCount").GetInt32());
         Assert.Contains(".missing", snippets);
         Assert.Contains("#nope", snippets);
         Assert.Contains("section", snippets);
+        Assert.Contains(".card .missing", snippets);
         Assert.DoesNotContain(".card", snippets);
+    }
+
+    [Fact]
+    public async Task CombinatorsAttributesAndStructuralPseudoClassesResolveAgainstThePage()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """
+            <ul class="menu"><li class="item"><a class="link" href="/home">home</a></li></ul>
+            """);
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), """
+            .menu > li.item { color: red; }
+            .menu .link { color: blue; }
+            .link[href="/home"] { color: green; }
+            li:first-child { color: black; }
+            .menu > a { color: grey; }
+            .menu + p { color: white; }
+            [href^="/away"] { color: pink; }
+            .menu:hover { color: teal; }
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "CSS0009", 100, 100));
+        var snippets = json.GetProperty("findings").EnumerateArray()
+            .Select(finding => finding.GetProperty("Snippet").GetString())
+            .ToList();
+
+        Assert.Contains(".menu > a", snippets);      // the link is a grandchild, not a child
+        Assert.Contains(".menu + p", snippets);      // there is no following sibling
+        Assert.Contains("[href^=\"/away\"]", snippets);
+
+        Assert.DoesNotContain(".menu > li.item", snippets);
+        Assert.DoesNotContain(".menu .link", snippets);
+        Assert.DoesNotContain(".link[href=\"/home\"]", snippets);
+        Assert.DoesNotContain("li:first-child", snippets);
+
+        // A selector with a state only the browser knows is never reported as unmatched.
+        Assert.DoesNotContain(".menu:hover", snippets);
     }
 
     [Fact]

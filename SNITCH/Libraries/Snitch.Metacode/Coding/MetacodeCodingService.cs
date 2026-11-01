@@ -88,7 +88,10 @@ public sealed record FolderSweep(
     int Failed,
     IReadOnlyList<string> Details)
 {
-    public int Total => Text + Managed + Native + Skipped + Failed;
+    public int Total => Text + Managed + Java + Native + Skipped + Failed;
+
+    /// <summary>Java archives decompiled with JADX in this sweep.</summary>
+    public int Java { get; init; }
 }
 
 /// <summary>
@@ -118,8 +121,8 @@ public sealed record MetacodeCodingResult(
 /// <summary>
 /// The implementation. It owns no state beyond its collaborators: the workspace (to read and write the
 /// solution), the metacode index (the trees and their refresh), the ILSpy decompiler (the producer of
-/// trees from a managed assembly), Ghidra (the same for a native image) and the native store (where the
-/// latter's output lands).
+/// trees from a managed assembly), Ghidra (the same for a native image), JADX (the same for a Java
+/// binary) and the native store (where the Ghidra output lands).
 /// </summary>
 public sealed class MetacodeCodingService : IMetacodeCodingService
 {
@@ -130,6 +133,7 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
     private readonly IMetacodeIndexService _index;
     private readonly IMetacodeDecompileService _decompiler;
     private readonly IGhidraService _ghidra;
+    private readonly IJadxService _jadx;
     private readonly INativeCodeStore _native;
 
     public MetacodeCodingService(
@@ -137,12 +141,14 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         IMetacodeIndexService index,
         IMetacodeDecompileService decompiler,
         IGhidraService ghidra,
+        IJadxService jadx,
         INativeCodeStore native)
     {
         _workspace = workspace;
         _index = index;
         _decompiler = decompiler;
         _ghidra = ghidra;
+        _jadx = jadx;
         _native = native;
     }
 
@@ -199,7 +205,7 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         };
     }
 
-    /// <summary>The managed/native half of <see cref="DecompileAsync"/>, without the folder sweep.</summary>
+    /// <summary>The Java/managed/native half of <see cref="DecompileAsync"/>, without the folder sweep.</summary>
     private async Task<MetacodeCodingResult> DecompileCoreAsync(
         string assemblyPath,
         string? nameFilter,
@@ -208,6 +214,13 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         bool force,
         CancellationToken cancellationToken)
     {
+        // Three decompilers, one per family of binary, and the file's own bytes pick it: Java bytecode
+        // (class/dex/zip-of-classes) goes to JADX, .NET metadata to ILSpy, and machine code to Ghidra.
+        if (JavaArchiveDetector.IsJavaBinary(assemblyPath))
+        {
+            return await DecompileJavaAsync(assemblyPath, force, cancellationToken).ConfigureAwait(false);
+        }
+
         // ILSpy reads metadata, so machine code has to go the other way: Ghidra recovers C, the model
         // lowers it, and the native tables (plus the AST) keep it. The detection is a PE header check,
         // not an exception from deep inside the decompiler.
@@ -402,6 +415,150 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
                 : null);
     }
 
+    /// <summary>
+    /// The Java half of <see cref="DecompileCoreAsync"/>: JADX recovers the sources, the Java frontend
+    /// lowers them into the model, and every decompiled file becomes a document under
+    /// <c>java://&lt;archive&gt;/&lt;unit&gt;</c> in the same AST. JADX installs itself on first use; a
+    /// failure names the run's log instead of throwing.
+    /// </summary>
+    private async Task<MetacodeCodingResult> DecompileJavaAsync(
+        string archivePath, bool force, CancellationToken cancellationToken)
+    {
+        var ingest = await IngestJavaAsync(archivePath, force, cancellationToken).ConfigureAwait(false);
+        if (ingest.Error is not null)
+            return MetacodeCodingResult.Failed("decompile", ingest.Archive, ingest.Error);
+
+        return new MetacodeCodingResult(
+            "decompile", ingest.Archive, ingest.Stored, ingest.Summary,
+            File: ingest.File, Diagnostics: ingest.Diagnostics);
+    }
+
+    /// <summary>What decompiling one Java archive did, in the shape both the tool and the sweep report.</summary>
+    private sealed record JavaIngest(
+        string Archive,
+        bool Stored,
+        string Summary,
+        string? File = null,
+        IReadOnlyList<string>? Diagnostics = null,
+        string? Error = null);
+
+    /// <summary>
+    /// Run JADX on a Java binary, lower every source it wrote with the Java frontend, and store them in
+    /// the metacode AST — one entry point for the single-archive path and the sweep.
+    /// </summary>
+    private async Task<JavaIngest> IngestJavaAsync(string archivePath, bool force, CancellationToken cancellationToken)
+    {
+        var archive = Path.GetFileName(archivePath);
+        var sha = NativeCodeStore.HashOf(archivePath);
+
+        // JADX on a large APK is minutes, not milliseconds: an archive the store already holds is not
+        // run again unless the caller asks for it.
+        if (!force && string.Equals(_index.DecompiledJavaHash(archive), sha, StringComparison.Ordinal))
+        {
+            return new JavaIngest(archive, false,
+                $"{archive} is already stored as metacode (SHA-256 {sha[..Math.Min(12, sha.Length)]}); " +
+                "pass force=true to decompile it again.");
+        }
+
+        JadxAnalysis analysis;
+        try
+        {
+            analysis = await _jadx.DecompileAsync(archivePath, cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new JavaIngest(archive, false, string.Empty,
+                Error: $"JADX could not run on {archive}: {exception.GetType().Name}: {exception.Message}");
+        }
+
+        if (analysis.IsError)
+        {
+            var hint = " JADX is installed on demand under " + JadxOptions.DefaultToolsDirectory +
+                       "; set JADX_HOME (or JADX_CLI) to use a copy that is already there, and make sure a JDK is installed.";
+            return new JavaIngest(archive, false, string.Empty, analysis.LogPath,
+                Error: $"{archive} is Java bytecode and JADX produced no source: " +
+                       (analysis.Error ?? "no .java file was written.") + hint);
+        }
+
+        var units = new List<JavaSourceUnit>(analysis.Sources.Count);
+        var failures = new List<string>();
+
+        foreach (var source in analysis.Sources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string text;
+            try
+            {
+                text = await File.ReadAllTextAsync(source.Path, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                failures.Add($"{source.RelativePath}: {exception.Message}");
+                continue;
+            }
+
+            // Through the translator, not the frontend directly, so Java gets the same normalization
+            // passes as every other language (a C-style `for` becomes a `while`).
+            var document = MetacodeTranslator.Default.Translate(
+                MetacodeSource.FromJava(text, source.Path), MetacodeOptions.Default);
+
+            units.Add(new JavaSourceUnit(source.RelativePath, source.TypeName, document, text));
+        }
+
+        if (units.Count == 0)
+        {
+            return new JavaIngest(archive, false, string.Empty, analysis.LogPath,
+                Error: $"{archive}: JADX wrote {analysis.Files} source file(s) but none could be read. " +
+                       "The log is at " + analysis.LogPath + ".");
+        }
+
+        MetacodeBuildReport report;
+        try
+        {
+            report = await _index.IndexJavaAsync(archivePath, sha, units, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new JavaIngest(archive, false, string.Empty, analysis.LogPath,
+                Error: $"{archive}: JADX produced {units.Count} source file(s), but the solution store refused them: " +
+                       $"{exception.GetType().Name}: {exception.Message}");
+        }
+
+        if (report.Error is not null)
+            return new JavaIngest(archive, false, string.Empty, analysis.LogPath, Error: report.Error);
+
+        var summary = new StringBuilder()
+            .Append(archive).Append(" is Java bytecode: JADX recovered ").Append(analysis.Files)
+            .Append(" source file(s) in ").Append(analysis.Elapsed.TotalSeconds.ToString("0.0")).Append(" s and ")
+            .Append(report.Indexed).Append(" of them are stored as metacode trees — ")
+            .Append(report.Declarations).Append(" declaration(s), ").Append(report.Functions).Append(" callable(s), ")
+            .Append(report.Diagnostics).Append(" diagnostic(s)");
+        if (analysis.Truncated > 0)
+            summary.Append(", ").Append(analysis.Truncated).Append(" file(s) past the cap were not read");
+        if (report.Removed > 0) summary.Append(", ").Append(report.Removed).Append(" stale unit(s) removed");
+        if (report.Failed > 0) summary.Append(", ").Append(report.Failed).Append(" failed");
+        summary.Append(". Query them with metacode_index (trees, complexity) — paths start with ")
+            .Append(MetacodeIndexStore.JavaPrefix)
+            .Append("; every row records the archive in source_path and is flagged decompiled.");
+
+        var diagnostics = new List<string>();
+        if (analysis.LogPath is not null) diagnostics.Add("log: " + analysis.LogPath);
+        diagnostics.AddRange(failures.Take(5));
+        diagnostics.AddRange(report.Failures.Take(5));
+
+        return new JavaIngest(archive, report.Indexed > 0, summary.ToString(), analysis.LogPath,
+            diagnostics.Count > 0 ? diagnostics : null);
+    }
+
     // ── the folder a binary came from ─────────────────────────────────────────────────
 
     /// <summary>
@@ -414,11 +571,18 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
     private const long MaxSiblingBytes = 64L * 1024 * 1024;
 
     /// <summary>
+    /// How many Java archives the sweep may hand to JADX. One: a jar in a folder is already the whole
+    /// program, and decompiling all of its dependencies would spend minutes on code nobody asked about.
+    /// </summary>
+    private const int MaxJavaSiblings = 1;
+
+    /// <summary>
     /// The same folder as the binary just decompiled, read into the same store: every text file goes in
     /// as a document (a <c>file</c> node when no frontend reads it), every other managed assembly is
-    /// decompiled, and a couple of native images are handed to Ghidra. Bounded by <paramref name="maxSiblings"/>
-    /// files and <see cref="MaxNativeSiblings"/> native runs, and idempotent: a file the store already
-    /// holds is skipped on its hash, a binary already decompiled on its MVID/SHA.
+    /// decompiled, a Java archive is handed to JADX, and a couple of native images are handed to Ghidra.
+    /// Bounded by <paramref name="maxSiblings"/> files and by <see cref="MaxNativeSiblings"/> /
+    /// <see cref="MaxJavaSiblings"/> runs, and idempotent: a file the store already holds is skipped on its
+    /// hash, a binary already decompiled on its MVID/SHA.
     /// </summary>
     private async Task<FolderSweep> SweepAsync(
         string folder, string sourcePath, int maxSiblings, CancellationToken cancellationToken)
@@ -426,6 +590,7 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
         var details = new List<string>();
         var texts = new List<string>();
         var managed = new List<string>();
+        var java = new List<string>();
         var native = new List<string>();
         int skipped = 0, failed = 0;
 
@@ -480,6 +645,15 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
             if (WorkspaceSources.IsTextFile(file))
             {
                 texts.Add(file);
+                continue;
+            }
+
+            // Java bytecode comes before the executable-magic check: a .class starts with CAFEBABE,
+            // which is also a Mach-O fat binary, and a .jar is a zip and would otherwise be dismissed as
+            // "neither text nor an executable image".
+            if (JavaArchiveDetector.IsJavaBinary(file))
+            {
+                java.Add(file);
                 continue;
             }
 
@@ -561,6 +735,50 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
             }
         }
 
+        var javas = 0;
+        foreach (var archive in java)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var name = Path.GetFileName(archive);
+            if (javas >= MaxJavaSiblings)
+            {
+                skipped++;
+                details.Add($"{name}: Java archive not decompiled (at most {MaxJavaSiblings} per sweep — " +
+                            "pass its path to decompile it on its own)");
+                continue;
+            }
+
+            try
+            {
+                var ingest = await IngestJavaAsync(archive, force: false, cancellationToken).ConfigureAwait(false);
+                if (ingest.Error is not null)
+                {
+                    failed++;
+                    details.Add($"{name}: {ingest.Error}");
+                }
+                else if (ingest.Stored)
+                {
+                    javas++;
+                }
+                else
+                {
+                    // The store already held this exact archive (same SHA-256).
+                    skipped++;
+                    details.Add($"{name}: already stored");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failed++;
+                details.Add($"{name}: {exception.Message}");
+            }
+        }
+
         var natives = 0;
         foreach (var binary in native)
         {
@@ -608,7 +826,10 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
             }
         }
 
-        return new FolderSweep(folder, texts.Count, managedDecompiled, natives, skipped, failed, details);
+        return new FolderSweep(folder, texts.Count, managedDecompiled, natives, skipped, failed, details)
+        {
+            Java = javas,
+        };
     }
 
     /// <summary>Whether a file starts with the magic of a PE, ELF or Mach-O image.</summary>
@@ -639,6 +860,7 @@ public sealed class MetacodeCodingService : IMetacodeCodingService
             .Append("Swept ").Append(Path.GetFileName(sweep.Folder) ?? sweep.Folder).Append(": ")
             .Append(sweep.Text).Append(" text file(s) read, ")
             .Append(sweep.Managed).Append(" managed assembly(ies) decompiled, ")
+            .Append(sweep.Java).Append(" Java archive(s) decompiled, ")
             .Append(sweep.Native).Append(" native binary(ies) parsed, ")
             .Append(sweep.Skipped).Append(" skipped, ")
             .Append(sweep.Failed).Append(" failed");

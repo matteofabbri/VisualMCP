@@ -47,6 +47,11 @@ public sealed class PropertyToAutoService : IPropertyToAutoService
                                  string.Equals(Path.GetFullPath(d.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
 
+        // VB spells the property, its accessors and its backing field in its own syntax.
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbPropertyToAuto.RunAsync(
+                _workspace, solution, document, propertyName, containingType, dryRun, cancellationToken);
+
         // Writing does not update the in-memory solution (the workspace has no mutation API), so a
         // second refactoring would rewrite the file from the old text and silently undo the first.
         // Refuse instead of corrupting the file.

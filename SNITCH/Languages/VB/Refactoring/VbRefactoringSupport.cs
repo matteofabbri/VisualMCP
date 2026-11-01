@@ -312,6 +312,23 @@ internal static class VbRefactoringSupport
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
+    /// <summary>Whether a symbol is declared in a Visual Basic document.</summary>
+    public static bool IsVisualBasic(ISymbol symbol) =>
+        symbol.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree.Options.Language == LanguageNames.VisualBasic;
+
+    /// <summary>The document of <paramref name="solution"/> that holds <paramref name="path"/>, or null.</summary>
+    public static Document? DocumentAt(Solution solution, string? path)
+    {
+        if (path is null) return null;
+
+        var full = Path.GetFullPath(path);
+        return solution.Projects
+            .SelectMany(project => project.Documents)
+            .FirstOrDefault(document => document.FilePath is not null &&
+                                        string.Equals(Path.GetFullPath(document.FilePath), full,
+                                            Snitch.Platform.HostSystem.PathComparison));
+    }
+
     /// <summary>The type of the first declaration that starts on the line: an As clause of any kind.</summary>
     private static TypeSyntax? TypeOnLine(SyntaxNode root, int line)
     {

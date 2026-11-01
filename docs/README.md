@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **411 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **416 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -76,7 +76,7 @@ walkthrough: [Getting started](getting-started.md).
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
 | [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 411 tools, grouped by area, with a one-line description of each |
+| [Tool catalogue](tools.md) | All 416 tools, grouped by area, with a one-line description of each |
 | [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |
@@ -106,6 +106,7 @@ to name internal types; the pages above are not.
 | [adding-a-language.md](adding-a-language.md) | how a new language joins the style engine or the metacode model |
 | [agent-ergonomics.md](agent-ergonomics.md) | how many calls an agent needs to answer one question, measured on the session store, with the chains that are still mechanical |
 | [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md) | the rule-by-rule comparison against ReSharper / Rider / CodeMaid |
+| [resharper_tocover.md](resharper_tocover.md) | the whole ReSharper inspection catalogue — all 1,560 ids Rider 2026.2.1 declares, every language group, each with what the rule reports and whether a capability here answers it |
 | [resharper-context-actions.md](resharper-context-actions.md) | the context-action catalogue and its behaviour |
 
 The rule-by-rule table for the style engine is [`../CAPABILITY_MAP.md`](../CAPABILITY_MAP.md).

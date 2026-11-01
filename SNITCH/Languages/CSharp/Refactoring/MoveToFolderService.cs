@@ -53,7 +53,12 @@ public sealed class MoveToFolderService : IMoveToFolderService
         var root = await document.GetSyntaxRootAsync(cancellationToken);
         if (root is null) return new { error = $"Could not read the syntax tree of {Path.GetFileName(path)}." };
 
-        var namespaceName = root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault()?.Name.ToString();
+        // A VB file declares its namespace in a Namespace block (or not at all: the project's root
+        // namespace supplies it), so it is read from VB's own node.
+        var namespaceName = document.Project.Language == LanguageNames.VisualBasic
+            ? root.DescendantNodes().OfType<Microsoft.CodeAnalysis.VisualBasic.Syntax.NamespaceBlockSyntax>()
+                .FirstOrDefault()?.NamespaceStatement.Name.ToString()
+            : root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault()?.Name.ToString();
 
         string targetDirectory;
         if (!string.IsNullOrWhiteSpace(folder))

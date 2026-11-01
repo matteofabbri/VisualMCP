@@ -203,7 +203,13 @@ internal static class InspectionPackCatalog
                            new Rider.RedundantLambdaSignatureParenthesesAnalyzer(),
                            new Rider.UseNameofExpressionAnalyzer(),
                            new Rider.StringLiteralAsInterpolationArgumentAnalyzer(),
-                           new Rider.RedundantCheckBeforeAssignmentAnalyzer()),
+                           new Rider.RedundantCheckBeforeAssignmentAnalyzer(),
+                           new Rider.RedundantStringInterpolationAnalyzer(),
+                           new Rider.MethodOverloadWithOptionalParameterAnalyzer(),
+                           new Rider.ReplaceSequenceEqualWithConstantPatternAnalyzer(),
+                           new Rider.RedundantPatternParenthesesAnalyzer(),
+                           new Rider.MergeIntoPatternAnalyzer(),
+                           new Rider.ReplaceWithStringIsNullOrEmptyAnalyzer()),
                        ImmutableArray<DiagnosticAnalyzer>.Empty,
                        ImmutableArray.Create<CodeFixProvider>(new Rider.RiderCodeFixProvider()));
 
@@ -364,20 +370,31 @@ internal static class InspectionPackCatalog
 
     private static string? NewestPackageVersion(string packageId)
     {
-        var root = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
-        if (string.IsNullOrWhiteSpace(root))
-            root = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        // The configured cache first (a disk-guard policy may move it off the system drive), then the
+        // default one: a redirected NUGET_PACKAGES that does not hold the package must not make the
+        // pack vanish when the package is right there in the user's normal cache.
+        var roots = new List<string>();
+        var configured = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (!string.IsNullOrWhiteSpace(configured)) roots.Add(configured);
+        roots.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages"));
 
-        var packageFolder = Path.Combine(root, packageId.ToLowerInvariant());
-        if (!Directory.Exists(packageFolder)) return null;
+        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var packageFolder = Path.Combine(root, packageId.ToLowerInvariant());
+            if (!Directory.Exists(packageFolder)) continue;
 
-        return Directory.EnumerateDirectories(packageFolder)
-            .Select(dir => (Dir: dir, Version: ParseVersion(Path.GetFileName(dir))))
-            .Where(candidate => candidate.Version is not null)
-            .OrderByDescending(candidate => candidate.Version)
-            .Select(candidate => candidate.Dir)
-            .FirstOrDefault();
+            var newest = Directory.EnumerateDirectories(packageFolder)
+                .Select(dir => (Dir: dir, Version: ParseVersion(Path.GetFileName(dir))))
+                .Where(candidate => candidate.Version is not null)
+                .OrderByDescending(candidate => candidate.Version)
+                .Select(candidate => candidate.Dir)
+                .FirstOrDefault();
+
+            if (newest is not null) return newest;
+        }
+
+        return null;
     }
 
     private static Version? ParseVersion(string folderName)

@@ -120,7 +120,10 @@ public sealed record MetacodeBuildReport(
 /// <summary>One binary whose code the store holds: the file name, the identity its rows are keyed on, and how many documents it contributed.</summary>
 public sealed record DecompiledAssemblyRow(string Assembly, string Mvid, int Types)
 {
-    /// <summary><c>managed</c> for an ILSpy decompilation, <c>native</c> for a Ghidra one.</summary>
+    /// <summary>
+    /// <c>managed</c> for an ILSpy decompilation, <c>native</c> for a Ghidra one, <c>java</c> for a JADX
+    /// one (where the identity is the archive's SHA-256, since a jar has no MVID).
+    /// </summary>
     public string Kind { get; init; } = "managed";
 }
 

@@ -47,6 +47,7 @@ public sealed class AnalyzeRazorPagesService : IAnalyzeRazorPagesService
 
         var all = new List<RazorFinding>();
         var pagesAnalyzed = 0;
+        var partials = RazorAnalysis.CreatePartialResolver(collection);
 
         foreach (var file in collection.Files)
         {
@@ -54,7 +55,7 @@ public sealed class AnalyzeRazorPagesService : IAnalyzeRazorPagesService
             if (document is null) continue;
 
             pagesAnalyzed++;
-            all.AddRange(RazorRules.Run(document)
+            all.AddRange(RazorRules.Run(document, partials.For(Path.GetDirectoryName(document.FilePath)))
                 .Where(finding => !RazorRuleCatalog.IsSecurity(finding.Category)));
         }
 

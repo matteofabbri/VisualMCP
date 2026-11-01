@@ -3,7 +3,7 @@
 Comparison of VisualMCP tools against ReSharper, Rider and CodeMaid.
 Legend: ✅ implemented · ⚠️ partial · ❌ missing · 💀 not applicable to a headless MCP server
 
-Last updated: 2026-10-31 — **411 tools** in the running build; `capability_report` prints the live count.
+Last updated: 2026-11-01 — **416 tools** in the running build; `capability_report` prints the live count.
 This is the ✅ side of the comparison: each row names a capability that exists, the tool that provides it,
 and the guarantee — what that tool proves and where it stops. The ❌/⚠️ side is
 [What is missing — the gap inventory](gaps.md); a row that reads "scanned", "masked" or "candidate" is
@@ -41,14 +41,14 @@ an exception explained below it.
 | Feature | Tool | Status |
 |---|---|---|
 | Rename (preview + apply) | `preview_rename`, `apply_rename`, `rename_namespace` | ✅ symbols across the solution, and a namespace's last segment with every declaration and using updated |
-| Extract method / interface / class / superclass | `extract_method`, `extract_interface`, `extract_class`, `extract_superclass` | ✅ |
+| Extract method / interface / class / superclass | `extract_method`, `extract_interface`, `extract_class`, `extract_superclass` | ✅ `extract_method` and `extract_interface` also run on a `.vb` document: the block becomes a private `Sub`/`Function`, and the interface is written in VB's vocabulary with the `Implements` clause on the type *and* on every member |
 | Extract variable / field / parameter / part of string | `introduce_variable`, `introduce_field`, `introduce_parameter`, `introduce_part_of_string` | ✅ |
 | Inline method / variable / parameter / class / field | `inline_symbol`, `inline_parameter`, `inline_class`, `inline_field` | ✅ |
-| Change signature (reorder/add/remove/transform) | `change_signature`, `add_params`, `remove_params`, `transform_parameters` | ✅ `transform_parameters` wraps parameters in a parameter object, makes them optional or required, retypes them, or replaces one with a property |
-| Move type / namespace / folder / static members / instance method / into another type | `move_type`, `move_to_namespace`, `move_to_folder`, `move_static_members`, `move_instance_method`, `move_type_to_outer_scope`, `move_type_to_nested_scope` | ✅ |
+| Change signature (reorder/add/remove/transform) | `change_signature`, `add_params`, `remove_params`, `transform_parameters` | ✅ `change_signature` and the `ParamArray` pair run on C# and Visual Basic; `transform_parameters` (wrap in a parameter object, optional/required, retype, replace with a property) is C# only |
+| Move type / namespace / folder / static members / instance method / into another type | `move_type`, `move_to_namespace`, `move_to_folder`, `move_static_members`, `move_instance_method`, `move_type_to_outer_scope`, `move_type_to_nested_scope` | ✅ `move_type` and `move_to_folder` also run on `.vb`, carrying the file's `Imports` and the declared `Namespace` |
 | Safe delete, copy type, use base type | `safe_delete`, `safe_delete_file`, `safe_delete_folder`, `copy_type`, `use_base_type` | ✅ symbols, files and folders — each refused while a reference exists |
 | Pull members up / push members down | `pull_members_up`, `push_members_down` | ✅ |
-| Encapsulate field, property ↔ method, indexer ↔ method | `encapsulate_field`, `property_to_auto`, `property_to_function`, `function_to_property`, `function_to_indexer`, `indexer_to_function` | ✅ |
+| Encapsulate field, property ↔ method, indexer ↔ method | `encapsulate_field`, `property_to_auto`, `property_to_function`, `function_to_property`, `function_to_indexer`, `indexer_to_function` | ✅ `property_to_auto` and `function_to_property` also run on `.vb`, rewriting both call spellings (with and without parentheses) |
 | Constructor → factory, to primary constructor, to record | `constructor_to_factory`, `convert_to_primary_constructor`, `convert_to_record` | ✅ |
 | Anonymous type → named type | `convert_anonymous_to_type` | ✅ |
 | Make static / non-static | `make_static`, `make_non_static` | ✅ call sites routed through an instance already in scope; refused when one is not |
@@ -63,9 +63,13 @@ an exception explained below it.
 | Structural search & replace as a refactoring | `structural_search` | ✅ |
 
 All ~51 refactorings of Rider's "main set" are implemented; the table above is the tool for each one.
-The ones whose operation is a declaration rather than C# syntax also run on a `.vb` document:
-`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `change_type`, `use_base_type`,
-`type_to_partial` and `safe_delete`, each under the same compiler gate.
+Fifteen of them also run on a `.vb` document, each under the same compiler gate: the ones whose
+operation is a declaration (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`,
+`change_signature`, `change_type`, `use_base_type`, `type_to_partial`, `safe_delete`) and the ones
+whose VB spelling is its own operation (`extract_interface`, `extract_method`, `move_type`,
+`move_to_folder`, `property_to_auto`, `function_to_property`). What stays C#-only is the
+declaration-shape tail: `extract_class`/`extract_superclass`, the inline family, the move family
+beyond `move_type`/`move_to_folder`, and the indexer conversions.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
 `simplify_code` (97 IDE ids) and `simplify_vb_code` (41 VB ids), the fixes come from `apply_code_fix`,
 and 41 context-action ids are applied directly by `context_action` — the guards, the wrap actions, the
@@ -135,7 +139,7 @@ pattern merging and the extension block, named in its table below.
 | Inspections from the shipped packs | `inspect_code` | ✅ ~800 ids from 5 packs |
 | Apply an inspection's own code fix | `apply_code_fix` | ✅ dry run, FixAll by scope |
 | **Baseline: only the findings a change introduced** | `inspection_baseline` | ✅ |
-| ReSharper's inspection catalogue | `resharper_inspection_map` | ⚠️ the catalogue is **read, not ported**: 1,560 ids in Rider 2026.2.1 (796 C#-only, plus 105 shared with VB), each with its language group, the analyzer that produces it and its tooltip description, read from `lib/ReSharperHost`. 13 are implemented natively under ReSharper's names in the opt-in `rider` pack (11 of them with a code fix), 36 map to an existing capability here, 8 have none. The rest are closed-source analyzers over JetBrains' PSI — a reimplementation each, not a registration |
+| ReSharper's inspection catalogue | `resharper_inspection_map` | ⚠️ the catalogue is **read, not ported**: 1,560 ids in Rider 2026.2.1 (910 of them applicable to C#), each with its language group, the analyzer that produces it and its tooltip description, read from `lib/ReSharperHost`. 19 are implemented natively under ReSharper's names in the opt-in `rider` pack (16 of them with a code fix), 26 more map to an existing capability here, 8 have none. The rest are closed-source analyzers over JetBrains' PSI — a reimplementation each, not a registration. **All 1,560 ids, one row each with its coverage, are [resharper_tocover.md](resharper_tocover.md)** — `outputPath` writes that page from the same read |
 | Severity configuration / suppressions / `.DotSettings` | `configure_inspection`, `suppress_finding`, `read_dot_settings` | ✅ severity per solution/project/file, a `#pragma` or `SuppressMessage` suppression, and reading the team's `.DotSettings` layers (its ids are reported, not applied to Roslyn) |
 | Solution-wide background analysis | `background_analysis`, `analysis_findings` | ✅ a warm loop re-runs the packs when the solution changes; the findings are served from its cache |
 | Dead code, unused symbols | `find_dead_code`, `find_unused_symbols` | ✅ |
@@ -179,6 +183,26 @@ pattern merging and the extension block, named in its table below.
 | Which tests a change affects | `test_impact_analysis`, `run_affected_tests` | ✅ git diff → the symbols the changed files declare → the test methods that reference them, and the same filter executed in one call |
 | Behaviour preserved by a change | `verify_change` | ✅ the suite on the working tree and on the base revision in a detached worktree, diffed test by test: regressions, fixes, new tests, verdict |
 
+### Debugger
+
+A real Debug Adapter Protocol session over netcoredbg (installed on demand), with every request the
+adapter implements exposed as a tool, plus two capabilities reached through Roslyn.
+
+| Feature | Tool | Status |
+|---|---|---|
+| Start under the debugger / attach | `debug_launch`, `debug_attach` | ✅ a built assembly or a `.csproj` (the newest `bin/` assembly), arguments, environment, working directory, stop at entry; attach by process id |
+| Line breakpoints | `debug_breakpoints` | ✅ per file, with a C# condition and a hit count (`>5`, `>=5`, `5`, `%3`) counted **by this server** because the adapter has none — an unsatisfied hit is resumed transparently and `hitConditionSkips` reports it; verified vs unverified with the adapter's message |
+| Break on a method by name | `debug_function_breakpoints` | ✅ the DAP function-breakpoint forms (`Ns.Type.Method`, `Module.dll!Ns.Type.Method(int)`) with a condition; the whole set is replaced per call, and an unverified name binds when its module loads |
+| **Break where a member is written (data breakpoint)** | `debug_data_breakpoints` | ✅ every write site in the solution's source, resolved by Roslyn: assignment, compound assignment, `++`/`--`, a `ref`/`out` argument and an initializer, each listed with its kind. A write from code outside the solution's source does not stop, and a local is refused |
+| Step, continue, pause | `debug_pause`, `debug_continue`, `debug_step` | ✅ over/into/out, and every resume waits for the next stop or for the exit |
+| Exceptions by type | `debug_exceptions` | ✅ the `all` / `user-unhandled` filters **narrowed to named exception types** (`filterOptions`, an exact full type name, `!Type` excludes), and with no setting to change the call returns the stopped exception — id, stage, type, message, details and inner exceptions. A stop on an exception carries that same block |
+| Threads, stack, variables | `debug_threads`, `debug_stack`, `debug_variables` | ✅ file:line per frame, and Locals/Arguments/Autos with member expansion |
+| Evaluate, and **write**, a value | `debug_evaluate` | ✅ the data tip of a watch, and `newValue` is Set Value: the expression is assigned in the running process and the answer shows what it holds afterwards |
+| Console output | `debug_output` | ✅ stdout/stderr as the debuggee wrote them, plus the adapter's stderr when a launch failed |
+| Restart with the same breakpoints, optionally rebuilt | `debug_restart` | ✅ the same program, arguments, environment, line/function breakpoints and exception settings again under a new session id; `rebuild=true` runs `dotnet build` on the project that produced the assembly, and a failed build leaves the session untouched |
+| Edit-and-continue / hot reload | — | ⚠️ the adapter applies metadata deltas only over GDB/MI (`-apply-deltas`), and its DAP mode has no request for them. Substitutes: `debug_restart rebuild=true` and `debug_evaluate newValue` |
+| Debugger windows (breakpoints list, modules, parallel stacks) | `debug_sessions`, `debug_stack`, `debug_threads` | 💀 the data is a tool result; the window is the client's |
+
 ### Decompilation & profiling
 
 | Feature | Tool | Status |
@@ -187,8 +211,8 @@ pattern merging and the extension block, named in its table below.
 | NuGet package API / type source | `inspect_package`, `inspect_packages`, `decompile_package_type`, `find_assembly_api` | ✅ the package's DLL located in the cache and its API read, without a path |
 | Pseudocode view (metacode) | `metacode_translate`, `decompile_to_metacode`, `metacode_compare` | ✅ |
 | Native binary → pseudocode | `analyze_native_binary` (Ghidra) | ✅ |
-| Navigate inside decompiled code | `assembly_workspace` | ✅ search, source, references and outline over a Roslyn workspace keyed on the MVID; rename is not possible (there is no source to write) |
-| IL viewer | `disassemble` | ✅ the IL of one type or method, with tokens resolved against the metadata |
+| Navigate inside decompiled code | `assembly_workspace` | ✅ search, source, references and outline over a Roslyn workspace keyed on the MVID; `action=il` returns the same symbol as IL; rename is not possible (there is no source to write) |
+| IL viewer | `disassemble` | ✅ the IL of one type or method, with tokens resolved against the metadata; `assembly_workspace action=il` links the decompiled view and the IL view of the same symbol |
 | CPU/memory/I-O diagnosis | `profile_*` (27 tools) | ✅ sampling, allocation sites, GC, heap retention, thread-pool and lock analysis, async and database event analysis, instrumentation, plus the verdict tools (`profile_slowdown`, `profile_threadpool`, `profile_review_change`, `profile_root_cause`) |
 | Interactive timeline, object-graph explorer | `profile_*` | 💀 the data is a tool result; the client draws the timeline and the graph |
 
@@ -218,7 +242,7 @@ and, in the last column, exactly where it stops.
 | Language / kind | Tool | What it proves | Where it stops |
 |---|---|---|---|
 | JavaScript, TypeScript, JSX, TSX | `js_files`, `analyze_js` | modules imported and exported, functions and classes, JSX presence, the relative imports resolved into a module graph with its import cycles; 17 rules over masked source — `eval`, `new Function`, `innerHTML`, `dangerouslySetInnerHTML`, `document.write`, loose equality, `var`, `console`, `debugger`, empty catch, `@ts-ignore`, `target="_blank"` without `rel`, JSX `<img>` without `alt`, `any` in TypeScript, `setTimeout("…")`, an unresolvable relative import | no parser and no type model: symbols, references, rename and refactorings inside JS/TS are absent, JSX/TSX components, props/state and bundler configuration are not analysed, and a package specifier is not resolved — only `./` and `../` are checked against the file system. `node_typecheck` and `node_lint` run the project's own `tsc`/`eslint` |
-| HTML, CSS, SCSS | `markup_files`, `analyze_markup` | tags read by a quote-aware scanner, with balance, duplicate ids, `alt`, `lang`, viewport, label binding, nested forms, deprecated elements, inline handlers, `target="_blank"`, empty href, `button` type, control names, `http://` subresources; for CSS `!important`, ID selectors, empty rules, `@import`, duplicate selectors, unbalanced braces, `javascript:` URLs, `expression()`; the page's tag/class/id index is matched against the simple selectors of the scanned sheets — a selector that matches nothing is CSS0009, a class used and defined in no sheet is HTML0015 — the CSS rules and selectors also run on every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` | no DOM: a tag is scanned, not parsed into a tree, so combinators, attribute selectors, pseudo-classes, specificity and the cascade are not resolved, a CDN sheet or CSS built in JavaScript is outside the scan, and CSS isolation and formatting are not analysed |
+| HTML, CSS, SCSS | `markup_files`, `analyze_markup` | tags read by a quote-aware scanner, with balance, duplicate ids, `alt`, `lang`, viewport, label binding, nested forms, deprecated elements, inline handlers, `target="_blank"`, empty href, `button` type, control names, `http://` subresources; for CSS `!important`, ID selectors, empty rules, `@import`, duplicate selectors, unbalanced braces, `javascript:` URLs, `expression()`; a selector resolves against the page's element index — compound parts with tag, classes, id, attribute conditions and the structural pseudo-classes, joined by descendant, child, adjacent-sibling and general-sibling combinators — a selector that matches nothing is CSS0009, a class used and defined in no sheet is HTML0015, the CSS rules and selectors also run on every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` | a structural scanner, not a renderer: a selector whose meaning only a browser can decide (`:hover`, `:checked`, `:nth-child()`, `:has()`) is indexed but never reported, the nesting is the one the markup writes, specificity and the cascade are not resolved, a CDN sheet or CSS built in JavaScript is outside the scan, and CSS isolation and formatting are not analysed |
 | YAML | `yaml_files`, `analyze_yaml` | documents and top-level keys, and for a Kubernetes manifest its `kind`/`apiVersion`/`metadata.name`; tabs in indentation, duplicate keys, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collections, an alias with no anchor; then the manifest shape — kind without apiVersion or the reverse, metadata with no name, a container with no image, two containers with the same name | no schema validation against Kubernetes, Helm or a CI schema, and not a YAML parser: the manifest rules check identity and container shape, not the schema, and an indentation-aware line scan leaves nested-value typing and anchors beyond a missing definition unchecked |
 | F# | `fsharp_files`, `analyze_fsharp` | modules, types, top-level functions and opens — the declaration inventory F# has no symbol index for; tabs, `Option.get`, partial list access, `Unchecked.defaultof`/`unbox`, null comparison, `with _ ->`, `let mutable`, `printf`, `failwith`, a duplicated `open` | no semantic model — F# is not a Roslyn language — so no symbols, references, rename, refactorings, inspections or complexity; the scanner resolves nothing, and `build_project` returns only the compiler's own `FS####` diagnostics |
 | SQL | `sql_files`, `analyze_sql` | statements, verbs and tables; the lexical, safety, security and performance rules SQL0001–SQL0010 | not a dialect parser: no schema object model, no validation against a database, no execution, no query plan, no formatting, and SQL inside a C# string is a `trace_data_flow` sink rather than parsed text |
@@ -233,6 +257,7 @@ every batch and the rows it closed, is [gaps.md §14](gaps.md#14-revision-log).
 
 | Date | What changed | Tools |
 |---|---|---|
+| 2026-11-01 | **The debugger, against the adapter's real surface**: per-exception-type filters (`filterOptions`) and the stopped exception's block (`exceptionInfo`), function breakpoints, Set Value through `debug_evaluate newValue`, hit conditions counted by the server, **data breakpoints as the solution's Roslyn-resolved write sites**, and `debug_restart` with an optional rebuild. Edit-and-continue/hot reload is a ⚠️ row: the adapter applies metadata deltas only over GDB/MI | 413 → 416 |
 | 2026-10-31 | **The HTML/CSS depth**: `markup_files` indexes every page's tags/classes/ids and every sheet's simple selectors; `analyze_markup` gains CSS0009 (a simple selector that matches no element) and HTML0015 (a class used and defined in no scanned sheet), runs the CSS rules and selectors on every `<style>` block, and checks an inline `style` attribute for `!important`, `javascript:` and `expression()` | 404 (unchanged) |
 | 2026-10-31 | **The depth of the scanned layers and the data-flow reach**: `analyze_yaml` gains YAML0009–YAML0012 (kind/apiVersion asymmetry, metadata without a name, a container with no image, duplicate container names), `analyze_js` resolves a relative import and reports JS0017, and `trace_data_flow` follows a value stored in a field of the same type across the method that writes it and the method that reads it. No new tool: the range of three existing ones | 401 (unchanged) |
 | 2026-10-31 | **Version control and collaboration** stops being a row in [gaps.md](gaps.md) and becomes a feature section here: the 37 tools — 28 in the Git family (27 `git_*` and `commit_lint`), 8 GitHub and `code_review`. The section adds no tool, it moves ones already counted; real-time co-editing stays the one boundary and is UI-bound by design | 401 (unchanged) |

@@ -13,15 +13,15 @@ public static class MetacodeIndexTool
         "facts computed over the model. It is generated when the solution opens and kept in step with saved files " +
         "(the background pass compares each file's timestamp, then its content hash, so only what changed is " +
         "translated). The document set is the whole solution, not only the Compile items: every text file under the " +
-        "solution folder is read — C#, Visual Basic and Razor through a frontend, and a README, a .csproj or a JSON " +
-        "config as a single `file` AST node (kind `file`, payload with its path/language/lines/chars), so nothing the " +
-        "solution contains is missing from the store. Every source is stored TWICE: its native text and language in " +
+        "solution folder is read — C#, Visual Basic, Java and Razor through a frontend, and a README, a .csproj or a " +
+        "JSON config as a single `file` AST node (kind `file`, payload with its path/language/lines/chars), so nothing " +
+        "the solution contains is missing from the store. Every source is stored TWICE: its native text and language in " +
         "source_document, its metacode in mc_document/mc_tree. " +
         "PROVENANCE: every row of mc_document/mc_tree/mc_node carries source_path — the file the content came from, " +
-        "which for decompiled code is the BINARY — and a decompiled flag (true for code recovered from an assembly or a " +
-        "native binary, false for code read from a source file). So decompiled types (assembly://<file>/<type>) and " +
-        "native functions (native://<file>) live in the same tables and the same AST as the solution's own code, and a " +
-        "query can always tell them apart. " +
+        "which for decompiled code is the BINARY — and a decompiled flag (true for code recovered from an assembly, a " +
+        "native binary or a Java archive, false for code read from a source file). So decompiled types " +
+        "(assembly://<file>/<type>), Java units (java://<archive>/<unit>) and native functions (native://<file>) live " +
+        "in the same tables and the same AST as the solution's own code, and a query can always tell them apart. " +
         "The COMPLETE AST of every declaration is stored node by node in mc_node too: the parent link, the parent " +
         "property that holds the node, its position there, its depth, its span and the node's own payload as JSON — " +
         "so the tree is a SQL query, not a rendering to parse. " +
@@ -33,8 +33,8 @@ public static class MetacodeIndexTool
         "stored tree of a symbol (or every tree of a file), which is what metacode_generate turns back into code; " +
         "action=ast returns the complete stored AST of the matching declarations, nested, one node per class of the " +
         "model (If, Block, Invocation, Binary, …) with its span; " +
-        "action=assemblies lists the binaries whose decompiled code the store also holds, managed and native " +
-        "(metacoding action=decompile).")]
+        "action=assemblies lists the binaries whose decompiled code the store also holds — managed (ILSpy), native " +
+        "(Ghidra) and Java (JADX), each with its kind (metacoding action=decompile).")]
     public static async Task<object> MetacodeIndex(
         IMetacodeIndexService index,
         [Description("status | build | complexity | trees | ast | assemblies (default: status).")]

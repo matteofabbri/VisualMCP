@@ -83,12 +83,14 @@ public sealed class TraceDataFlowService : ITraceDataFlowService
                 .OrderByDescending(group => group.Count())
                 .ToDictionary(group => group.Key, group => group.Count()),
             flows,
-            note = "A static taint walk over locals, parameters and call arguments, up to `depth` call levels. " +
-                   "Sources and sinks are the tables in TaintCatalog: request query/form/header/body/route data, " +
-                   "Console and environment input, and model-bound action parameters; sinks are SQL, process, " +
-                   "file, redirect, HTML and HTTP-client calls. A value stored in a field, a database or a queue " +
-                   "is not followed, and a sanitizer list (parsed numbers, GUIDs, Path.GetFileName, encoded " +
-                   "strings) is what marks a value safe. A finding is a candidate to check, not a proof.",
+            note = "A static taint walk over locals, parameters and call arguments, up to `depth` call levels, " +
+                   "plus a field written in one method and read in another, on any object. Sources and sinks are " +
+                   "the tables in TaintCatalog: request query/form/header/body/route data, Console and environment " +
+                   "input, and model-bound action parameters; sinks are SQL, process, file, redirect, HTML and " +
+                   "HTTP-client calls. A field is keyed by its declaration, not by the instance it hangs off, so " +
+                   "writing one instance's field taints every instance's; a property, a database and a queue are " +
+                   "not followed. A sanitizer list (parsed numbers, GUIDs, Path.GetFileName, encoded strings) is " +
+                   "what marks a value safe. A finding is a candidate to check, not a proof.",
         };
     }
 

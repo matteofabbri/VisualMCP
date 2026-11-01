@@ -43,6 +43,13 @@ public sealed class MoveTypeService : IMoveTypeService
             };
 
         var typeSymbol = typeSymbols[0];
+
+        // VB has no file-scoped namespace to reproduce and spells the type's surroundings differently,
+        // so moving a declaration to its own file is its own projection.
+        if (Snitch.Languages.VB.Refactoring.VbRefactoringSupport.IsVisualBasic(typeSymbol))
+            return await Snitch.Languages.VB.Refactoring.VbMoveType.RunAsync(
+                _workspace, solution, typeSymbol, targetDirectory, dryRun, CancellationToken.None);
+
         var declLocation = typeSymbol.Locations.FirstOrDefault(l => l.IsInSource);
         if (declLocation is null)
             return new { error = "Type has no source location." };

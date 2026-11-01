@@ -730,3 +730,372 @@ public sealed class RedundantCheckBeforeAssignmentAnalyzer : DiagnosticAnalyzer
         }
     }
 }
+
+/// <summary>
+/// RedundantStringInterpolation: an interpolated string with no interpolation is a plain string.
+/// Ported from <c>RedundantInterpolatedStringExpressionAnalyzer</c>: a trivial interpolated string of the
+/// non-verbatim kind, not a member of an interpolated-string concatenation.
+/// </summary>
+public sealed class RedundantStringInterpolationAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "RedundantStringInterpolation", "Redundant string interpolation",
+        "The interpolated string has no interpolation and can be a plain string",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.InterpolatedStringExpression);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var expression = (InterpolatedStringExpressionSyntax)context.Node;
+
+        // "$" is the interpolated kind; "$@" and "@$" are the verbatim kinds ReSharper leaves alone.
+        if (!expression.StringStartToken.IsKind(SyntaxKind.InterpolatedStringStartToken)) return;
+        if (expression.Contents.Any(content => content is InterpolationSyntax)) return;
+        if (IsPartOfInterpolatedConcatenation(expression)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, expression.StringStartToken.GetLocation()));
+    }
+
+    /// <summary>Two adjacent interpolated strings are merged by the compiler; the trivial one stays as written.</summary>
+    private static bool IsPartOfInterpolatedConcatenation(InterpolatedStringExpressionSyntax expression) =>
+        expression.Parent is BinaryExpressionSyntax binary &&
+        binary.IsKind(SyntaxKind.AddExpression) &&
+        (binary.Left is InterpolatedStringExpressionSyntax || binary.Right is InterpolatedStringExpressionSyntax);
+}
+
+/// <summary>
+/// MethodOverloadWithOptionalParameter: an overload that only adds optional parameters is shadowed by the
+/// shorter one, because every call it accepts the other accepts too.
+/// Ported from <c>MethodOverloadWithOptionalParametersProblemAnalyzer</c>.
+/// </summary>
+public sealed class MethodOverloadWithOptionalParameterAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "MethodOverloadWithOptionalParameter", "Method overload with optional parameter",
+        "The parameter '{0}' is hidden by an overload of '{1}' with no such parameter",
+        DiagnosticSeverity.Warning);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.MethodDeclaration);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var declaration = (MethodDeclarationSyntax)context.Node;
+        if (context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not IMethodSymbol method) return;
+        if (method.IsOverride || method.ExplicitInterfaceImplementations.Length > 0) return;
+        if (method.ContainingType is null) return;
+
+        var parameters = method.Parameters;
+        if (parameters.Length == 0) return;
+
+        var overloads = method.ContainingType.GetMembers(method.Name)
+            .OfType<IMethodSymbol>()
+            .Where(other => !SymbolEqualityComparer.Default.Equals(other, method))
+            .Where(other => !other.IsOverride && other.ExplicitInterfaceImplementations.Length == 0)
+            .Where(other => other.Arity == method.Arity)
+            .ToList();
+        if (overloads.Count == 0) return;
+
+        // Optional parameters are trailing, so the candidates are the prefixes of the signature.
+        for (var index = parameters.Length - 1; index >= 0 && parameters[index].IsOptional; index--)
+        {
+            if (!overloads.Any(overload => IsPrefix(overload, parameters, index))) continue;
+
+            var parameter = declaration.ParameterList.Parameters[index];
+            context.ReportDiagnostic(Diagnostic.Create(
+                Rule, parameter.Identifier.GetLocation(), parameters[index].Name, method.Name));
+        }
+    }
+
+    private static bool IsPrefix(IMethodSymbol overload, ImmutableArray<IParameterSymbol> parameters, int count)
+    {
+        if (overload.Parameters.Length != count) return false;
+
+        for (var index = 0; index < count; index++)
+        {
+            if (overload.Parameters[index].RefKind != parameters[index].RefKind) return false;
+            if (!SymbolEqualityComparer.Default.Equals(overload.Parameters[index].Type, parameters[index].Type)) return false;
+        }
+
+        return true;
+    }
+}
+
+/// <summary>
+/// ReplaceSequenceEqualWithConstantPattern: a char span compared to a string literal with SequenceEqual is
+/// the C# 11 constant pattern. Ported from <c>ReplaceSequenceEqualWithConstantPatternProblemAnalyzer</c>.
+/// </summary>
+public sealed class ReplaceSequenceEqualWithConstantPatternAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "ReplaceSequenceEqualWithConstantPattern", "Replace SequenceEqual with a constant pattern",
+        "The span can be compared to the literal with a constant pattern: x is \"…\"",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.InvocationExpression);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var invocation = (InvocationExpressionSyntax)context.Node;
+        if (invocation.ArgumentList.Arguments.Count != 1) return;
+        if (invocation.Expression is not MemberAccessExpressionSyntax member) return;
+        if (!member.Name.Identifier.ValueText.Equals("SequenceEqual", StringComparison.Ordinal)) return;
+
+        // A constant pattern over a string needs C# 11.
+        if (invocation.SyntaxTree.Options is not CSharpParseOptions parseOptions ||
+            parseOptions.LanguageVersion < LanguageVersion.CSharp11)
+            return;
+
+        var argument = invocation.ArgumentList.Arguments[0].Expression;
+        if (argument is not LiteralExpressionSyntax literal) return;
+        if (!literal.IsKind(SyntaxKind.StringLiteralExpression)) return;
+        if (!literal.Token.Text.StartsWith("\"", StringComparison.Ordinal)) return;
+
+        if (context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken).Symbol is not IMethodSymbol method) return;
+
+        // An extension method invoked with a member access resolves to its reduced form, which drops the
+        // receiver from Parameters; the declared symbol is what carries the two parameters.
+        var declared = method.ReducedFrom ?? method;
+        if (declared.Name != "SequenceEqual" || declared.Parameters.Length != 2 || !declared.IsExtensionMethod) return;
+        if (!IsMemoryExtensions(declared.ContainingType)) return;
+
+        if (context.SemanticModel.GetTypeInfo(member.Expression, context.CancellationToken).Type is not INamedTypeSymbol qualifier)
+            return;
+        if (!IsCharSpan(qualifier)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, invocation.GetLocation()));
+    }
+
+    private static bool IsMemoryExtensions(INamedTypeSymbol? type) =>
+        type is { Name: "MemoryExtensions" } && type.ContainingNamespace?.ToDisplayString() == "System";
+
+    private static bool IsCharSpan(INamedTypeSymbol type) =>
+        type is { Name: "Span" or "ReadOnlySpan", TypeArguments.Length: 1 } &&
+        type.ContainingNamespace?.ToDisplayString() == "System" &&
+        type.TypeArguments[0].SpecialType == SpecialType.System_Char;
+}
+
+/// <summary>
+/// RedundantPatternParentheses: parentheses that pattern precedence does not require.
+/// Ported from <c>RedundantPatternParenthesesProblemAnalyzer</c>.
+/// </summary>
+public sealed class RedundantPatternParenthesesAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "RedundantPatternParentheses", "Redundant pattern parentheses",
+        "The parentheses around the pattern are redundant",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.ParenthesizedPattern);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var parenthesized = (ParenthesizedPatternSyntax)context.Node;
+        if (parenthesized.Pattern is not { } pattern) return;
+        if (!ParenthesesAreRedundant(parenthesized, pattern)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, parenthesized.GetLocation()));
+    }
+
+    /// <summary>In patterns <c>not</c> binds tighter than <c>and</c>, which binds tighter than <c>or</c>.</summary>
+    private static bool ParenthesesAreRedundant(ParenthesizedPatternSyntax parenthesized, PatternSyntax inner) =>
+        parenthesized.Parent switch
+        {
+            UnaryPatternSyntax => false,
+            BinaryPatternSyntax binary when binary.IsKind(SyntaxKind.AndPattern) => !inner.IsKind(SyntaxKind.OrPattern),
+            _ => true,
+        };
+}
+
+/// <summary>
+/// MergeIntoPattern: <c>x is A &amp;&amp; x is B</c> is one pattern, <c>x is A and B</c>.
+/// Ported from <c>SequentialPatternCheck</c> / <c>MergeIntoPatternWarning</c>: only the conjunction of two
+/// checks on the same operand is merged, and an or-pattern is left alone because <c>and</c> binds tighter.
+/// </summary>
+public sealed class MergeIntoPatternAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "MergeIntoPattern", "Merge into pattern",
+        "The two checks on the same value can be one pattern: 'is A and B'",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.LogicalAndExpression);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var binary = (BinaryExpressionSyntax)context.Node;
+        if (!TryMatch(binary, out _, out _)) return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, binary.OperatorToken.GetLocation()));
+    }
+
+    /// <summary>The two pattern checks this conjunction merges, when it is the mergeable shape.</summary>
+    internal static bool TryMatch(
+        BinaryExpressionSyntax binary, out IsPatternExpressionSyntax left, out IsPatternExpressionSyntax right)
+    {
+        left = null!;
+        right = null!;
+
+        if (binary.Left is not IsPatternExpressionSyntax leftCheck) return false;
+        if (binary.Right is not IsPatternExpressionSyntax rightCheck) return false;
+        if (!SyntaxFactory.AreEquivalent(leftCheck.Expression, rightCheck.Expression)) return false;
+
+        // (a or b) and c is not a or b and c: an or-pattern on either side keeps its own grouping.
+        if (leftCheck.Pattern.IsKind(SyntaxKind.OrPattern) || rightCheck.Pattern.IsKind(SyntaxKind.OrPattern)) return false;
+
+        left = leftCheck;
+        right = rightCheck;
+        return true;
+    }
+}
+
+/// <summary>
+/// ReplaceWithStringIsNullOrEmpty: <c>s == null || s.Length == 0</c> is <c>string.IsNullOrEmpty(s)</c>.
+/// Ported from <c>ReplaceWithStringIsNullOrEmptyWarning</c>: the positive form inside <c>||</c> and the
+/// negated one inside <c>&amp;&amp;</c>, on one side-effect-free string operand.
+/// </summary>
+public sealed class ReplaceWithStringIsNullOrEmptyAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "ReplaceWithStringIsNullOrEmpty", "Use string.IsNullOrEmpty",
+        "The null-or-empty check on '{0}' can be written with string.IsNullOrEmpty",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(AnalyzeOr, SyntaxKind.LogicalOrExpression);
+        context.RegisterSyntaxNodeAction(AnalyzeAnd, SyntaxKind.LogicalAndExpression);
+    }
+
+    private static void AnalyzeOr(SyntaxNodeAnalysisContext context) => Analyze(context, negated: false);
+
+    private static void AnalyzeAnd(SyntaxNodeAnalysisContext context) => Analyze(context, negated: true);
+
+    private static void Analyze(SyntaxNodeAnalysisContext context, bool negated)
+    {
+        var binary = (BinaryExpressionSyntax)context.Node;
+        if (!TryMatch(binary, context.SemanticModel, negated, out var operand)) return;
+
+        if (context.SemanticModel.GetTypeInfo(operand, context.CancellationToken).Type?.SpecialType !=
+            SpecialType.System_String)
+            return;
+
+        context.ReportDiagnostic(Diagnostic.Create(Rule, binary.GetLocation(), operand.ToString()));
+    }
+
+    /// <summary>The string operand when the pair is a null check and an empty check in the same direction.</summary>
+    internal static bool TryMatch(
+        BinaryExpressionSyntax binary, SemanticModel? model, bool negated, out ExpressionSyntax operand)
+    {
+        operand = null!;
+
+        if (!TryNullCheck(binary.Left, out var nullChecked, out var isNullCheck)) return false;
+        if (isNullCheck == negated) return false;
+        if (!TryEmptyCheck(binary.Right, out var emptyChecked, out var isEmptyCheck, model)) return false;
+        if (isEmptyCheck == negated) return false;
+        if (!SyntaxFactory.AreEquivalent(nullChecked, emptyChecked)) return false;
+        if (!IsSideEffectFree(nullChecked)) return false;
+
+        operand = nullChecked;
+        return true;
+    }
+
+    private static bool TryNullCheck(ExpressionSyntax expression, out ExpressionSyntax operand, out bool isNull)
+    {
+        operand = null!;
+        isNull = false;
+        if (expression is not BinaryExpressionSyntax binary) return false;
+        if (!binary.IsKind(SyntaxKind.EqualsExpression) && !binary.IsKind(SyntaxKind.NotEqualsExpression)) return false;
+
+        isNull = binary.IsKind(SyntaxKind.EqualsExpression);
+        if (IsNullLiteral(binary.Right)) { operand = binary.Left; return true; }
+        if (IsNullLiteral(binary.Left)) { operand = binary.Right; return true; }
+        return false;
+    }
+
+    private static bool TryEmptyCheck(
+        ExpressionSyntax expression, out ExpressionSyntax operand, out bool isEmpty, SemanticModel? model)
+    {
+        operand = null!;
+        isEmpty = false;
+
+        if (expression is not BinaryExpressionSyntax binary) return false;
+
+        // s.Length == 0 / s.Length < 1 (empty) and s.Length != 0 / s.Length > 0 (not empty).
+        if (binary.Left is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Length" } length)
+        {
+            if (binary.Right is not LiteralExpressionSyntax literal || literal.Token.Value is not int value) return false;
+
+            operand = length.Expression;
+            if (binary.IsKind(SyntaxKind.EqualsExpression) && value == 0) { isEmpty = true; return true; }
+            if (binary.IsKind(SyntaxKind.LessThanExpression) && value == 1) { isEmpty = true; return true; }
+            if (binary.IsKind(SyntaxKind.LessThanOrEqualExpression) && value == 0) { isEmpty = true; return true; }
+            if (binary.IsKind(SyntaxKind.NotEqualsExpression) && value == 0) { isEmpty = false; return true; }
+            if (binary.IsKind(SyntaxKind.GreaterThanExpression) && value == 0) { isEmpty = false; return true; }
+            return false;
+        }
+
+        // s == "" / s == string.Empty (and the negations).
+        if (!binary.IsKind(SyntaxKind.EqualsExpression) && !binary.IsKind(SyntaxKind.NotEqualsExpression)) return false;
+        isEmpty = binary.IsKind(SyntaxKind.EqualsExpression);
+
+        if (IsEmptyString(binary.Right, model)) { operand = binary.Left; return true; }
+        if (IsEmptyString(binary.Left, model)) { operand = binary.Right; return true; }
+        return false;
+    }
+
+    private static bool IsNullLiteral(ExpressionSyntax expression) =>
+        expression.IsKind(SyntaxKind.NullLiteralExpression);
+
+    private static bool IsEmptyString(ExpressionSyntax expression, SemanticModel? model) =>
+        expression is LiteralExpressionSyntax { Token.Value: string value } && value.Length == 0 ||
+        model?.GetSymbolInfo(expression).Symbol is IFieldSymbol { Name: "Empty" } field &&
+        field.ContainingType.SpecialType == SpecialType.System_String;
+
+    private static bool IsSideEffectFree(ExpressionSyntax expression) => expression switch
+    {
+        IdentifierNameSyntax => true,
+        ThisExpressionSyntax => true,
+        MemberAccessExpressionSyntax member => IsSideEffectFree(member.Expression),
+        _ => false,
+    };
+}

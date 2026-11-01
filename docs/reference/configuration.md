@@ -33,6 +33,7 @@ the same file, including calls that were cancelled.
 | `VISUALMCP_DASHBOARD_HOST` | Bind another interface (default `127.0.0.1`); exposing it on a LAN is a deliberate choice |
 | `GHIDRA_INSTALL_DIR` / `GHIDRA_HOME` | Where Ghidra is installed, used by `analyze_native_binary`; `ghidraHome`/`headlessPath` override it. When neither is set, Ghidra is downloaded into `<local data>\VisualMCP\tools` on first use |
 | `JAVA_HOME_OVERRIDE` | JDK handed to Ghidra (JDK 21+); `javaHome` overrides it |
+| `JADX_HOME` / `JADX_CLI` | Where JADX is installed (`bin/jadx[.bat]` inside), used by `metacoding action=decompile` on Java archives; `jadxHome`/`cliPath` on `JadxOptions` override it. When neither is set, the cross-platform `jadx-<version>.zip` is downloaded into the same `tools` folder on first use. JADX runs on the JDK `JAVA_HOME` points at, or one found under the usual install roots |
 | `VISUALMCP_SKIP_INSTALL_ON_BUILD` | Build-time only: stops the Visual Studio post-build target from re-running the installer |
 | `VISUALMCP_TEMP` | The root a disk policy redirects to; `disk_usage action=guard` sets it. A policy file found at startup is applied before anything spawns a build |
 

@@ -14,6 +14,21 @@ public sealed record DecompiledTypeMetacode(
     int Functions);
 
 /// <summary>
+/// One source file JADX recovered from a Java binary: its path inside the archive (the package path), the
+/// type it is named after, the tree the Java frontend lowered it into, and the Java text itself — which is
+/// kept in the store's <c>source_document</c> half, because unlike an ILSpy type it is a file a reader can
+/// open.
+/// </summary>
+public sealed record JavaSourceUnit(
+    string RelativePath,
+    string TypeName,
+    MetacodeDocument Document,
+    string Text)
+{
+    public int Members => Document.Modules.Sum(module => module.Declarations.Count);
+}
+
+/// <summary>
 /// What a metacode decompilation produced. It never throws: a missing assembly or a type the engine
 /// cannot read comes back as <see cref="Error"/> or in <see cref="Errors"/>, next to everything that
 /// did succeed, because a decompilation that stops at the first awkward type is not useful.

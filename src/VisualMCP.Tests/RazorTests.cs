@@ -216,6 +216,61 @@ public sealed class RazorTests
         Assert.DoesNotContain(findings, finding => finding.RuleId is "RZ1005" or "RZ2006" or "RZ2007");
     }
 
+    [Fact]
+    public void AntiForgery_LooksInsideThePartialTheFormRenders()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vmcp-razor-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "Views", "Home"));
+        Directory.CreateDirectory(Path.Combine(root, "Views", "Shared"));
+
+        var page = Path.Combine(root, "Views", "Home", "Edit.cshtml");
+        var tokenPartial = Path.Combine(root, "Views", "Shared", "_Token.cshtml");
+        var cleanPartial = Path.Combine(root, "Views", "Shared", "_NoToken.cshtml");
+        File.WriteAllText(tokenPartial, "@Html.AntiForgeryToken()");
+        File.WriteAllText(cleanPartial, "<p>nothing here</p>");
+        File.WriteAllText(page, "<form method=\"post\"></form>");
+
+        try
+        {
+            var collection = new RazorCollection { Root = root };
+            collection.Files.Add(new RazorFileEntry(page, "Views/Home/Edit.cshtml", null));
+            collection.Files.Add(new RazorFileEntry(tokenPartial, "Views/Shared/_Token.cshtml", null));
+            collection.Files.Add(new RazorFileEntry(cleanPartial, "Views/Shared/_NoToken.cshtml", null));
+
+            var resolver = RazorAnalysis.CreatePartialResolver(collection)
+                .For(Path.GetDirectoryName(page));
+
+            var tagHelper = Scan("""
+                <form method="post" action="/save">
+                    <partial name="_Token" />
+                    <button type="submit">Save</button>
+                </form>
+                """, "Views/Home/Edit.cshtml");
+            Assert.DoesNotContain(RazorRules.Run(tagHelper, resolver), finding => finding.RuleId == "RZ1005");
+
+            var htmlHelper = Scan("""
+                <form method="post" action="/save">
+                    @await Html.PartialAsync("_Token")
+                </form>
+                """, "Views/Home/Edit.cshtml");
+            Assert.DoesNotContain(RazorRules.Run(htmlHelper, resolver), finding => finding.RuleId == "RZ1005");
+
+            var withoutToken = Scan("""
+                <form method="post" action="/save">
+                    <partial name="_NoToken" />
+                </form>
+                """, "Views/Home/Edit.cshtml");
+            Assert.Contains(RazorRules.Run(withoutToken, resolver), finding => finding.RuleId == "RZ1005");
+
+            // Without a resolver the rule stays per file, which is the behaviour the limit named.
+            Assert.Contains(RazorRules.Run(htmlHelper), finding => finding.RuleId == "RZ1005");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     // ── Security rules ─────────────────────────────────────────────────────────
 
     [Theory]

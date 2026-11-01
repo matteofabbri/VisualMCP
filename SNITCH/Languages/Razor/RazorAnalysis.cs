@@ -162,6 +162,29 @@ public static class RazorAnalysis
         }
     }
 
+    /// <summary>
+    /// The partial resolver for one analysis run: the collected files indexed once, so a thousand pages
+    /// do not each rebuild the index, and each partial parsed at most once. <see cref="For"/> binds it to
+    /// the folder of the page being analysed — a partial is looked for next to that page first, then by
+    /// path suffix and by file name (the shortest path wins, so a "Shared" copy beats a deep one). A name
+    /// that resolves to nothing returns null, and the rule then behaves as before.
+    /// </summary>
+    public static RazorPartialResolver CreatePartialResolver(RazorCollection collection, int maxDocuments = 200) =>
+        new(collection.Files.Select(entry => entry.FilePath).ToList(), maxDocuments);
+
+    private static string NormalisePartialName(string name)
+    {
+        var trimmed = name.Trim().Trim('\'', '"');
+        if (trimmed.Length == 0) return string.Empty;
+        if (trimmed.StartsWith("~/", StringComparison.Ordinal)) trimmed = trimmed[2..];
+        trimmed = trimmed.TrimStart('/');
+
+        return trimmed.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : trimmed + ".cshtml";
+    }
+
     private static void AddDirectory(RazorCollection collection, string root, string? project, int maxPages)
     {
         foreach (var file in EnumerateRazorFiles(root))
@@ -301,6 +324,99 @@ public static class RazorAnalysis
         RazorPageKind.ViewStart => "viewstart",
         _ => "other",
     };
+}
+
+/// <summary>
+/// A partial name resolved to its parsed document, for the rules that look inside what a page renders.
+/// The collected files are indexed once per analysis run and each partial is parsed once; a page binds it
+/// to its own folder with <see cref="For"/>, so "Views/Home/Edit.cshtml" finds a partial next to itself
+/// before it finds a shared one.
+/// </summary>
+public sealed class RazorPartialResolver
+{
+    private readonly List<string> _files;
+    private readonly Dictionary<string, List<string>> _byStem;
+    private readonly Dictionary<string, RazorDocument?> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly int _maxDocuments;
+    private int _parsed;
+
+    internal RazorPartialResolver(List<string> files, int maxDocuments)
+    {
+        _files = files;
+        _maxDocuments = maxDocuments;
+        _byStem = files
+            .GroupBy(file => Path.GetFileNameWithoutExtension(file), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.OrderBy(file => file.Length).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The resolver bound to the folder of the page being analysed.</summary>
+    public Func<string, RazorDocument?> For(string? fromDirectory) =>
+        name => Resolve(name, fromDirectory);
+
+    private RazorDocument? Resolve(string name, string? fromDirectory)
+    {
+        var relative = Normalise(name);
+        if (relative.Length == 0) return null;
+
+        var candidates = new List<string>();
+        if (Path.IsPathRooted(relative))
+            candidates.Add(relative);
+        else if (fromDirectory is not null)
+            candidates.Add(Path.GetFullPath(Path.Combine(fromDirectory, relative)));
+
+        var normalised = "/" + relative.Replace('\\', '/');
+        candidates.AddRange(_files.Where(file =>
+            ("/" + file.Replace('\\', '/')).EndsWith(normalised, StringComparison.OrdinalIgnoreCase)));
+
+        if (_byStem.TryGetValue(Path.GetFileNameWithoutExtension(relative), out var matches))
+            candidates.AddRange(matches);
+
+        foreach (var candidate in candidates)
+        {
+            if (_cache.TryGetValue(candidate, out var known))
+            {
+                if (known is not null) return known;
+                continue;
+            }
+
+            if (!File.Exists(candidate) || _parsed >= _maxDocuments)
+            {
+                _cache[candidate] = null;
+                continue;
+            }
+
+            RazorDocument? document;
+            try
+            {
+                _parsed++;
+                document = RazorScanner.Scan(candidate, File.ReadAllText(candidate));
+                document.Kind = RazorPageClassifier.Classify(document, candidate);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                document = null;
+            }
+
+            _cache[candidate] = document;
+            if (document is not null) return document;
+        }
+
+        return null;
+    }
+
+    private static string Normalise(string name)
+    {
+        var trimmed = name.Trim().Trim('\'', '"');
+        if (trimmed.Length == 0) return string.Empty;
+        if (trimmed.StartsWith("~/", StringComparison.Ordinal)) trimmed = trimmed[2..];
+        trimmed = trimmed.TrimStart('/');
+
+        return trimmed.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.EndsWith(".razor", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : trimmed + ".cshtml";
+    }
 }
 
 /// <summary>Path- and directive-based classification, because the extension alone cannot tell them apart.</summary>

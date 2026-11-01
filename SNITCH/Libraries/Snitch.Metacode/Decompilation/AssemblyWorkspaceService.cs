@@ -35,6 +35,9 @@ public interface IAssemblyWorkspaceService
     /// <summary>The decompiled source of one type or member, with its document location.</summary>
     Task<object> SourceAsync(string assemblyPath, string symbol, int maxChars);
 
+    /// <summary>The IL of a type or one of its methods, decoded from the same binary's method bodies.</summary>
+    Task<object> IlAsync(string assemblyPath, string symbol, int maxMethods);
+
     /// <summary>Every use of a type or member inside the decompiled set (Roslyn's symbol finder).</summary>
     Task<object> ReferencesAsync(string assemblyPath, string symbol, int maxResults);
 
@@ -255,6 +258,45 @@ public sealed class AssemblyWorkspaceService : IAssemblyWorkspaceService
             truncated = text.Length > maxChars,
             code = text.Length > maxChars ? text[..maxChars] + "…(truncated)" : text,
         });
+    }
+
+    /// <summary>
+    /// The other half of the C#↔IL toggle: the same member, read as the instructions the JIT actually
+    /// consumes. The symbol is resolved in the decompiled workspace (so a name action=search found works
+    /// here too) and the binary's method body is decoded by <see cref="DisassemblyService"/>.
+    /// </summary>
+    public async Task<object> IlAsync(string assemblyPath, string symbol, int maxMethods = 50)
+    {
+        if (Find(assemblyPath) is not { } workspace) return NotLoaded(assemblyPath);
+        if (string.IsNullOrWhiteSpace(symbol))
+            return new { error = "A symbol is required (Type or Type.Member)." };
+
+        var compilation = await workspace.Workspace.CurrentSolution
+            .GetProject(workspace.ProjectId)!.GetCompilationAsync();
+        var target = ResolveSymbol(compilation, symbol);
+        if (target is null)
+            return new
+            {
+                error = $"'{symbol}' does not resolve inside {workspace.AssemblyName}.",
+                hint = "Call action=search to see the names the workspace holds.",
+            };
+
+        var typeName = target.ContainingType?.Name ?? (target as INamedTypeSymbol)?.Name;
+        var methodName = target is IMethodSymbol method ? method.Name : null;
+        var il = new DisassemblyService().Disassemble(workspace.AssemblyPath, typeName, methodName,
+            Math.Clamp(maxMethods, 1, 500));
+
+        return new
+        {
+            assembly = workspace.AssemblyName,
+            symbol = target.ToDisplayString(),
+            type = typeName,
+            method = methodName,
+            view = "il",
+            il,
+            note = "The C# view is action=source of the same symbol; this is the same body as the instructions " +
+                   "the JIT consumes, with token operands resolved to names.",
+        };
     }
 
     public async Task<object> ReferencesAsync(string assemblyPath, string symbol, int maxResults = 100)

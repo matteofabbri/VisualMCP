@@ -4,8 +4,8 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Registers Snitch.Metacode: the translator itself (a singleton — it holds only the frontend list),
-/// the ILSpy decompiler that produces metacode, and the Ghidra headless analyzer that produces
-/// metacode from a native binary.
+/// the ILSpy decompiler that produces metacode, the Ghidra headless analyzer that produces metacode from
+/// a native binary, and JADX, which does the same from a Java binary.
 /// </summary>
 /// <remarks>
 /// The decompiler used to be registered by <c>AddSnitch()</c> while its implementation lived in the
@@ -34,6 +34,16 @@ public static class SnitchMetacodeServiceCollectionExtensions
                 sp.GetRequiredService<Snitch.Metacode.Decompilation.GhidraOptions>(),
                 sp.GetRequiredService<Snitch.Metacode.Decompilation.IGhidraInstaller>()));
         services.AddSingleton<Snitch.Metacode.Decompilation.INativeCodeStore, Snitch.Metacode.Decompilation.NativeCodeStore>();
+
+        // JADX: same shape as Ghidra — the installer (the cross-platform jadx-<version>.zip is downloaded
+        // into the same per-user tools folder), then the CLI service that runs it. HostSystem decides the
+        // launcher name; a JDK on the machine is what actually runs it.
+        services.AddSingleton<Snitch.Metacode.Decompilation.IJadxInstaller, Snitch.Metacode.Decompilation.JadxInstaller>();
+        services.AddSingleton<Snitch.Metacode.Decompilation.JadxOptions>(_ => Snitch.Metacode.Decompilation.JadxOptions.Default);
+        services.AddSingleton<Snitch.Metacode.Decompilation.IJadxService>(sp =>
+            new Snitch.Metacode.Decompilation.JadxService(
+                sp.GetRequiredService<Snitch.Metacode.Decompilation.JadxOptions>(),
+                sp.GetRequiredService<Snitch.Metacode.Decompilation.IJadxInstaller>()));
 
         // The "locate the package, then inspect or decompile" composite: its decompile half is the
         // service above, so its registration belongs here rather than in AddSnitch().

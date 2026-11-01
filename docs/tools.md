@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **411 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **416 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -98,7 +98,7 @@ Conventions:
 | `configure_formatting` | ✎ Set any other `.editorconfig` option (`csharp_*`, `dotnet_*`, `indent_*`, `end_of_line`, `charset`, `file_header_template`, …) at the same scopes, same upsert |
 | `suppress_finding` | ✎ preview Silence one finding where it takes effect: a `#pragma` around the member or a `SuppressMessage` attribute on it; compiler-gated |
 | `custom_inspections` | Inspections declared in `.visualMCP/inspections.json` (banned symbols/namespaces/attributes, identifier/string/comment patterns) with id, severity, message; `validate` checks the file |
-| `resharper_inspection_map` | Where ReSharper's inspection ids stand, in two layers: the catalogue read from the local Rider installation's metadata (every id with its language group, the analyzer that produces it and its tooltip description), and the curated map on top (the `rider` pack ids, the simplify_code/pack/tool mapping, the ids with no capability), including the mapped ids this Rider version no longer declares |
+| `resharper_inspection_map` | Where ReSharper's inspection ids stand, in two layers: the catalogue read from the local Rider installation's metadata (every id with its language group, the analyzer that produces it and its tooltip description), and the curated map on top (the `rider` pack ids, the simplify_code/pack/tool mapping, the ids with no capability), including the mapped ids this Rider version no longer declares. `outputPath` writes the whole uncovered catalogue to a Markdown page instead of the first `maxUncovered` of them |
 | `read_dot_settings` | Read the ReSharper `.DotSettings`/`.DotSettings.user` layers: inspection severities, disabled ids, custom dictionary words |
 | `find_spelling_issues` | Words one edit away from a word the solution or `.visualMCP/spelling.dic` + the `.DotSettings` words already use |
 | `naming_rules` | ✎ preview Apply `dotnet_naming_rule` from `.editorconfig`: list the violations with the expected name, or rename them (`apply=true`) |
@@ -174,7 +174,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `introduce_field` | ✎ Hoist a context-free expression into a private readonly field |
 | `introduce_parameter` | ✎ Turn a compile-time-fixed expression into a parameter, passing it at every call site |
 | `introduce_part_of_string` | ✎ Lift a substring of a string literal into a private const |
-| `change_signature` | ✎ Reorder, add or remove parameters and update every call site |
+| `change_signature` | ✎ Reorder, add or remove parameters and update every call site (C# and Visual Basic) |
 | `transform_parameters` | ✎ Wrap parameters in a parameter object, make them optional or required, retype them, or replace one with a property |
 | `change_type` | ✎ Replace a declaration's type, only if the project still compiles |
 | `change_nullability` | ✎ Toggle a nullable annotation, refused when it would add nullability diagnostics |
@@ -275,9 +275,11 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 
 A real Debug Adapter Protocol debugger over [netcoredbg](https://github.com/Samsung/netcoredbg)
 (installed on demand into the shared tools directory — `debug_install`). Sessions live across calls,
-so a stop that happened between two tool calls is still there. `debug_status`, `debug_threads`,
-`debug_stack`, `debug_variables`, `debug_evaluate`, `debug_output` and `debug_sessions` are read-only;
-the others change the session or the debuggee.
+so a stop that happened between two tool calls is still there. Every request the adapter implements
+over DAP has its tool, plus two capabilities the adapter lacks: data breakpoints resolved through
+Roslyn (`debug_data_breakpoints`) and a hit count the server itself enforces. `debug_status`,
+`debug_threads`, `debug_stack`, `debug_variables`, `debug_evaluate` (read-only without `newValue`),
+`debug_output` and `debug_sessions` are read-only; the others change the session or the debuggee.
 
 | Tool | What it does |
 |---|---|
@@ -285,16 +287,19 @@ the others change the session or the debuggee.
 | `debug_install` | ✎ Download and extract netcoredbg from the Samsung release (idempotent; `force` reinstalls) |
 | `debug_launch` | ✎ Start a built `.dll`/`.exe` (or a `.csproj`: the newest `bin/` assembly) under the debugger; breakpoints can be set in the same call, and the call waits for the first stop |
 | `debug_attach` | ✎ Attach to a running process id |
-| `debug_breakpoints` | ✎ Replace one file's breakpoints (`line`, `condition`, `hitCondition`); reports verified vs unverified |
+| `debug_breakpoints` | ✎ Replace one file's breakpoints (`line`, `condition`, `hitCondition`); the hit count is enforced here, and verified vs unverified is reported |
+| `debug_function_breakpoints` | ✎ Break on a method by name (`Ns.Type.Method`), replacing the whole function set |
+| `debug_data_breakpoints` | ✎ Break where a field or property is **written**: every write site the solution's source has, resolved by Roslyn |
 | `debug_continue` | ✎ Continue and wait for the next stop or exit |
 | `debug_step` | ✎ Step over / into / out |
 | `debug_pause` | ✎ Break into the running process |
-| `debug_exceptions` | ✎ Break on exceptions (`all`, `user-unhandled`) |
+| `debug_exceptions` | ✎ Break on exceptions — `all` / `user-unhandled`, narrowed to named types (`!Type` excludes); with no setting, returns the stopped exception's type, stage and details |
 | `debug_threads` | The threads, with the stopped one marked |
 | `debug_stack` | The call stack with file:line per frame |
 | `debug_variables` | Locals / Arguments / Autos of a frame, with optional member expansion |
-| `debug_evaluate` | Evaluate a watch expression in the stopped frame |
+| `debug_evaluate` | Evaluate a watch expression in the stopped frame; `newValue` writes it into the process (Set Value) |
 | `debug_output` | The debuggee's console output, plus the adapter's stderr |
+| `debug_restart` | ✎ Relaunch a launched session with the same program, arguments and breakpoints; `rebuild=true` runs `dotnet build` first |
 | `debug_terminate` | ✎ End the session and terminate the debuggee |
 | `debug_sessions` | Every live session with its state, stop location and breakpoint files |
 
@@ -372,7 +377,7 @@ dotnet-stack or dotnet-monitor. Full workflows in [Profiling](guides/profiling.m
 
 | Tool | What it does |
 |---|---|
-| `ef_migrations` | ✎ Run the project's own `dotnet ef`: `list`, `add`, `script`, `remove`, `update`, `info`, `dbcontext-list`, `pending-model-changes` (model vs migration snapshot), with the exact command, exit code, stdout and stderr as structured data |
+| `ef_migrations` | ✎ Run the project's own `dotnet ef`: `list`, `add`, `script`, `diff` (the SQL between `fromMigration` and `toMigration`), `remove`, `update`, `info`, `dbcontext-list`, `pending-model-changes` (model vs migration snapshot), with the exact command, exit code, stdout and stderr as structured data |
 
 ## Razor and Blazor
 
@@ -435,8 +440,8 @@ import to a file and no package specifier.
 
 | Tool | What it does |
 |---|---|
-| `markup_files` | Inventory: lines, element count, distinct classes / simple selectors, ids (and how many repeat), findings per file; `kind` picks html, css or both |
-| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0009` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a simple selector that matches no element in the scanned pages); the CSS rules and selectors are also read from every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` |
+| `markup_files` | Inventory: lines, element count, distinct classes / selectors, ids (and how many repeat), findings per file; `kind` picks html, css or both |
+| `analyze_markup` | HTML `HTML0001`–`HTML0015` (alt, lang, viewport, duplicate id, label binding, nested form, deprecated element, inline handler, `target="_blank"`, empty href, `button` type, control name, `http://` subresource, tag balance, a class no scanned stylesheet defines) and CSS `CSS0001`–`CSS0009` (`!important`, ID selector, empty rule, `@import`, duplicate selector, unbalanced braces, `javascript:` URL, `expression()`, a selector that matches no element in the scanned pages); a selector resolves compound parts (tag, classes, id, attribute conditions, structural pseudo-classes) joined by descendant/child/sibling combinators, the CSS rules and selectors are also read from every `<style>` block, and an inline `style` attribute is checked for `!important`, `javascript:` and `expression()` |
 
 ## YAML
 
@@ -469,9 +474,9 @@ compiler's own `FS####` diagnostics.
 | `find_assembly_api` | Regex search over type and member names; matching types come back with their members, and a member match names its type |
 | `decompile_type` | Decompile one type from an assembly to C# with the ILSpy engine |
 | `decompile_types` | The same for several types of one assembly in one call |
-| `assembly_workspace` | Decompile an assembly INTO a Roslyn workspace (one document per type, cached per MVID) and navigate it: `load`, `list`, `search` (CamelHumps too), `source`, `references`, `outline`, `unload` |
+| `assembly_workspace` | Decompile an assembly INTO a Roslyn workspace (one document per type, cached per MVID) and navigate it: `load`, `list`, `search` (CamelHumps too), `source`, `il` (the same symbol as IL — the C#↔IL toggle), `references`, `outline`, `unload` |
 | `decompile_assembly` | Decompile a whole module, or a filtered/paged set of types; can write one file per type |
-| `disassemble` | The IL view of a module: each method body decoded into instructions with the metadata tokens resolved (`call System.String::Concat`, the `ldstr` literals), filtered by type and method |
+| `disassemble` | The IL view of a module: each method body decoded into instructions with the metadata tokens resolved (`call System.String::Concat`, the `ldstr` literals), filtered by type and method; `assembly_workspace action=il` returns the same view for a symbol that was found in its decompiled workspace |
 
 ## Metacode
 
@@ -571,9 +576,10 @@ the other actions change GitHub, and merges/deletes require `confirm=true`.
 ## Kubernetes and Helm
 
 Through the ecosystem's own clients: `kubectl` for the cluster, `helm` for releases. `k8s_status`,
-`k8s_context`, `k8s_get`, `k8s_describe` and `k8s_logs` are read-only; `k8s_apply`, `k8s_delete` and
-`k8s_rollout` change the cluster and require `confirm=true` (apply defaults to a server-side dry run).
-A missing client or an unreachable cluster is a structured answer, not an exception.
+`k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` and `k8s_kustomize` are read-only (the last is an
+offline render); `k8s_exec`, `k8s_apply`, `k8s_delete` and `k8s_rollout` change state and require
+`confirm=true` (apply defaults to a server-side dry run). A missing client or an unreachable cluster is a
+structured answer, not an exception.
 
 | Tool | What it does |
 |---|---|
@@ -582,6 +588,8 @@ A missing client or an unreachable cluster is a structured answer, not an except
 | `k8s_get` | Resources as rows (name, namespace, phase or `N/M ready`, restarts, age) parsed from `get -o json`; `output=yaml\|json\|wide\|name\|jsonpath=…` for the client's own view; kinds may be comma-separated |
 | `k8s_describe` | The full `kubectl describe` text: events, conditions, containers, scheduler decisions |
 | `k8s_logs` | A pod's logs with `tail`, `since`, `container` and `previous` |
+| `k8s_kustomize` | Render a kustomization offline (`kubectl kustomize`): the rendered YAML and its document count, with an optional namespace override; no cluster is contacted |
+| `k8s_exec` | ✎ Run one command inside a pod's container (`kubectl exec`, the part after `--`); requires `confirm=true`; no shell is involved |
 | `k8s_apply` | ✎ Apply a manifest from a file or from `content`; server-side dry run unless `dryRun=false` with `confirm=true` |
 | `k8s_delete` | ✎ Delete one resource; requires `confirm=true`, `ignoreNotFound` for idempotence |
 | `k8s_rollout` | `status`, `restart` or `undo` (with `toRevision`) of a workload; restart/undo require `confirm=true` |

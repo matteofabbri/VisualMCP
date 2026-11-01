@@ -59,6 +59,13 @@ public sealed class AssemblyWorkspaceTests
             var typeSource = ResultAssert.Json(await service.SourceAsync(assembly, "Demo.Calculator", 5000));
             Assert.Contains("Twice", typeSource.GetProperty("code").GetString());
 
+            // The same member as IL: the other half of the C#↔IL toggle.
+            var il = ResultAssert.Json(await service.IlAsync(assembly, "Demo.Calculator.Add", 10));
+            Assert.Equal("Add", il.GetProperty("method").GetString());
+            var method = il.GetProperty("il").GetProperty("methods")[0];
+            Assert.Contains(method.GetProperty("il").EnumerateArray(),
+                line => line.GetString()!.EndsWith(": add"));
+
             var references = ResultAssert.Json(await service.ReferencesAsync(assembly, "Demo.Calculator.Add", 20));
             Assert.True(references.GetProperty("referenceCount").GetInt32() >= 1,
                 "the call in Twice is a use inside the decompiled set: " + references.GetRawText());

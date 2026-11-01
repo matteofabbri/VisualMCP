@@ -143,6 +143,51 @@ public sealed class ResharperCatalogueTests
         Assert.True(coverage.GetProperty("uncoveredFromCatalogue").GetArrayLength() <= 5);
     }
 
+    [Fact]
+    public void The_export_page_lists_the_whole_catalogue_with_its_coverage()
+    {
+        var catalogue = new ReSharperCatalogue(
+            Found: true,
+            Path: Path.Combine("JetBrains", "Rider 2026.2.1"),
+            Error: null,
+            AssembliesScanned: 1,
+            DecodeFailures: 0,
+            Ids:
+            [
+                new ReSharperInspectionId("AbsentRule", "CSHARP", null, "H1", null, "Absent | rule description", "A"),
+                new ReSharperInspectionId("CoveredProbe", "CSHARP", null, "H2", null, null, "A"),
+                new ReSharperInspectionId("VbAbsent", "VBASIC", null, "H3", null, null, "A"),
+            ],
+            DecodeFailureSample: [],
+            ResourceErrors: []);
+
+        var path = Path.Combine(AppContext.BaseDirectory, "tocover-" + Guid.NewGuid().ToString("N") + ".md");
+        try
+        {
+            var written = ReSharperToCoverExport.Write(catalogue, ["CoveredProbe", "DroppedRule"], path);
+            var text = File.ReadAllText(written);
+
+            Assert.Contains("Rider 2026.2.1", text);
+            Assert.Contains("| Ids declared | 3 |", text);
+            Assert.Contains("| **With no capability** | **2** |", text);
+
+            // The page lists every id, covered or not, and every group, including the ones that are not C#.
+            Assert.Contains("`AbsentRule`", text);
+            Assert.Contains("Absent \\| rule description", text);
+            Assert.Contains("`CoveredProbe`", text);
+            Assert.Contains("## C# — 2 ids", text);
+            Assert.Contains("## Visual Basic — 1 id", text);
+            Assert.Contains("| `CoveredProbe` | — | ✅ |", text);
+            Assert.Contains("| `AbsentRule` | Absent \\| rule description | — |", text);
+
+            Assert.Contains("`DroppedRule`", text[text.LastIndexOf("no longer declares", StringComparison.Ordinal)..]);
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { /* best effort */ }
+        }
+    }
+
     private static string CreateProbeInstallation()
     {
         var compilation = CSharpCompilation.Create(

@@ -12,7 +12,9 @@ public static class ChangeSignatureTool
         "Updates the declaration and every call site — in the same file and across the solution. " +
         "Returns a 'callSites' list of before/after pairs plus a per-file line diff, in dryRun too. " +
         "REFUSES, writing nothing, when a use is not a plain call (method group / delegate conversion) or " +
-        "when the change would add compiler errors. Equivalent to ReSharper 'Change Signature'.\n\n" +
+        "when the change would add compiler errors. Equivalent to ReSharper 'Change Signature'. A Visual " +
+        "Basic method takes the same operation: its call sites may omit the parentheses, an added default is " +
+        "emitted as 'Optional', and an 'AddressOf' use refuses the change like a method group.\n\n" +
         "newParameterOrder: array of existing parameter names in the desired order. " +
         "Omit a name to remove it (only safe if the parameter has a default value or you also supply a defaultForRemoved). " +
         "additionalParams: array of objects {name, type, defaultValue} to append.")]

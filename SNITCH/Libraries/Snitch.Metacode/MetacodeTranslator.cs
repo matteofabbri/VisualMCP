@@ -13,20 +13,24 @@ namespace Snitch.Metacode;
 public sealed class MetacodeTranslator
 {
     /// <summary>
-    /// The pipeline this product runs, which is exactly what it can produce: the three source languages are
-    /// C# and Visual Basic (Roslyn) and Razor (this repository's scanner), and canonical pseudocode and a
-    /// Ghidra snapshot are the library's own formats, written by its renderer and by its native pipeline.
+    /// The pipeline this product runs, which is exactly what it can produce: C#, Visual Basic and Java
+    /// (Roslyn for the first two, this library's recursive-descent reader for Java), Razor (this
+    /// repository's scanner), and canonical pseudocode and a Ghidra snapshot — the library's own formats,
+    /// written by its renderer and by its native pipeline.
     /// </summary>
     /// <remarks>
-    /// Python and C++ are deliberately absent. <see cref="PythonFrontend"/> and <see cref="CppFrontend"/>
-    /// read an AST dump (<c>python -m ast</c>, <c>clang -Xclang -ast-dump=json</c>) that nothing in this
-    /// product generates, so listing them here would advertise languages the pipeline cannot be fed. They
-    /// stay available as opt-in readers: pass one to the constructor when the caller has such a dump.
+    /// Java is here because something in this product feeds it: <see cref="Decompilation.JadxService"/>
+    /// turns a .class/.dex/.jar/.apk into .java sources. Python and C++ are still deliberately absent —
+    /// <see cref="PythonFrontend"/> and <see cref="CppFrontend"/> read an AST dump (<c>python -m ast</c>,
+    /// <c>clang -Xclang -ast-dump=json</c>) that nothing in this product generates, so listing them would
+    /// advertise languages the pipeline cannot be fed. They stay available as opt-in readers: pass one to
+    /// the constructor when the caller has such a dump.
     /// </remarks>
     public static MetacodeTranslator Default { get; } = new(new ILanguageFrontend[]
     {
         new CSharpFrontend(),
         new VisualBasicFrontend(),
+        new JavaFrontend(),
         new RazorFrontend(),
         new PseudocodeFrontend(),
         new GhidraFrontend(),

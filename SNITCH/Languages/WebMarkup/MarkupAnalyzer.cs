@@ -77,7 +77,7 @@ public static class MarkupAnalyzer
         ["CSS0006"] = "Unbalanced braces",
         ["CSS0007"] = "javascript: URL",
         ["CSS0008"] = "IE expression()",
-        ["CSS0009"] = "A simple selector that matches no element in the scanned pages",
+        ["CSS0009"] = "A selector that matches no element in the scanned pages",
     };
 
     /// <summary>
@@ -87,6 +87,12 @@ public static class MarkupAnalyzer
     private static readonly Regex ClassMention = new(@"(?<![\w-])\.(-?[_A-Za-z][-\w]*)", RegexOptions.Compiled);
     private static readonly Regex IdMention = new(@"(?<![\w-])#(-?[_A-Za-z][-\w]*)", RegexOptions.Compiled);
     private static readonly Regex CssRuleSelector = new(@"^[^{};@]+$", RegexOptions.Compiled);
+
+    /// <summary>The single-colon spellings that are pseudo-elements in CSS 3.</summary>
+    private static readonly HashSet<string> LegacyPseudoElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "before", "after", "first-line", "first-letter",
+    };
 
     // ── HTML ───────────────────────────────────────────────────────────────────
 
@@ -108,6 +114,7 @@ public static class MarkupAnalyzer
         var tags = ScanTags(masked);
         var openForms = 0;
         var nodes = new List<MarkupNode>();
+        var openElements = new List<int>();
 
         foreach (var tag in tags)
         {
@@ -129,7 +136,22 @@ public static class MarkupAnalyzer
                 }
             }
 
-            if (tag.Closing) continue;
+            if (tag.Closing)
+            {
+                // Pop what this closing tag closes. HTML allows optional end tags (a <li> or a <p> closes
+                // when the next one starts), so an element still open closes with its ancestor, and a
+                // stray closing tag changes nothing.
+                for (var depth = openElements.Count - 1; depth >= 0; depth--)
+                {
+                    if (!string.Equals(nodes[openElements[depth]].Tag, name, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    openElements.RemoveRange(depth, openElements.Count - depth);
+                    break;
+                }
+
+                continue;
+            }
+
             var attributes = ReadAttributes(masked, tag);
 
             var (nodeLine, nodeColumn) = Position(lineStarts, tag.Offset);
@@ -140,7 +162,13 @@ public static class MarkupAnalyzer
                     ? classValue.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
                     : Array.Empty<string>(),
                 nodeLine,
-                nodeColumn));
+                nodeColumn,
+                Parent: openElements.Count > 0 ? openElements[^1] : -1,
+                Order: nodes.Count,
+                Attributes: attributes));
+
+            if (!VoidElements.Contains(name) && !tag.SelfClosing)
+                openElements.Add(nodes.Count - 1);
 
             if (Deprecated.Contains(name))
                 Add("HTML0007", "warning", "Maintainability",
@@ -463,64 +491,363 @@ public static class MarkupAnalyzer
     }
 
     /// <summary>
-    /// The simple selectors of the stylesheet, with the element they name: one tag, one class or one id,
-    /// optionally a tag with one of the two (<c>div.card</c>). Everything else — a descendant or child
-    /// combinator, an attribute, a pseudo-class, a comma list — is deliberately not returned: matching it
-    /// needs the DOM and the cascade, and a guess would be a false finding.
+    /// Every selector of the stylesheet, simple or complex. A complex one keeps its compound parts and the
+    /// combinators between them, so CSS0009 can ask whether the whole chain exists in the page index; a part
+    /// only a browser can decide (a dynamic pseudo-class, :nth-child, :has) makes the selector "not
+    /// checkable", and it is then indexed for its classes but never reported as unmatched.
     /// </summary>
     private static IEnumerable<CssSimpleSelector> SimpleSelectors(string masked, int[] lineStarts)
     {
         foreach (var (selectorText, offset) in RuleSelectors(masked))
         {
-            foreach (var part in selectorText.Split(','))
+            foreach (var rawPart in SplitSelectorList(selectorText))
             {
-                var simple = part.Trim();
-                if (!TryParseSimpleSelector(simple, out var tag, out var className, out var id)) continue;
+                var text = rawPart.Trim();
+                if (text.Length == 0) continue;
+                if (!TryParseComplexSelector(text, out var complex)) continue;
 
-                var (line, column) = Position(lineStarts, offset + selectorText.IndexOf(simple, StringComparison.Ordinal));
-                yield return new CssSimpleSelector(simple, tag, className, id, line, column);
+                var (line, column) = Position(lineStarts,
+                    offset + selectorText.IndexOf(rawPart, StringComparison.Ordinal));
+                var subject = complex.Parts[^1];
+                yield return new CssSimpleSelector(
+                    text, subject.Tag, subject.Classes?.FirstOrDefault(), subject.Id, line, column,
+                    complex, complex.Checkable);
             }
         }
     }
 
-    /// <summary>The simple selector grammar: [tag|*][.class|#id], nothing else.</summary>
-    private static bool TryParseSimpleSelector(
-        string text, out string? tag, out string? className, out string? id)
+    /// <summary>A comma-separated selector list, split only on the commas outside brackets, parentheses and quotes.</summary>
+    private static List<string> SplitSelectorList(string text)
     {
-        tag = null;
-        className = null;
-        id = null;
+        var parts = new List<string>();
+        var start = 0;
+        var round = 0;
+        var square = 0;
+        var quote = '\0';
 
-        if (string.IsNullOrEmpty(text) || text == "*") return false;
-
-        var marker = text.IndexOfAny(['.', '#']);
-        var tagPart = marker < 0 ? text : text[..marker];
-        var suffix = marker < 0 ? string.Empty : text[marker..];
-
-        if (tagPart.Length > 0)
+        for (var index = 0; index < text.Length; index++)
         {
-            if (tagPart != "*")
+            var character = text[index];
+            if (quote != '\0')
             {
-                if (!IsCssIdentifier(tagPart)) return false;
-                tag = tagPart;
+                if (character == quote) quote = '\0';
+                continue;
+            }
+
+            if (character is '"' or '\'') quote = character;
+            else if (character == '(') round++;
+            else if (character == ')') round = Math.Max(0, round - 1);
+            else if (character == '[') square++;
+            else if (character == ']') square = Math.Max(0, square - 1);
+            else if (character == ',' && round == 0 && square == 0)
+            {
+                parts.Add(text[start..index]);
+                start = index + 1;
             }
         }
 
-        if (suffix.Length > 0)
-        {
-            if (suffix.Length < 2 || !IsCssIdentifier(suffix[1..])) return false;
-
-            if (suffix[0] == '.') className = suffix[1..];
-            else id = suffix[1..];
-        }
-
-        return tag is not null || className is not null || id is not null;
+        parts.Add(text[start..]);
+        return parts;
     }
 
-    private static bool IsCssIdentifier(string value) =>
-        value.Length > 0 &&
-        !char.IsDigit(value[0]) &&
-        value.All(character => char.IsLetterOrDigit(character) || character is '-' or '_');
+    /// <summary>The selector grammar: compound parts joined by a descendant, child or sibling combinator.</summary>
+    private static bool TryParseComplexSelector(string text, out CssComplexSelector selector)
+    {
+        selector = null!;
+        var parts = new List<CssSelectorPart>();
+        var index = 0;
+        var combinator = CssCombinator.None;
+
+        while (index < text.Length)
+        {
+            var sawSpace = false;
+            while (index < text.Length && char.IsWhiteSpace(text[index]))
+            {
+                sawSpace = true;
+                index++;
+            }
+
+            if (index >= text.Length) break;
+
+            if (parts.Count > 0)
+            {
+                var character = text[index];
+                if (character is '>' or '+' or '~')
+                {
+                    combinator = character switch
+                    {
+                        '>' => CssCombinator.Child,
+                        '+' => CssCombinator.AdjacentSibling,
+                        _ => CssCombinator.GeneralSibling,
+                    };
+                    index++;
+                    while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+                }
+                else if (sawSpace)
+                {
+                    combinator = CssCombinator.Descendant;
+                }
+                else
+                {
+                    return false;
+                }
+
+                if (index >= text.Length) return false;
+            }
+
+            if (!TryParseCompound(text, ref index, out var part)) return false;
+            parts.Add(part with { Combinator = combinator });
+            combinator = CssCombinator.None;
+
+            if (index < text.Length && text[index] is not ('>' or '+' or '~') && !char.IsWhiteSpace(text[index]))
+                return false;
+        }
+
+        if (parts.Count == 0) return false;
+        selector = new CssComplexSelector(text, parts, parts.All(part => part.Checkable));
+        return true;
+    }
+
+    /// <summary>One compound part: a tag, classes, an id, attribute conditions and pseudo-classes.</summary>
+    private static bool TryParseCompound(string text, ref int index, out CssSelectorPart part)
+    {
+        part = null!;
+        var start = index;
+
+        string? tag = null;
+        string? id = null;
+        var classes = new List<string>();
+        var attributes = new List<CssAttributeCondition>();
+        var pseudoClasses = new List<string>();
+        var negations = new List<CssSelectorPart>();
+        var alternatives = new List<CssSelectorPart>();
+        var checkable = true;
+        var pseudoElement = false;
+
+        if (index < text.Length && text[index] == '*')
+        {
+            index++;
+        }
+        else if (index < text.Length && (char.IsLetter(text[index]) || text[index] is '_' or '-'))
+        {
+            tag = ReadName(text, ref index);
+        }
+
+        while (index < text.Length)
+        {
+            var character = text[index];
+
+            if (character == '.')
+            {
+                index++;
+                var name = ReadName(text, ref index);
+                if (name.Length == 0) return false;
+                classes.Add(name);
+            }
+            else if (character == '#')
+            {
+                index++;
+                var name = ReadName(text, ref index);
+                if (name.Length == 0) return false;
+                id = name;
+            }
+            else if (character == '[')
+            {
+                if (!TryParseAttribute(text, ref index, out var attribute)) return false;
+                attributes.Add(attribute);
+            }
+            else if (character == ':')
+            {
+                var doubleColon = index + 1 < text.Length && text[index + 1] == ':';
+                index += doubleColon ? 2 : 1;
+
+                var name = ReadName(text, ref index).ToLowerInvariant();
+                if (name.Length == 0) return false;
+
+                // A pseudo-element (::before, or the legacy :before) styles the element but does not change
+                // which element the selector selects.
+                if (doubleColon || LegacyPseudoElements.Contains(name))
+                {
+                    pseudoElement = true;
+                    continue;
+                }
+
+                if (index < text.Length && text[index] == '(')
+                {
+                    var inner = ReadParenthesized(text, ref index);
+                    if (inner is null) return false;
+
+                    if (name is "not" or "is" or "where")
+                    {
+                        var list = new List<CssSelectorPart>();
+                        var parsed = true;
+                        foreach (var item in SplitSelectorList(inner))
+                        {
+                            var trimmed = item.Trim();
+                            var cursor = 0;
+                            if (trimmed.Length == 0 || !TryParseCompound(trimmed, ref cursor, out var innerPart) ||
+                                cursor != trimmed.Length)
+                            {
+                                parsed = false;
+                                break;
+                            }
+
+                            list.Add(innerPart);
+                        }
+
+                        if (!parsed || list.Count == 0)
+                        {
+                            checkable = false;
+                        }
+                        else
+                        {
+                            if (name == "not") negations.AddRange(list);
+                            else alternatives.AddRange(list);
+                            checkable &= list.All(innerPart => innerPart.Checkable);
+                        }
+                    }
+                    else
+                    {
+                        // :nth-child(), :has(), :lang() … need more of the page than this index holds.
+                        checkable = false;
+                    }
+
+                    continue;
+                }
+
+                if (name is "first-child" or "last-child" or "only-child" or "empty" or "root")
+                    pseudoClasses.Add(name);
+                else
+                    checkable = false; // :hover, :focus, :checked … only the browser can decide
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (index == start) return false;
+
+        part = new CssSelectorPart(tag, classes, id, attributes, pseudoClasses, negations, alternatives,
+            checkable, pseudoElement);
+        return true;
+    }
+
+    private static string ReadName(string text, ref int index)
+    {
+        var start = index;
+        if (index < text.Length && (char.IsLetter(text[index]) || text[index] is '_' or '-')) index++;
+        while (index < text.Length &&
+               (char.IsLetterOrDigit(text[index]) || text[index] is '-' or '_'))
+            index++;
+        return text[start..index];
+    }
+
+    /// <summary>The text inside a pair of parentheses, with nesting; null when they are unbalanced.</summary>
+    private static string? ReadParenthesized(string text, ref int index)
+    {
+        if (index >= text.Length || text[index] != '(') return null;
+        var depth = 0;
+        var start = index + 1;
+        var quote = '\0';
+
+        for (; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (quote != '\0')
+            {
+                if (character == quote) quote = '\0';
+                continue;
+            }
+
+            if (character is '"' or '\'') quote = character;
+            else if (character == '(') depth++;
+            else if (character == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    var inner = text[start..index];
+                    index++;
+                    return inner;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>An attribute condition: <c>[name]</c>, <c>[name=value]</c>, <c>[name*=value i]</c>.</summary>
+    private static bool TryParseAttribute(string text, ref int index, out CssAttributeCondition condition)
+    {
+        condition = null!;
+        index++; // the '['
+
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+        var name = ReadName(text, ref index);
+        if (name.Length == 0) return false;
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+
+        if (index < text.Length && text[index] == ']')
+        {
+            index++;
+            condition = new CssAttributeCondition(name, null, null, false);
+            return true;
+        }
+
+        string @operator;
+        if (index + 1 < text.Length && text[index + 1] == '=' && text[index] is '~' or '|' or '^' or '$' or '*')
+        {
+            @operator = text[index] + "=";
+            index += 2;
+        }
+        else if (index < text.Length && text[index] == '=')
+        {
+            @operator = "=";
+            index++;
+        }
+        else
+        {
+            return false;
+        }
+
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+
+        string value;
+        if (index < text.Length && text[index] is '"' or '\'')
+        {
+            var quote = text[index++];
+            var end = text.IndexOf(quote, index);
+            if (end < 0) return false;
+            value = text[index..end];
+            index = end + 1;
+        }
+        else
+        {
+            var start = index;
+            while (index < text.Length && text[index] != ']' && !char.IsWhiteSpace(text[index])) index++;
+            value = text[start..index];
+        }
+
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+        var ignoreCase = false;
+        if (index < text.Length && text[index] is 'i' or 'I')
+        {
+            ignoreCase = true;
+            index++;
+        }
+        else if (index < text.Length && text[index] is 's' or 'S')
+        {
+            index++;
+        }
+
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+        if (index >= text.Length || text[index] != ']') return false;
+        index++;
+
+        condition = new CssAttributeCondition(name, @operator, value, ignoreCase);
+        return true;
+    }
 
     /// <summary>Whether an element index entry can satisfy a simple selector.</summary>
     public static bool Matches(MarkupNode node, CssSimpleSelector selector) =>
@@ -528,6 +855,134 @@ public static class MarkupAnalyzer
         (selector.Class is null ||
          node.Classes.Contains(selector.Class, StringComparer.OrdinalIgnoreCase)) &&
         (selector.Id is null || string.Equals(node.Id, selector.Id, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Whether a page's element index satisfies a selector — the whole chain, when the selector has
+    /// combinators. The index is one page's, because a parent and a sibling are indices into it.
+    /// </summary>
+    public static bool Matches(IReadOnlyList<MarkupNode> nodes, MarkupNode node, CssSimpleSelector selector)
+    {
+        if (selector.Complex is null) return Matches(node, selector);
+        if (!selector.Complex.Checkable) return false;
+
+        var parts = selector.Complex.Parts;
+        var current = node;
+        if (!PartMatches(nodes, current, parts[^1])) return false;
+
+        for (var position = parts.Count - 2; position >= 0; position--)
+        {
+            var part = parts[position];
+            MarkupNode? matched = parts[position + 1].Combinator switch
+            {
+                CssCombinator.Child => current.Parent >= 0 && PartMatches(nodes, nodes[current.Parent], part)
+                    ? nodes[current.Parent]
+                    : null,
+                CssCombinator.AdjacentSibling => PreviousSibling(nodes, current) is { } adjacent &&
+                                                 PartMatches(nodes, adjacent, part)
+                    ? adjacent
+                    : null,
+                CssCombinator.GeneralSibling => PreviousSiblings(nodes, current)
+                    .FirstOrDefault(sibling => PartMatches(nodes, sibling, part)),
+                _ => Ancestors(nodes, current).FirstOrDefault(ancestor => PartMatches(nodes, ancestor, part)),
+            };
+
+            if (matched is null) return false;
+            current = matched;
+        }
+
+        return true;
+    }
+
+    private static bool PartMatches(IReadOnlyList<MarkupNode> nodes, MarkupNode node, CssSelectorPart part)
+    {
+        if (part.Tag is not null && !string.Equals(node.Tag, part.Tag, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (part.Id is not null && !string.Equals(node.Id, part.Id, StringComparison.Ordinal))
+            return false;
+
+        if (part.Classes is { } classes &&
+            classes.Any(className => !node.Classes.Contains(className, StringComparer.OrdinalIgnoreCase)))
+            return false;
+
+        if (part.Attributes is { } attributes &&
+            attributes.Any(condition => !AttributeMatches(node, condition)))
+            return false;
+
+        if (part.PseudoClasses is { } pseudoClasses &&
+            pseudoClasses.Any(pseudo => !PseudoMatches(nodes, node, pseudo)))
+            return false;
+
+        if (part.Not is { Count: > 0 } negations &&
+            negations.Any(negation => PartMatches(nodes, node, negation)))
+            return false;
+
+        if (part.IsAny is { Count: > 0 } alternatives &&
+            !alternatives.Any(alternative => PartMatches(nodes, node, alternative)))
+            return false;
+
+        return true;
+    }
+
+    private static bool PseudoMatches(IReadOnlyList<MarkupNode> nodes, MarkupNode node, string pseudo)
+    {
+        var first = !nodes.Take(node.Order).Any(candidate => candidate.Parent == node.Parent);
+        var last = !nodes.Skip(node.Order + 1).Any(candidate => candidate.Parent == node.Parent);
+
+        return pseudo switch
+        {
+            "root" => node.Parent < 0 && string.Equals(node.Tag, "html", StringComparison.OrdinalIgnoreCase),
+            "first-child" => first,
+            "last-child" => last,
+            "only-child" => first && last,
+            "empty" => !nodes.Any(candidate => candidate.Parent == node.Order),
+            _ => false,
+        };
+    }
+
+    private static bool AttributeMatches(MarkupNode node, CssAttributeCondition condition)
+    {
+        if (node.Attributes is null || !node.Attributes.TryGetValue(condition.Name, out var value)) return false;
+        if (condition.Operator is null || condition.Value is null) return true;
+
+        var comparison = condition.IgnoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return condition.Operator switch
+        {
+            "=" => string.Equals(value, condition.Value, comparison),
+            "~=" => value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Any(word => string.Equals(word, condition.Value, comparison)),
+            "|=" => string.Equals(value, condition.Value, comparison) ||
+                    value.StartsWith(condition.Value + "-", comparison),
+            "^=" => condition.Value.Length > 0 && value.StartsWith(condition.Value, comparison),
+            "$=" => condition.Value.Length > 0 && value.EndsWith(condition.Value, comparison),
+            "*=" => condition.Value.Length > 0 && value.Contains(condition.Value, comparison),
+            _ => false,
+        };
+    }
+
+    private static IEnumerable<MarkupNode> Ancestors(IReadOnlyList<MarkupNode> nodes, MarkupNode node)
+    {
+        var parent = node.Parent;
+        while (parent >= 0 && parent < nodes.Count)
+        {
+            yield return nodes[parent];
+            parent = nodes[parent].Parent;
+        }
+    }
+
+    private static MarkupNode? PreviousSibling(IReadOnlyList<MarkupNode> nodes, MarkupNode node)
+    {
+        for (var index = node.Order - 1; index >= 0; index--)
+            if (nodes[index].Parent == node.Parent)
+                return nodes[index];
+        return null;
+    }
+
+    private static IEnumerable<MarkupNode> PreviousSiblings(IReadOnlyList<MarkupNode> nodes, MarkupNode node)
+    {
+        for (var index = node.Order - 1; index >= 0; index--)
+            if (nodes[index].Parent == node.Parent)
+                yield return nodes[index];
+    }
 
     /// <summary>The class and id tokens a selector mentions, complex selectors included.</summary>
     public static IReadOnlyList<string> ClassesIn(string selector) =>
@@ -679,6 +1134,7 @@ public static class MarkupAnalyzer
     {
         var chars = text.ToCharArray();
         var index = 0;
+        var depth = 0;
 
         void Blank(int from, int to)
         {
@@ -711,11 +1167,26 @@ public static class MarkupAnalyzer
             {
                 var quote = text[index];
                 var end = text.IndexOf(quote, index + 1);
-                if (end < 0) { Blank(index + 1, text.Length); break; }
-                Blank(index + 1, end);
+
+                // Inside a declaration a string is a value: blanking it stops a keyframe, a URL or a
+                // content string from being read as a rule. In a selector it is an attribute value that
+                // the match needs, so it is kept.
+                if (depth > 0)
+                {
+                    if (end < 0) { Blank(index + 1, text.Length); break; }
+                    Blank(index + 1, end);
+                }
+                else if (end < 0)
+                {
+                    break;
+                }
+
                 index = end + 1;
                 continue;
             }
+
+            if (text[index] == '{') depth++;
+            else if (text[index] == '}') depth = Math.Max(0, depth - 1);
 
             index++;
         }
@@ -807,13 +1278,49 @@ public sealed record MarkupFinding(
     string RuleId, string Severity, string Category, string Message, string File, int Line, int Column,
     string Snippet, string? Fix);
 
-/// <summary>One element of the page index: what a simple selector can be matched against.</summary>
+/// <summary>One element of the page index: what a selector can be matched against.</summary>
+/// <param name="Parent">The index of the enclosing element in the same page's list, or -1 at the root.</param>
+/// <param name="Order">The element's index in the page list, which is document order.</param>
+/// <param name="Attributes">The attributes as read, which is what an attribute selector matches.</param>
 public sealed record MarkupNode(
-    string Tag, string? Id, IReadOnlyList<string> Classes, int Line, int Column);
+    string Tag, string? Id, IReadOnlyList<string> Classes, int Line, int Column,
+    int Parent = -1, int Order = 0, IReadOnlyDictionary<string, string>? Attributes = null);
 
-/// <summary>A simple selector (tag, .class, #id or tag.class) with the element it names.</summary>
+/// <summary>How a compound selector is joined to the one on its left.</summary>
+public enum CssCombinator
+{
+    None,
+    Descendant,
+    Child,
+    AdjacentSibling,
+    GeneralSibling,
+}
+
+/// <summary>An attribute condition: <c>[name]</c>, <c>[name=value]</c>, <c>[name^=value i]</c>.</summary>
+public sealed record CssAttributeCondition(string Name, string? Operator, string? Value, bool IgnoreCase);
+
+/// <summary>One compound selector: a tag, classes, an id, attribute conditions and pseudo-classes.</summary>
+/// <param name="Checkable">False when only a browser could decide it (<c>:hover</c>, <c>:nth-child()</c>).</param>
+/// <param name="Combinator">How this part joins the part on its left (None for the first).</param>
+public sealed record CssSelectorPart(
+    string? Tag = null,
+    IReadOnlyList<string>? Classes = null,
+    string? Id = null,
+    IReadOnlyList<CssAttributeCondition>? Attributes = null,
+    IReadOnlyList<string>? PseudoClasses = null,
+    IReadOnlyList<CssSelectorPart>? Not = null,
+    IReadOnlyList<CssSelectorPart>? IsAny = null,
+    bool Checkable = true,
+    bool PseudoElement = false,
+    CssCombinator Combinator = CssCombinator.None);
+
+/// <summary>A selector as written: its compound parts, with the combinators between them.</summary>
+public sealed record CssComplexSelector(string Text, IReadOnlyList<CssSelectorPart> Parts, bool Checkable);
+
+/// <summary>A selector with the element it ends on; <paramref name="Complex"/> carries the whole chain.</summary>
 public sealed record CssSimpleSelector(
-    string Text, string? Tag, string? Class, string? Id, int Line, int Column);
+    string Text, string? Tag, string? Class, string? Id, int Line, int Column,
+    CssComplexSelector? Complex = null, bool Checkable = true);
 
 /// <summary>The facts a scan of one markup file produces.</summary>
 public sealed record MarkupAnalysis(

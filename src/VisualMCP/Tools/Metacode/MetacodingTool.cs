@@ -15,17 +15,21 @@ public static class MetacodingTool
         "• action=decompile — decompile a binary and STORE what it finds in .visualMCP/visualmcp.db, in the same AST the " +
         "solution's own files live in. A MANAGED assembly (.NET, CLR metadata) becomes one metacode tree per type under " +
         "assembly://<file>/<type>, queryable with metacode_index (trees, complexity) and comparable with " +
-        "metacode_compare. A NATIVE binary (no CLR metadata) is handed to Ghidra — installed on demand if this machine " +
-        "has none — and its recovered functions are stored TWICE: in the dedicated tables native_artifact / " +
-        "native_function (Ghidra's C + canonical pseudocode + complexity per function) / native_call (call edges), keyed " +
-        "on the file's SHA-256, AND as one metacode document under native://<file> (its functions as the declarations). " +
+        "metacode_compare. A JAVA binary (.class/.dex/.jar/.apk/.aar/.war, or a zip that carries .class entries) is " +
+        "handed to JADX — installed on demand on Windows/Linux/macOS if this machine has none, and needing a JDK — and " +
+        "every decompiled .java file becomes one metacode document under java://<archive>/<unit>, after the Java frontend " +
+        "lowers it into the model. A NATIVE binary (no CLR metadata, no Java bytecode) is handed to Ghidra — installed on " +
+        "demand if this machine has none — and its recovered functions are stored TWICE: in the dedicated tables " +
+        "native_artifact / native_function (Ghidra's C + canonical pseudocode + complexity per function) / native_call " +
+        "(call edges), keyed on the file's SHA-256, AND as one metacode document under native://<file> (its functions as " +
+        "the declarations). " +
         "Every stored row records the binary in source_path and carries the decompiled flag, so a query never confuses " +
-        "decompiled code with code read from a source file. Keyed on the binary's MVID (managed) or SHA-256 (native): the " +
-        "same binary is not decompiled twice unless force=true. With siblings=true (the default) the folder the binary " +
-        "came from is swept after it: its text files are read into the store (a file no frontend reads becomes a `file` " +
-        "node) and its other binaries are decompiled too, up to maxSiblings files and 2 native images — so one call " +
-        "fills the AST with the whole folder instead of one file. This is the only decompile call that PERSISTS its " +
-        "output; decompile_type / decompile_assembly return text and keep nothing.\n" +
+        "decompiled code with code read from a source file. Keyed on the binary's MVID (managed) or SHA-256 (native and " +
+        "Java): the same binary is not decompiled twice unless force=true. With siblings=true (the default) the folder " +
+        "the binary came from is swept after it: its text files are read into the store (a file no frontend reads becomes " +
+        "a `file` node) and its other binaries are decompiled too, up to maxSiblings files, 2 native images and 1 Java " +
+        "archive — so one call fills the AST with the whole folder instead of one file. This is the only decompile call " +
+        "that PERSISTS its output; decompile_type / decompile_assembly return text and keep nothing.\n" +
         "• action=rewrite — replace the code of an existing declaration with what 'source' describes, emit it as C#, and " +
         "write it back to the file the declaration came from. 'source' is metacode pseudocode by default (language=pseudo) " +
         "or C# (language=cs). Previewed unless dryRun=false; every write is compiler-gated (refused when it would add an " +
@@ -35,16 +39,16 @@ public static class MetacodingTool
     public static async Task<object> Metacoding(
         IMetacodeCodingService coding,
         [Description("decompile | rewrite | insert.")] string action,
-        [Description("decompile: path to the binary to decompile and store — a managed .dll/.exe (ILSpy) or a native PE/ELF/Mach-O (Ghidra).")]
+        [Description("decompile: path to the binary to decompile and store — a managed .dll/.exe (ILSpy), a Java .class/.dex/.jar/.apk/.aar/.war (JADX) or a native PE/ELF/Mach-O (Ghidra).")]
         string? assemblyPath = null,
         [Description("decompile (managed only): only types whose full name contains this text (case-insensitive).")] string? nameFilter = null,
         [Description("decompile (managed only): only types in this namespace or a sub-namespace (prefix match, case-insensitive).")] string? namespaceFilter = null,
         [Description("decompile (managed only): maximum types to store (0 = all).")] int maxTypes = 0,
-        [Description("decompile: decompile again even when the store already holds this binary (MVID for managed, SHA-256 for native).")]
+        [Description("decompile: decompile again even when the store already holds this binary (MVID for managed, SHA-256 for native and Java).")]
         bool force = false,
         [Description("decompile: after the binary, sweep its folder — read the text files next to it and decompile its other binaries into the same AST (default true).")]
         bool siblings = true,
-        [Description("decompile: how many sibling files the sweep may process (default 25). Native siblings are capped at 2 per sweep.")]
+        [Description("decompile: how many sibling files the sweep may process (default 25). Native siblings are capped at 2 per sweep, Java archives at 1.")]
         int maxSiblings = 25,
         [Description("rewrite: the declaration to replace — a name ('Divide'), a qualified name ('Calculator.Divide') or a declaration key.")]
         string? symbol = null,

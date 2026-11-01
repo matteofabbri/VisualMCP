@@ -194,6 +194,34 @@ public sealed class DataFlowTests
     }
 
     [Fact]
+    public async Task AFieldOfAnotherObjectCarriesTheValueToo()
+    {
+        var json = await TraceAsync("""
+            using System;
+            using System.IO;
+
+            public sealed class Request
+            {
+                public string Path;
+            }
+
+            public class Probe
+            {
+                private readonly Request _request = new Request();
+
+                public void Store() => _request.Path = Console.ReadLine();
+
+                public void Sink() => File.ReadAllText(_request.Path);
+            }
+            """);
+
+        Assert.Equal(1, json.GetProperty("flowCount").GetInt32());
+        Assert.Contains(
+            json.GetProperty("flows")[0].GetProperty("steps").EnumerateArray(),
+            step => step.GetProperty("what").GetString() == "stored in field Path");
+    }
+
+    [Fact]
     public async Task AFieldThatNeverHoldsATaintedValueProducesNoFlow()
     {
         var json = await TraceAsync("""

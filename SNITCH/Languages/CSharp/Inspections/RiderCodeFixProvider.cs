@@ -28,6 +28,11 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
         "UseNameofExpression",
         "StringLiteralAsInterpolationArgument",
         "RedundantCheckBeforeAssignment",
+        "RedundantStringInterpolation",
+        "ReplaceSequenceEqualWithConstantPattern",
+        "RedundantPatternParentheses",
+        "MergeIntoPattern",
+        "ReplaceWithStringIsNullOrEmpty",
     ];
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -67,6 +72,11 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
         "UseNameofExpression" => "Use nameof",
         "StringLiteralAsInterpolationArgument" => "Merge the literal into the interpolated string",
         "RedundantCheckBeforeAssignment" => "Remove the redundant check",
+        "RedundantStringInterpolation" => "Remove the string interpolation",
+        "ReplaceSequenceEqualWithConstantPattern" => "Replace with a constant pattern",
+        "RedundantPatternParentheses" => "Remove the redundant parentheses",
+        "MergeIntoPattern" => "Merge the checks into one pattern",
+        "ReplaceWithStringIsNullOrEmpty" => "Use string.IsNullOrEmpty",
         _ => null,
     };
 
@@ -98,6 +108,11 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
             "UseNameofExpression" => UseNameofAsync(document, root, node, cancellationToken),
             "StringLiteralAsInterpolationArgument" => MergeInterpolationLiteralAsync(document, root, node, cancellationToken),
             "RedundantCheckBeforeAssignment" => RemoveRedundantCheckAsync(document, root, node, cancellationToken),
+            "RedundantStringInterpolation" => RemoveStringInterpolationAsync(document, root, node, cancellationToken),
+            "ReplaceSequenceEqualWithConstantPattern" => ReplaceSequenceEqualAsync(document, root, node, cancellationToken),
+            "RedundantPatternParentheses" => RemovePatternParenthesesAsync(document, root, node, cancellationToken),
+            "MergeIntoPattern" => MergeIntoPatternAsync(document, root, node, cancellationToken),
+            "ReplaceWithStringIsNullOrEmpty" => ReplaceWithIsNullOrEmptyAsync(document, root, node, cancellationToken),
             _ => Task.FromResult(document),
         });
     }
@@ -267,6 +282,92 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
 
         var replacement = statement.Statement.WithTriviaFrom(statement);
         return WithNodeAsync(document, root, statement, replacement, cancellationToken);
+    }
+
+    private static Task<Document> RemoveStringInterpolationAsync(
+        Document document, SyntaxNode root, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var interpolated = node.AncestorsAndSelf().OfType<InterpolatedStringExpressionSyntax>().FirstOrDefault();
+        if (interpolated is null) return Task.FromResult(document);
+        if (interpolated.Contents.Any(content => content is InterpolationSyntax)) return Task.FromResult(document);
+
+        var value = string.Concat(
+            interpolated.Contents.OfType<InterpolatedStringTextSyntax>().Select(text => text.TextToken.ValueText));
+        var source = SymbolDisplay.FormatLiteral(value, quote: true);
+        var replacement = SyntaxFactory.LiteralExpression(
+            SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(source, value)).WithTriviaFrom(interpolated);
+        return WithNodeAsync(document, root, interpolated, replacement, cancellationToken);
+    }
+
+    private static Task<Document> ReplaceSequenceEqualAsync(
+        Document document, SyntaxNode root, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var invocation = node.AncestorsAndSelf().OfType<InvocationExpressionSyntax>().FirstOrDefault();
+        if (invocation?.Expression is not MemberAccessExpressionSyntax member) return Task.FromResult(document);
+        if (invocation.ArgumentList.Arguments.Count != 1) return Task.FromResult(document);
+
+        var literal = invocation.ArgumentList.Arguments[0].Expression;
+        var qualifier = member.Expression.WithoutTrivia();
+        if (qualifier is not (IdentifierNameSyntax or MemberAccessExpressionSyntax or ThisExpressionSyntax
+            or ParenthesizedExpressionSyntax))
+            qualifier = SyntaxFactory.ParenthesizedExpression(qualifier);
+
+        var replacement = SyntaxFactory.IsPatternExpression(qualifier, SyntaxFactory.ConstantPattern(literal.WithoutTrivia()))
+            .WithTriviaFrom(invocation);
+        return WithNodeAsync(document, root, invocation, replacement, cancellationToken);
+    }
+
+    private static Task<Document> RemovePatternParenthesesAsync(
+        Document document, SyntaxNode root, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var parenthesized = node.AncestorsAndSelf().OfType<ParenthesizedPatternSyntax>().FirstOrDefault();
+        if (parenthesized?.Pattern is not { } pattern) return Task.FromResult(document);
+
+        return WithNodeAsync(document, root, parenthesized, pattern.WithTriviaFrom(parenthesized), cancellationToken);
+    }
+
+    private static Task<Document> MergeIntoPatternAsync(
+        Document document, SyntaxNode root, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var binary = node.AncestorsAndSelf().OfType<BinaryExpressionSyntax>()
+            .FirstOrDefault(candidate => candidate.IsKind(SyntaxKind.LogicalAndExpression));
+        if (binary is null) return Task.FromResult(document);
+        if (!MergeIntoPatternAnalyzer.TryMatch(binary, out var left, out var right)) return Task.FromResult(document);
+
+        var pattern = SyntaxFactory.BinaryPattern(
+            SyntaxKind.AndPattern,
+            left.Pattern.WithoutTrailingTrivia().WithTrailingTrivia(SyntaxFactory.Space),
+            right.Pattern.WithoutLeadingTrivia());
+        var replacement = SyntaxFactory.IsPatternExpression(left.Expression.WithoutTrivia(), pattern)
+            .WithTriviaFrom(binary);
+        return WithNodeAsync(document, root, binary, replacement, cancellationToken);
+    }
+
+    private static async Task<Document> ReplaceWithIsNullOrEmptyAsync(
+        Document document, SyntaxNode root, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var binary = node.AncestorsAndSelf().OfType<BinaryExpressionSyntax>()
+            .FirstOrDefault(candidate => candidate.IsKind(SyntaxKind.LogicalOrExpression) ||
+                                         candidate.IsKind(SyntaxKind.LogicalAndExpression));
+        if (binary is null) return document;
+
+        var model = await document.GetSemanticModelAsync(cancellationToken);
+        var negated = binary.IsKind(SyntaxKind.LogicalAndExpression);
+        if (!ReplaceWithStringIsNullOrEmptyAnalyzer.TryMatch(binary, model, negated, out var operand))
+            return document;
+
+        ExpressionSyntax call = SyntaxFactory.InvocationExpression(
+            SyntaxFactory.MemberAccessExpression(
+                SyntaxKind.SimpleMemberAccessExpression,
+                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.StringKeyword)),
+                SyntaxFactory.IdentifierName("IsNullOrEmpty")),
+            SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(
+                SyntaxFactory.Argument(operand.WithoutTrivia()))));
+
+        if (negated)
+            call = SyntaxFactory.PrefixUnaryExpression(SyntaxKind.LogicalNotExpression, call);
+
+        return await WithNodeAsync(document, root, binary, call.WithTriviaFrom(binary), cancellationToken);
     }
 
     private static Task<Document> ReplaceAsync<TSyntax>(

@@ -8,8 +8,9 @@ namespace Snitch.Languages.CSharp.Analysis.DataFlow;
 /// A taint walk over the solution: it seeds a method with the values a caller controls, follows the
 /// assignments and calls that carry them, and reports the ones that arrive at a sink in
 /// <see cref="TaintCatalog"/>. It is a static analysis with a documented reach — locals, parameters and
-/// call arguments to a caller-set depth, plus a field of the same type (written in one method, read in
-/// another) — not a proof: a field of another object, a database or a queue is not followed, and
+/// call arguments to a caller-set depth, plus a field written in one method and read in another, on any
+/// object — not a proof: a field is keyed by its declaration and not by the instance it hangs off, so
+/// writing one instance's field taints every instance's; a database or a queue is not followed, and
 /// <c>trace_data_flow</c> says so in every answer.
 /// </summary>
 public static class TaintAnalyzer
@@ -29,7 +30,7 @@ public static class TaintAnalyzer
             context.Index[method.Definition] = method;
         }
 
-        // Pass one: the fields a type parks tainted data in. A field written by one method and read by
+        // Pass one: the fields that hold tainted data. A field written by one method and read by
         // another is the one store an intra-method walk cannot see.
         foreach (var method in context.Models)
         {
@@ -39,7 +40,8 @@ public static class TaintAnalyzer
                     context.FieldOrigins[field] = origin;
         }
 
-        // Pass two: the report, with those fields seeded in every method of their containing type.
+        // Pass two: the report, with those fields seeded in every method: a field carries its value
+        // across methods and across objects, so the read side is not restricted to the declaring type.
         foreach (var method in context.Models)
         {
             var state = ComputeTaint(method, seeds: null, fieldSeeds: context.FieldOrigins);
@@ -82,8 +84,7 @@ public static class TaintAnalyzer
 
         if (fieldSeeds is not null)
             foreach (var (field, origin) in fieldSeeds)
-                if (SymbolEqualityComparer.Default.Equals(field.ContainingType, method.Symbol.ContainingType))
-                    state[field] = origin;
+                state[field] = origin;
 
         var model = method.Model;
 
@@ -106,8 +107,9 @@ public static class TaintAnalyzer
                         break;
 
                     case AssignmentExpressionSyntax assignment:
-                        if (TryOwnField(assignment.Left, model) is { } field)
+                        if (TryField(assignment.Left, model) is { } written)
                         {
+                            var (field, isOwn) = written;
                             var fieldValue = assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
                                 ? assignment.Right
                                 : assignment;
@@ -117,9 +119,11 @@ public static class TaintAnalyzer
                                 state[field] = WithStep(fieldOrigin, method, assignment, $"stored in field {field.Name}");
                                 changed = true;
                             }
-                            else if (state.Remove(field))
+                            else if (isOwn && state.Remove(field))
                             {
-                                // Last write wins: a clean assignment clears what an earlier one stored.
+                                // Last write wins for a field of this object: a clean assignment clears
+                                // what an earlier one stored. A field of another object is keyed by its
+                                // declaration, so a clean write to one instance cannot clear the others.
                                 changed = true;
                             }
 
@@ -373,21 +377,24 @@ public static class TaintAnalyzer
     }
 
     /// <summary>
-    /// The field an assignment writes when this walk is allowed to follow it: a static field, or one
-    /// reached through <c>this</c>/<c>base</c>. A field of another object would need alias tracking, so it
-    /// is deliberately not followed.
+    /// The field an assignment writes, and whether it belongs to this object. A field of another object
+    /// is followed too — the value crosses methods and objects — but it is keyed by its declaration, so
+    /// the walk is instance-insensitive: writing one instance's field taints every instance's. A property
+    /// is not a field and is not tracked here.
     /// </summary>
-    private static IFieldSymbol? TryOwnField(ExpressionSyntax left, SemanticModel model)
+    private static (IFieldSymbol Field, bool IsOwn)? TryField(ExpressionSyntax left, SemanticModel model)
     {
         if (model.GetSymbolInfo(left).Symbol is not IFieldSymbol field) return null;
 
-        return left switch
+        var isOwn = left switch
         {
-            IdentifierNameSyntax => field,
-            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax } => field,
-            MemberAccessExpressionSyntax when field.IsStatic => field,
-            _ => null,
+            IdentifierNameSyntax => true,
+            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax } => true,
+            MemberAccessExpressionSyntax when field.IsStatic => true,
+            _ => false,
         };
+
+        return (field, isOwn);
     }
 
     private static bool IsSanitizer(InvocationExpressionSyntax invocation, SemanticModel model)

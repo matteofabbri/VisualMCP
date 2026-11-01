@@ -15,7 +15,8 @@ public static class FindRazorVulnerabilitiesTool
         "script/style that defeats a Content-Security-Policy. Every finding carries a CWE id, a severity, file:line, " +
         "the source line and a remediation. Read-only. " +
         "Use this INSTEAD OF grepping for Html.Raw, type=\"password\" or target=\"_blank\" — the rules understand Razor " +
-        "expressions, tag helpers and the anti-forgery token. Filter by minimum severity or by CWE (e.g. 79).")]
+        "expressions, tag helpers and the anti-forgery token, including a token rendered by a partial the form " +
+        "includes (<partial name=…>, @Html.Partial(\"…\")). Filter by minimum severity or by CWE (e.g. 79).")]
     public static Task<object> FindRazorVulnerabilities(
         IFindRazorVulnerabilitiesService svc,
         [Description("Optional: only this project (exact name from the loaded solution).")] string? projectName = null,

@@ -82,7 +82,9 @@ pre-existing local.
 `encapsulate_field`, `property_to_auto`, `property_to_function`, `function_to_property`.
 
 `change_signature` is the one to reach for when a parameter is added, removed or reordered: it returns
-every call site as a before/after pair, refuses method-group uses, and is gated on the compiler.
+every call site as a before/after pair, refuses method-group uses, and is gated on the compiler. It runs
+on a Visual Basic method too — the call sites may omit the parentheses, an added default is emitted as
+`Optional`, and an `AddressOf` use refuses the change the way a method group does.
 `change_nullability` is gated on the *nullability* diagnostics specifically: it is refused when adding
 `?` would introduce new CS86xx/CS87xx warnings.
 

@@ -48,7 +48,7 @@ public sealed class MetacodingTests
         var store = new VisualMcpStore(workspace);
         var index = new MetacodeIndexService(workspace, store);
         var coding = new MetacodeCodingService(
-            workspace, index, new DecompileService(), new GhidraService(), new NativeCodeStore(store));
+            workspace, index, new DecompileService(), new GhidraService(), new JadxService(), new NativeCodeStore(store));
         return (workspace, store, index, coding);
     }
 

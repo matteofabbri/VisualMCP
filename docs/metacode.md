@@ -266,10 +266,11 @@ that has no frontend: just produce this text.
 2. Map every construct onto a model node; what has no node becomes `MetacodeOpaque*` + `MetacodeDiagnostic`,
    with the original text.
 3. Add it to `MetacodeTranslator.Default` **only if the translator can read the source directly**: that is
-   the rule that puts C#, Visual Basic and Razor there and Python/C++ not. A reader that depends on a dump
-   produced elsewhere goes through the constructor (opt-in), as `PythonFrontend` and `CppFrontend` do; if the
-   product knows how to produce that dump (like `translate_python_file` / `translate_cpp_file`), the tool
-   builds the translator with the right reader and it stays opt-in.
+   the rule that puts C#, Visual Basic, Java and Razor there and Python/C++ not. A reader that depends on a
+   dump produced elsewhere goes through the constructor (opt-in), as `PythonFrontend` and `CppFrontend` do; if
+   the product knows how to produce that dump (like `translate_python_file` / `translate_cpp_file`), the tool
+   builds the translator with the right reader and it stays opt-in. Java is the other case: the source is
+   Java text and JADX produces it, so `JavaFrontend` reads it directly and belongs in the default pipeline.
 4. Add a fixture to the test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`: it is the
    operational definition of "same architecture".
 
@@ -306,6 +307,10 @@ that has no frontend: just produce this text.
 - **Ghidra**: C's comma operator stays `RAW[cpp]`, multi-level pointers collapse to one, calling conventions
   and the decompiler's comments are lost, and the canonical text does not carry the origin of the single
   statement (the function does).
+- **Java**: an anonymous class body, a labeled `break`/`continue`, a local class, `assert`, a switch
+  expression and a method reference are `RAW[java]` with a diagnostic; annotations are decorators (their
+  arguments stay text); a record's components become fields plus the canonical constructor; a JADX comment is
+  dropped.
 
 ## Decompilation: from a binary to metacode
 
@@ -318,6 +323,7 @@ without changes.
 
 ```
 assembly .dll ──ILSpy──▶ C# ──CSharpFrontend──▶ MetacodeDocument ──renderer──▶ pseudocode
+java archive ──JADX──▶ .java sources ──JavaFrontend──▶ MetacodeDocument ──renderer──▶ pseudocode
 native binary ──Ghidra headless──▶ decompiled C ──normalization──▶ canonical text ──PseudocodeFrontend──▶ MetacodeDocument
 ```
 
@@ -487,6 +493,82 @@ key, reuse and forced replacement, lookup by name or address, routing of a non-m
 `metacoding`, the installer recognising an existing copy and the asset choice from the release feed. The
 "Ghidra really starts" verification is done by hand, once, and its outcome goes into the report of whoever
 runs it.
+
+## Java: a class file, the same model
+
+A `.class`, a `.dex`, or a zip of classes (`.jar`, `.war`, `.aar`, `.apk`, `.aab`) is **Java bytecode**, and
+JADX is the decompiler that reads it. Unlike Ghidra's C, what JADX produces is real Java source, so the
+frontend reads it directly instead of going through the canonical text:
+
+```
+Hello.jar ──JADX──▶ sources/com/example/Hello.java ──JavaFrontend──▶ MetacodeDocument ──renderer──▶ pseudocode
+```
+
+`JavaFrontend` is a recursive-descent reader over the Java grammar (`JavaLexer` + `JavaParser` in the same
+file): packages and imports, classes/interfaces/enums/records and annotation types, fields, constructors and
+methods, generics with wildcards, annotations as decorators, `if`/`while`/`do`/`for` (counted and enhanced),
+`switch` with fall-through, `try`/multi-catch/finally/try-with-resources, `synchronized`, lambdas, casts,
+array creation and initializers, `instanceof` patterns. `<` and `>` are lexed as single characters — `>>` in
+`Map<K, List<V>>` closes two generic lists and not a shift — and the parser merges the run when it is an
+operator.
+
+### The service and the installer
+
+```csharp
+using Snitch.Metacode.Decompilation;
+
+IJadxService jadx = provider.GetRequiredService<IJadxService>();
+var analysis = await jadx.DecompileAsync(@"app.jar");
+
+analysis.Files;       // how many .java files JADX wrote
+analysis.Sources;     // each one: where it is, its package path, its type name
+analysis.Error;       // the exact reason if it did not run (never an exception)
+analysis.LogPath;     // the full log of the process
+```
+
+`JadxInstaller` mirrors the Ghidra one. The asset it wants is the cross-platform CLI bundle
+`jadx-<version>.zip` (the GUI bundles are filtered out by name): it unpacks `bin/jadx` and `bin/jadx.bat`
+next to `lib/`, so `HostSystem` decides which launcher this process executes, `RestoreUnixModes` restores
+the execute bit a zip extracted on Windows does not preserve, and `JADX_HOME` / `JADX_CLI` /
+`JadxOptions.JadxHome` always win and download nothing. JADX is itself a Java program: with no `JAVA_HOME`
+and no JDK under the usual install roots the run fails, and the error says so (`JavaRuntimeLocator` is the
+same JDK search Ghidra uses, and a run that complains about Java is retried once with it).
+
+### Where the result goes
+
+`metacoding action=decompile` asks `JavaArchiveDetector` before anything else — `CAFEBABE`, `dex\n`, or a
+zip that actually carries `.class` entries — so a class file is not mistaken for a Mach-O fat binary and a
+jar is not dismissed as "not an executable image". The routing is:
+
+| The file is | Goes to | Stored as |
+|---|---|---|
+| .NET metadata | ILSpy | `assembly://<file>/<type>` |
+| Java bytecode | JADX | `java://<archive>/<package/Type.java>` |
+| machine code | Ghidra | `native://<file>` (plus the native tables) |
+
+Every decompiled `.java` file becomes one document in the same `mc_document`/`mc_tree`/`mc_node` tables as
+the solution's own code, with `source_path` = the archive and `decompiled` = 1. The Java text itself is kept
+in `source_document`, because unlike an ILSpy type it is a file a reader can look at. The identity is the
+archive's SHA-256: the same jar is not decompiled twice unless `force=true`, a second run reports "already
+stored", and a class that disappeared from the jar is removed with the rest of its archive.
+
+### What stays opaque
+
+The model's pressure valve, as in every other frontend: an anonymous class body (`new Runnable() { … }` — the
+creation is kept as `RAW[java]` with a diagnostic and the chain around it still lowers), a labeled
+`break`/`continue`, a local class, `assert`, a switch expression and a method reference. One such statement
+costs that statement: the parser recovers at the next `;` or block and the rest of the method is a tree.
+
+### How it is tested
+
+`JavaFrontendTests` reads a file shaped like JADX's output — package, fields, constructor, a method per
+control-flow construct, a multi-catch, an enhanced `for`, an anonymous class — and asserts the model (not the
+text): the class, the members, no `ParseError` anywhere, the anonymous class reported and kept, and recovery
+continuing after a statement the reader cannot place. `JadxTests` covers the release asset choice, the
+installer resolving an existing copy and a tools-folder install, the bytecode detector (`class`, `dex`, jar,
+plain zip), and a full `metacoding` run with JADX replaced by a recorded result: the rows under
+`java://fake.jar/…`, the `java` kind in `metacoding`'s own listing, and the second call answering "already
+stored".
 
 ## The model grew a little more
 

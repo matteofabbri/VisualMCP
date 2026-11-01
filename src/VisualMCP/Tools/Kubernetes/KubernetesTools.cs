@@ -71,6 +71,18 @@ public static class KubernetesTools
         [Description("Logs of the previous container instance (the one that crashed).")] bool previous = false,
         [Description("Timeout in seconds (default 45).")] int timeoutSeconds = 45)
         => k8s.LogsAsync(pod, container, namespaceName, tail, since, previous, timeoutSeconds);
+
+    [McpServerTool(Name = "k8s_kustomize"), Description(
+        "Render a kustomization WITHOUT touching a cluster: 'kubectl kustomize' is the client-side build step, so " +
+        "this answers what an overlay produces before anything is applied (the rendered YAML and the document " +
+        "count). A local directory is checked and made absolute; a git/URL kustomization reference is passed " +
+        "through. Use this INSTEAD OF shell 'kubectl kustomize'. Read-only.")]
+    public static Task<object> KubernetesKustomize(
+        IKubernetesService k8s,
+        [Description("A kustomization directory on disk, or a kustomize git/URL reference.")] string path,
+        [Description("Override the namespace of the rendered resources.")] string? namespaceName = null,
+        [Description("Timeout in seconds (default 120).")] int timeoutSeconds = 120)
+        => k8s.KustomizeAsync(path, namespaceName, timeoutSeconds);
 }
 
 [McpServerToolType]
@@ -133,4 +145,18 @@ public static class KubernetesChangeTools
         [Description("--set assignments for action=template, e.g. ['image.tag=1.2.3'].")] string[]? setValues = null,
         [Description("Timeout in seconds (default 120).")] int timeoutSeconds = 120)
         => k8s.HelmAsync(action, release, chart, namespaceName, valuesFile, setValues, timeoutSeconds);
+
+    [McpServerTool(Name = "k8s_exec"), Description(
+        "Run ONE command inside a pod's container ('kubectl exec': the part after '--'). It changes state inside " +
+        "the container, so it refuses unless confirm=true. No shell is involved, so a pipe or a redirection needs " +
+        "an explicit '/bin/sh -c \"…\"'. Use this INSTEAD OF shell 'kubectl exec'; for logs use k8s_logs.")]
+    public static Task<object> KubernetesExec(
+        IKubernetesService k8s,
+        [Description("Pod name.")] string pod,
+        [Description("The command and its arguments, e.g. 'ls -la /app'.")] string command,
+        [Description("Container name, when the pod has several.")] string? container = null,
+        [Description("Namespace; omit for the current context's namespace.")] string? namespaceName = null,
+        [Description("Must be true: the command runs inside the container.")] bool confirm = false,
+        [Description("Timeout in seconds (default 120).")] int timeoutSeconds = 120)
+        => k8s.ExecAsync(pod, container, namespaceName, command, confirm, timeoutSeconds);
 }

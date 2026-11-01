@@ -20,6 +20,9 @@ public interface IKubernetesService
     Task<object> DescribeAsync(string kind, string? name, string? namespaceName, bool allNamespaces, int timeoutSeconds);
     Task<object> LogsAsync(string pod, string? container, string? namespaceName, int tail, string? since,
         bool previous, int timeoutSeconds);
+    Task<object> KustomizeAsync(string path, string? namespaceName, int timeoutSeconds);
+    Task<object> ExecAsync(string pod, string? container, string? namespaceName, string command, bool confirm,
+        int timeoutSeconds);
     Task<object> ApplyAsync(string? file, string? content, string? namespaceName, bool dryRun, bool confirm,
         int timeoutSeconds);
     Task<object> DeleteAsync(string kind, string name, string? namespaceName, bool ignoreNotFound, bool confirm,
@@ -241,6 +244,90 @@ public sealed class KubernetesService : IKubernetesService
             logs = ProcessRunner.Truncate(text, 64_000),
             command = $"kubectl {args}",
             error = run.Succeeded || !string.IsNullOrWhiteSpace(run.Stdout) ? null : FirstLine(run.Stderr),
+        };
+    }
+
+    // ── kustomize (offline render) ───────────────────────────────────────────
+    /// <summary>
+    /// Renders a kustomization without touching a cluster: <c>kubectl kustomize</c> is the client-side
+    /// build step, so this answers what the overlay produces before anything is applied.
+    /// </summary>
+    public async Task<object> KustomizeAsync(string path, string? namespaceName, int timeoutSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return new { error = "A kustomization directory (or a git/URL reference) is required." };
+        if (path.Contains('\r') || path.Contains('\n'))
+            return new { error = "The path must be a single line." };
+        if (!string.IsNullOrWhiteSpace(namespaceName) && !IsSafeToken(namespaceName))
+            return new { error = $"'{namespaceName}' is not a namespace name." };
+
+        if (!ExternalTool.Exists("kubectl"))
+            return new { available = false, error = "kubectl was not found on PATH: kustomize is a kubectl subcommand." };
+
+        // A local path is checked and made absolute; anything else (a git reference) is passed through.
+        var target = path;
+        if (Directory.Exists(path) || File.Exists(path)) target = Path.GetFullPath(path);
+
+        var args = $"kustomize {Quote(target)}";
+        if (!string.IsNullOrWhiteSpace(namespaceName)) args += $" --namespace {Quote(namespaceName!)}";
+
+        var run = await KubectlAsync(args, Clamp(timeoutSeconds));
+        var rendered = run.Succeeded ? run.Stdout.Trim() : null;
+        return new
+        {
+            action = "kustomize",
+            path = target,
+            namespaceName,
+            succeeded = run.Succeeded,
+            command = $"kubectl {args}",
+            documents = rendered is null ? 0 : CountDocuments(rendered),
+            rendered = rendered is null ? ProcessRunner.Truncate(run.Text, 4_000) : ProcessRunner.Truncate(rendered, 64_000),
+            error = run.Succeeded ? null : FirstLine(run.Stderr),
+            note = "A client-side render: no cluster was contacted. Apply the result with k8s_apply (dryRun first).",
+        };
+    }
+
+    // ── exec ─────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Runs one command inside a container. It changes state inside the pod, so it needs
+    /// <c>confirm=true</c>; the command goes after <c>--</c> exactly as the shell would pass it,
+    /// except that no shell is involved, so redirection and pipes do not work.
+    /// </summary>
+    public async Task<object> ExecAsync(string pod, string? container, string? namespaceName, string command,
+        bool confirm, int timeoutSeconds)
+    {
+        if (!IsSafeToken(pod)) return new { error = "A pod name is required." };
+        if (!string.IsNullOrWhiteSpace(container) && !IsSafeToken(container))
+            return new { error = $"'{container}' is not a container name." };
+        if (string.IsNullOrWhiteSpace(command))
+            return new { error = "A command is required: the part kubectl receives after '--'." };
+        if (command.Contains('\r') || command.Contains('\n'))
+            return new { error = "The command must be a single line." };
+        if (!confirm)
+            return new { error = "exec runs a command inside the container (it can change state). Pass confirm=true to proceed." };
+
+        if (!ExternalTool.Exists("kubectl"))
+            return new { available = false, error = "kubectl was not found on PATH." };
+
+        var args = $"exec {Quote(pod)}";
+        if (!string.IsNullOrWhiteSpace(container)) args += $" -c {Quote(container!)}";
+        args += NamespaceArgs(namespaceName, allNamespaces: false);
+        args += $" -- {command}";
+
+        var run = await KubectlAsync(args, Clamp(timeoutSeconds));
+        return new
+        {
+            pod,
+            container,
+            namespaceName,
+            command = $"kubectl {args}",
+            succeeded = run.Succeeded,
+            exitCode = run.TimedOut ? (int?)null : run.ExitCode,
+            stdout = ProcessRunner.Truncate(run.Stdout, 32_000),
+            stderr = ProcessRunner.Truncate(run.Stderr, 8_000),
+            error = run.Succeeded ? null : FirstLine(run.Stderr),
+            note = "kubectl exec runs the program directly: a pipe or a redirection inside it needs a shell " +
+                   "(/bin/sh -c \"…\").",
         };
     }
 
@@ -547,6 +634,14 @@ public sealed class KubernetesService : IKubernetesService
         value.All(c => c is not ('\r' or '\n' or '\0'));
 
     private static string Quote(string value) => $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+
+    /// <summary>How many YAML documents a rendered stream holds (the '---' separators, plus one).</summary>
+    public static int CountDocuments(string yaml)
+    {
+        if (string.IsNullOrWhiteSpace(yaml)) return 0;
+        var separators = yaml.Split('\n').Count(line => line.TrimEnd('\r').Trim() == "---");
+        return separators + 1;
+    }
 
     private static string? Str(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

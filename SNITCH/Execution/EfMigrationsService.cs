@@ -11,23 +11,31 @@ namespace Snitch.Execution;
 public interface IEfMigrationsService
 {
     Task<object> RunAsync(string? projectName, string action, string? name, string? output,
-        string? startupProject, bool noBuild, int timeoutSeconds);
+        string? startupProject, bool noBuild, int timeoutSeconds, string? fromMigration, string? toMigration);
 }
 
 public sealed class EfMigrationsService : IEfMigrationsService
 {
     private static readonly string[] Actions =
-        ["list", "add", "script", "remove", "update", "info", "dbcontext-list", "pending-model-changes"];
+        ["list", "add", "script", "diff", "remove", "update", "info", "dbcontext-list", "pending-model-changes"];
 
     private readonly IRoslynWorkspace _workspace;
     public EfMigrationsService(IRoslynWorkspace workspace) => _workspace = workspace;
 
     public async Task<object> RunAsync(string? projectName = null, string action = "list", string? name = null,
-        string? output = null, string? startupProject = null, bool noBuild = false, int timeoutSeconds = 120)
+        string? output = null, string? startupProject = null, bool noBuild = false, int timeoutSeconds = 120,
+        string? fromMigration = null, string? toMigration = null)
     {
         var command = (action ?? string.Empty).Trim().ToLowerInvariant();
         if (!Actions.Contains(command))
             return new { error = $"Unknown action '{action}'. Use one of: {string.Join(", ", Actions)}." };
+
+        if (command == "diff" && string.IsNullOrWhiteSpace(fromMigration))
+            return new
+            {
+                error = "The diff action needs fromMigration (use '0' for an empty database); toMigration is " +
+                        "optional and defaults to the latest migration.",
+            };
 
         if (command == "add" && string.IsNullOrWhiteSpace(name))
             return new { error = "The add action needs a migration name." };
@@ -62,7 +70,7 @@ public sealed class EfMigrationsService : IEfMigrationsService
         if (project.FilePath is null) return new { error = $"Project '{project.Name}' has no file on disk." };
 
         var directory = Path.GetDirectoryName(project.FilePath)!;
-        var args = CommandArguments(command, name, output);
+        var args = CommandArguments(command, name, output, fromMigration, toMigration);
 
         args.AddRange(["--project", Quote(project.FilePath)]);
         if (!string.IsNullOrWhiteSpace(startupProject))
@@ -98,32 +106,54 @@ public sealed class EfMigrationsService : IEfMigrationsService
             pendingModelChanges,
             stdout = ProcessRunner.Truncate(stdout),
             stderr = ProcessRunner.Truncate(stderr),
-            hint = command == "pending-model-changes"
-                ? "Exit code 0: the model and the migrations agree. 1: the model has changed since the last " +
-                  "migration, so a migration is pending. Any other code is a tool or project error."
-                : exitCode != 0
-                    ? "A failing 'dotnet ef' usually means the 'dotnet-ef' tool is missing (dotnet tool install --global dotnet-ef) " +
-                      "or the project does not reference Microsoft.EntityFrameworkCore.Design."
-                    : "A migration file is C#: review it with the normal C# tools; nothing here proves the model and the " +
-                      "migrations agree, which is what a script does.",
+            hint = command switch
+            {
+                "pending-model-changes" =>
+                    "Exit code 0: the model and the migrations agree. 1: the model has changed since the last " +
+                    "migration, so a migration is pending. Any other code is a tool or project error.",
+                "diff" =>
+                    "The SQL between fromMigration and toMigration: that is the schema delta the database would " +
+                    "receive. A field-level comparison of the model itself is not made here — the C# of the " +
+                    "migration and the snapshot is reviewed with the normal tools.",
+                _ when exitCode != 0 =>
+                    "A failing 'dotnet ef' usually means the 'dotnet-ef' tool is missing (dotnet tool install --global dotnet-ef) " +
+                    "or the project does not reference Microsoft.EntityFrameworkCore.Design.",
+                _ =>
+                    "A migration file is C#: review it with the normal C# tools; nothing here proves the model and the " +
+                    "migrations agree, which is what a script or a diff does.",
+            },
         };
     }
 
     /// <summary>The 'dotnet ef' arguments before the common project options.</summary>
-    public static List<string> CommandArguments(string action, string? name, string? output)
+    public static List<string> CommandArguments(string action, string? name, string? output,
+        string? fromMigration = null, string? toMigration = null)
     {
         if (action == "info") return ["ef", "dbcontext", "info"];
         if (action == "dbcontext-list") return ["ef", "dbcontext", "list"];
 
+        // 'diff' is 'script from to': the SQL between two migrations, which is the schema delta.
         var args = new List<string> { "ef", "migrations" };
-        args.Add(action == "pending-model-changes" ? "has-pending-model-changes" : action);
+        args.Add(action switch
+        {
+            "pending-model-changes" => "has-pending-model-changes",
+            "diff" => "script",
+            _ => action,
+        });
 
         switch (action)
         {
             case "add" when !string.IsNullOrWhiteSpace(name): args.Add(Quote(name)); break;
             case "update" when !string.IsNullOrWhiteSpace(name): args.Add(Quote(name)); break;
+            case "diff" when !string.IsNullOrWhiteSpace(fromMigration):
+                args.Add(Quote(fromMigration));
+                if (!string.IsNullOrWhiteSpace(toMigration)) args.Add(Quote(toMigration));
+                break;
             case "script" when !string.IsNullOrWhiteSpace(output): args.AddRange(["--output", Quote(output)]); break;
         }
+
+        if (action == "diff" && !string.IsNullOrWhiteSpace(output))
+            args.AddRange(["--output", Quote(output)]);
 
         return args;
     }

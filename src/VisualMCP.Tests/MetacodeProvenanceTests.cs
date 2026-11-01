@@ -73,7 +73,8 @@ public sealed class MetacodeProvenanceTests
         FakeWorkspace workspace, MetacodeIndexService index, VisualMcpStore store, string binary)
     {
         return new MetacodeCodingService(
-            workspace, index, new DecompileService(), new FakeGhidra(Analysis(binary)), new NativeCodeStore(store));
+            workspace, index, new DecompileService(), new FakeGhidra(Analysis(binary)), new JadxService(),
+            new NativeCodeStore(store));
     }
 
     private static GhidraAnalysis Analysis(string binary) =>

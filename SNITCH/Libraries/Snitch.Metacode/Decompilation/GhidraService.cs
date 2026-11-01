@@ -434,55 +434,11 @@ public sealed class GhidraService : IGhidraService
     }
 
     /// <summary>
-    /// A JDK for <c>JAVA_HOME_OVERRIDE</c>: the one JAVA_HOME points at, or the newest under the usual
-    /// install roots (a Ghidra 12 needs a modern JDK, and a stale JAVA_HOME is the usual reason it
-    /// refuses to start).
+    /// A JDK for <c>JAVA_HOME_OVERRIDE</c> (a Ghidra 12 needs a modern one, and a stale JAVA_HOME is the
+    /// usual reason it refuses to start). The JADX path asks the same question, so the answer lives in
+    /// <see cref="JavaRuntimeLocator"/>.
     /// </summary>
-    internal static string? FindJavaHome()
-    {
-        var configured = Environment.GetEnvironmentVariable("JAVA_HOME");
-        if (!string.IsNullOrWhiteSpace(configured) && Directory.Exists(Path.Combine(configured, "bin")))
-            return configured.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        var roots = HostSystem.IsWindows
-            ? new[]
-            {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Java"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Eclipse Adoptium"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Amazon Corretto"),
-            }
-            : new[]
-            {
-                // Linux distributions and the common SDK managers put their JDKs under /usr/lib/jvm and
-                // the user's home; macOS uses the same folder names under a versioned JVM root.
-                "/usr/lib/jvm",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".sdkman", "candidates", "java"),
-                "/Library/Java/JavaVirtualMachines",
-            };
-
-        var java = "bin" + Path.DirectorySeparatorChar + "java" + HostSystem.ExecutableSuffix;
-
-        return roots
-            .Where(Directory.Exists)
-            .SelectMany(root => Directory.GetDirectories(root))
-            .Where(candidate => File.Exists(Path.Combine(candidate, java)) ||
-                                // macOS keeps the real home one level deeper: <root>/<jdk>.jdk/Contents/Home.
-                                File.Exists(Path.Combine(candidate, "Contents", "Home", java)))
-            .Select(candidate => File.Exists(Path.Combine(candidate, "Contents", "Home", java))
-                ? Path.Combine(candidate, "Contents", "Home")
-                : candidate)
-            // "jdk-25" sorts after "jdk-17" as a string only because of luck; compare the version.
-            .OrderByDescending(candidate => VersionOf(Path.GetFileName(candidate)))
-            .FirstOrDefault();
-    }
-
-    private static Version VersionOf(string name)
-    {
-        var digits = new string(name.Where(c => char.IsDigit(c) || c == '.' || c == '_').ToArray())
-            .Replace('_', '.');
-        return Version.TryParse(digits, out var version) ? version : new Version(0, 0);
-    }
+    internal static string? FindJavaHome() => JavaRuntimeLocator.FindJavaHome();
 
     private static bool LooksLikeJavaProblem(string output) =>
         output.Contains("JAVA_HOME", StringComparison.OrdinalIgnoreCase)

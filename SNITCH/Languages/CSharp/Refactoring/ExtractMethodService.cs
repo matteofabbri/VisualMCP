@@ -56,6 +56,12 @@ public sealed class ExtractMethodService : IExtractMethodService
                                          string.Equals(Path.GetFullPath(candidate.FilePath), path, StringComparison.OrdinalIgnoreCase));
         if (document is null) return new { error = $"{path} is not a document of the loaded solution." };
 
+        // VB statements, locals and the call that replaces them are VB syntax: a separate walk over the
+        // same rules (a contiguous block, locals read but never written, an optional trailing Return).
+        if (document.Project.Language == LanguageNames.VisualBasic)
+            return await Snitch.Languages.VB.Refactoring.VbExtractMethod.RunAsync(
+                _workspace, document, fromLine, toLine, methodName, dryRun, cancellationToken);
+
         var sourceText = await document.GetTextAsync(cancellationToken);
         if (toLine > sourceText.Lines.Count) return new { error = $"Line {toLine} is out of range." };
 

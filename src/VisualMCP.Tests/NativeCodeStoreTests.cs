@@ -173,7 +173,7 @@ public sealed class NativeCodeStoreTests
             var index = new MetacodeIndexService(workspace, store);
             var coding = new MetacodeCodingService(
                 workspace, index, new DecompileService(),
-                new FakeGhidra(Analysis(binary, HeadlessOf(workspace))), native);
+                new FakeGhidra(Analysis(binary, HeadlessOf(workspace))), new JadxService(), native);
             using (index)
             {
                 var result = await coding.DecompileAsync(binary);

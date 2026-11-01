@@ -94,6 +94,15 @@ public interface IMetacodeIndexService
         string binaryPath, string hash, MetacodeDocument document, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Stores the Java sources JADX recovered from a class/dex/jar/apk, one document per decompiled
+    /// <c>.java</c> file under <c>java://&lt;archive&gt;/&lt;unit&gt;</c>. The rows are keyed on the
+    /// archive's SHA-256, so decompiling the same archive again replaces them instead of duplicating
+    /// them, and every row records the archive it came from with the decompiled flag set.
+    /// </summary>
+    Task<MetacodeBuildReport> IndexJavaAsync(
+        string archivePath, string hash, IReadOnlyList<JavaSourceUnit> sources, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Indexes a given set of files — the folder a binary was decompiled from, or anything else a caller
     /// names — with the same freshness rules as a build pass. A file no frontend reads becomes a
     /// <c>file</c> node; a file that is not text at all is skipped.
@@ -107,6 +116,14 @@ public interface IMetacodeIndexService
     /// binary's current MVID to decide whether decompiling again would tell it anything new.
     /// </summary>
     string? DecompiledAssemblyHash(string assemblyFileName);
+
+    /// <summary>
+    /// The SHA-256 the store holds for a decompiled Java archive (the name of the file, e.g.
+    /// <c>app.jar</c>), or null when it was never stored. The Java counterpart of
+    /// <see cref="DecompiledAssemblyHash"/>: the same fresh-archive check, keyed on the content hash
+    /// because a jar has no MVID.
+    /// </summary>
+    string? DecompiledJavaHash(string archiveFileName);
 
     /// <summary>Which binaries the store holds metacode for — the answer to "what did I decompile?".</summary>
     IReadOnlyList<DecompiledAssemblyRow> DecompiledAssemblies();
@@ -521,6 +538,12 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         return _index.DecompiledHash(assemblyFileName.Trim());
     }
 
+    public string? DecompiledJavaHash(string archiveFileName)
+    {
+        if (string.IsNullOrWhiteSpace(archiveFileName) || !TryOpen()) return null;
+        return _index.DecompiledHash(MetacodeIndexStore.JavaPrefix, archiveFileName.Trim());
+    }
+
     /// <summary>
     /// Stores the functions Ghidra recovered from a native binary as one metacode document, so a native
     /// image is queryable exactly like a managed assembly or the solution's own code: same tables, same
@@ -576,6 +599,116 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 
     public IReadOnlyList<DecompiledAssemblyRow> DecompiledAssemblies() =>
         TryOpen() ? _index.DecompiledAssemblies() : [];
+
+    /// <summary>
+    /// Stores the Java sources JADX recovered from a class/dex/jar/apk: one document per decompiled
+    /// <c>.java</c> file, so the archive is queryable exactly like a managed assembly. The path is
+    /// <c>java://&lt;archive&gt;/&lt;unit&gt;</c>, the <em>source path</em> is the archive on disk, and
+    /// every row is flagged as decompiled. The Java text is kept too, in <c>source_document</c>, because
+    /// unlike an ILSpy type it is a file a reader can look at.
+    /// </summary>
+    public async Task<MetacodeBuildReport> IndexJavaAsync(
+        string archivePath,
+        string hash,
+        IReadOnlyList<JavaSourceUnit> sources,
+        CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var database = _store.EnsureDatabase();
+        if (database is null)
+            return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
+
+        if (!_index.Open(database))
+            return Failure("The solution database could not be opened (is the solution folder writable?).", stopwatch, database);
+
+        if (sources.Count == 0)
+            return Failure("JADX produced no Java source to store.", stopwatch, database);
+
+        var archive = Path.GetFileName(archivePath);
+        var project = "decompiled:" + archive;
+        var sourcePath = FullPathOf(archivePath);
+
+        int indexed = 0, empty = 0, declarations = 0, functions = 0, types = 0, diagnostics = 0;
+        var failures = new List<string>();
+        var written = new List<string>();
+
+        foreach (var source in sources)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var path = JavaPath(archive, source.RelativePath);
+            var collected = MetacodeDeclarations.Collect(source.Document, path);
+            if (collected.Rows.Count == 0)
+            {
+                // A decompiled unit the reader could place nothing in is not a document of the store.
+                empty++;
+                continue;
+            }
+
+            var facts = new MetacodeDocumentFacts(
+                path, project, hash, 0, "java", collected.Rows, source.Document.Diagnostics.Count)
+            {
+                Nodes = collected.Nodes,
+                SourcePath = sourcePath,
+                Decompiled = true,
+                Source = source.Text,
+            };
+
+            if (!await _index.ReplaceAsync(facts, cancellationToken).ConfigureAwait(false))
+            {
+                failures.Add($"{source.RelativePath}: the database refused the write");
+                continue;
+            }
+
+            written.Add(path);
+            indexed++;
+            declarations += collected.Rows.Count;
+            diagnostics += facts.Diagnostics;
+            foreach (var row in collected.Rows)
+            {
+                if (FunctionKinds.Contains(row.Kind)) functions++;
+                if (TypeKinds.Contains(row.Kind)) types++;
+            }
+        }
+
+        // A complete JADX run knows every source of the archive, so a unit that disappeared from the
+        // decompilation (a class removed from the jar) can be dropped. A capped run does not.
+        var removed = empty == 0
+            ? await _index
+                .RemoveUnderAsync(MetacodeIndexStore.JavaPrefix + archive + "/", written, cancellationToken)
+                .ConfigureAwait(false)
+            : 0;
+
+        var status = _index.Status();
+        return new MetacodeBuildReport(
+            sources.Count, indexed, empty, removed, failures.Count, failures.Take(5).ToList(),
+            declarations, functions, types, diagnostics,
+            stopwatch.ElapsedMilliseconds, database, _workspace.LoadedSolutionPath)
+        {
+            Documents = status.Documents,
+            Nodes = status.Nodes,
+        };
+    }
+
+    /// <summary>
+    /// The store key of one decompiled Java unit: the archive names the binary, the unit's path inside
+    /// the archive (its package path) names the source. It is a key, never opened, so each segment is
+    /// sanitised on its own — the separators are structure and must survive.
+    /// </summary>
+    private static string JavaPath(string archive, string relativePath)
+    {
+        var segments = relativePath.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var safe = segments.Select(segment =>
+        {
+            var clean = segment;
+            foreach (var invalid in Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '|', '?', '*']))
+                clean = clean.Replace(invalid, '_');
+
+            return clean.Length == 0 ? "_" : clean;
+        });
+
+        return MetacodeIndexStore.JavaPrefix + archive + "/" + string.Join("/", safe);
+    }
 
     /// <summary>The absolute form of a path a caller gave, or the text itself when it is not one.</summary>
     private static string FullPathOf(string path)
@@ -743,6 +876,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         ".cs" => MetacodeLanguage.CSharp,
         ".cshtml" or ".razor" => MetacodeLanguage.Razor,
         ".vb" => MetacodeLanguage.VisualBasic,
+        ".java" => MetacodeLanguage.Java,
         _ => MetacodeLanguage.Unknown,
     };
 
@@ -795,7 +929,8 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     private static MetacodeDocumentFacts Translate(
         string text, string project, string language, string path, string hash, long mtime)
     {
-        var translator = new MetacodeTranslator([new CSharpFrontend(), new VisualBasicFrontend(), new RazorFrontend()]);
+        var translator = new MetacodeTranslator(
+            [new CSharpFrontend(), new VisualBasicFrontend(), new JavaFrontend(), new RazorFrontend()]);
         var model = translator.Translate(MetacodeSource.FromText(text, LanguageOf(path), path), MetacodeOptions.Default);
         var collected = MetacodeDeclarations.Collect(model, path);
         var hasReader = model.Diagnostics.All(diagnostic => diagnostic.Code != MetacodeDiagnosticCodes.NoFrontend);

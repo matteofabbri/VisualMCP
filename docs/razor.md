@@ -112,11 +112,13 @@ Every finding has the same shape in both tools:
 
 ## Limits
 
-- It is a **heuristic** analysis: no data flow. A value coming from a partial, a view model or JavaScript is
-  not tracked; a clean result is not a proof of security.
+- It is a **heuristic** analysis: no data flow. A value coming from a view model or JavaScript is not
+  tracked; a clean result is not a proof of security.
 - Markup inside `@{ … }`/`@code { … }` is not descended into (it is C#).
-- Duplicate `id`s and anti-forgery tokens are checked **per file**: if the token sits in a partial rendered
-  inside the form, `RZ1005` may still report it.
+- `RZ1005` resolves the partials a form renders (`<partial name=…>`, `@Html.Partial("…")`, the
+  `RenderPartial` family) and looks for the token inside them, following nested includes with a cycle
+  guard; the search is textual, so a token built by a helper the rule does not name can still be reported,
+  and a partial it cannot resolve counts as having no token. Duplicate `id`s are still checked per file.
 - Dynamic values (`method="@Model.Method"`) are not guessed: the rules that depend on them stay silent
   instead of guessing.
 - Files over 2 MB and unreadable folders are reported in `skipped`/`unreadable`, not analysed.

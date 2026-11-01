@@ -94,6 +94,57 @@ run_tests
 (total/passed/failed/skipped/duration), a per-project breakdown, and the failed test names with
 their error message and stack trace.
 
+## Debugger
+
+The debug tools drive a real netcoredbg session over the Debug Adapter Protocol. A session id comes
+from `debug_launch` or `debug_attach` and stays valid across calls; `debug_sessions` lists the live
+ones. The engine notes — what the adapter cannot do and what stands in — are in
+[limits.md](limits.md#debugger).
+
+```
+debug_launch(program?, projectName?, programArgs?, workingDirectory?, environmentJson?,
+             stopAtEntry=false, breakpoints?, waitForStopSeconds=15)
+             → program: a built .dll/.exe, or a .csproj (the newest bin/ assembly is used);
+               breakpoints: [{file, line, condition?, hitCondition?}]
+
+debug_breakpoints(sessionId, file, breakpoints?, clear=false)
+             → replaces that one file's list; each item is {line, condition?, hitCondition?}
+
+debug_function_breakpoints(sessionId, breakpoints?, clear=false)
+             → replaces the whole function set; each item is {name, condition?} with the adapter's
+               name forms: "Ns.Type.Method", "Type.Method(int)", "Module.dll!Type.Method"
+
+debug_data_breakpoints(sessionId, file, line, member, clear=false)
+             → member is a field or property named on that line; the write sites come from Roslyn
+
+debug_exceptions(sessionId, filters?, exceptionTypes?, details=false)
+             → filters: ["all"] | ["user-unhandled"]; exceptionTypes narrows the first filter
+               ("System.NullReferenceException", "!System.OperationCanceledException" to exclude);
+               with no filter and no type, the call only reads the stopped exception
+```
+
+**Hit conditions** are `>5`, `>=5`, `<5`, `<=5`, `5` (exactly) and `%3` (every third hit). They are
+counted by the server: the adapter has no hit counter, so a stop that does not satisfy the condition is
+resumed transparently, `debug_continue` keeps waiting for the next one, and the answer's
+`hitConditionSkips` says how many stops were absorbed. A condition nothing can satisfy gives up after
+500 absorbed hits.
+
+**Data breakpoints.** `debug_data_breakpoints` resolves the member on `file:line` through Roslyn and
+installs one line breakpoint per write site the solution's source has — assignment, compound
+assignment, `++`/`--`, a `ref`/`out` argument, an initializer — reporting each site with its kind. A
+local is refused (it lives in one frame) and so is a write from code outside the solution's source.
+`clear=true` removes it and restores the file's ordinary breakpoints.
+
+**Evaluating and writing.** `debug_evaluate(sessionId, expression, frameId?, context?, newValue?)`
+returns the value, its type and the members of an object. With `newValue` the expression is assigned
+first (the debugger's Set Value), and the answer's `result` is what it holds afterwards — a breakpoint
+plus an assignment changes state, and `debug_continue` resumes with it.
+
+**Restart.** `debug_restart(sessionId, rebuild=false)` relaunches a *launched* session with the same
+program, arguments, environment, line/function breakpoints and exception settings, under a new session
+id. `rebuild=true` runs `dotnet build` on the project that produced the assembly first, and a failed
+build leaves the running session untouched. An attached session cannot be restarted.
+
 ## Profiling
 
 The profiling tools operate on a **running** .NET process, so they take `processId` or
@@ -256,8 +307,9 @@ analyze_native_binary(binaryPath, function?, maxFunctions=0,
                   in the header. Re-read the snapshot with metacode_translate
 ```
 
-`analyze_native_binary` is the only metacode tool that starts an external process (Ghidra,
-installed on demand); the snapshot it leaves behind is an ordinary metacode input afterwards.
+`analyze_native_binary` is the read-only metacode tool that starts an external process (Ghidra,
+installed on demand); `metacoding action=decompile` runs Ghidra and JADX on demand the same way. The
+snapshot Ghidra leaves behind is an ordinary metacode input afterwards.
 Canonical pseudocode is itself an input (`language=pseudo`, or a `.mc` file), so a language
 without a frontend joins by emitting it. `language` is required for text and, with a path,
 overrides the extension — an unknown extension alone has no frontend. Visual Basic is a source
@@ -630,6 +682,16 @@ k8s_describe(kind, name?, namespaceName?, allNamespaces=false, timeoutSeconds=60
 
 k8s_logs(pod, container?, namespaceName?, tail=200, since?, previous=false,
          timeoutSeconds=45)
+
+k8s_kustomize(path, namespaceName?, timeoutSeconds=120)
+                → kubectl kustomize: an offline render of an overlay, with the
+                  rendered YAML and the document count; a local path is checked
+                  and made absolute, a git/URL reference is passed through
+
+k8s_exec(pod, command, container?, namespaceName?, confirm=false, timeoutSeconds=120)
+                → one command inside the container, the part after `--`; it
+                  changes state, so it needs confirm=true; no shell is involved,
+                  so a pipe needs an explicit /bin/sh -c "…"
 
 k8s_apply(file?, content?, namespaceName?, dryRun=true, confirm=false,
           timeoutSeconds=120)

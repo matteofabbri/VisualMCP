@@ -50,10 +50,19 @@ public sealed class MetacodeIndexStore : IDisposable
     /// </summary>
     public const string NativePrefix = "native://";
 
+    /// <summary>
+    /// A Java binary decompiled with JADX: one document per decompiled .java file, under
+    /// <c>java://&lt;archive&gt;/&lt;package/Type.java&gt;</c>. It is kept out of the solution's prune like
+    /// the other two, and it is told apart from them because its content is source recovered from a
+    /// class file, not .NET metadata and not machine code.
+    /// </summary>
+    public const string JavaPrefix = "java://";
+
     /// <summary>Whether a stored path is a decompiled artifact rather than a document of the solution.</summary>
     public static bool IsDecompiledPath(string path) =>
         path.StartsWith(DecompiledPrefix, StringComparison.Ordinal)
-        || path.StartsWith(NativePrefix, StringComparison.Ordinal);
+        || path.StartsWith(NativePrefix, StringComparison.Ordinal)
+        || path.StartsWith(JavaPrefix, StringComparison.Ordinal);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
@@ -516,7 +525,14 @@ public sealed class MetacodeIndexStore : IDisposable
     /// or null when the store has never seen that assembly. It is the freshness token a re-decompilation
     /// compares against, so an unchanged binary is not decompiled twice.
     /// </summary>
-    public string? DecompiledHash(string assemblyFileName)
+    public string? DecompiledHash(string assemblyFileName) => DecompiledHash(DecompiledPrefix, assemblyFileName);
+
+    /// <summary>
+    /// The same question for any decompiled artifact: <paramref name="prefix"/> says which family
+    /// (<c>assembly://</c>, <c>java://</c>) and <paramref name="fileName"/> the binary. The identity is
+    /// whatever the decompiler keyed the rows on — the MVID, the SHA-256 of a Java archive.
+    /// </summary>
+    public string? DecompiledHash(string prefix, string fileName)
     {
         var connection = Open();
         if (connection is null) return null;
@@ -525,11 +541,11 @@ public sealed class MetacodeIndexStore : IDisposable
         try
         {
             using var context = VisualMcpSchema.CreateContext(connection);
-            var prefix = DecompiledPrefix + assemblyFileName + "/";
+            var path = prefix + fileName + "/";
 
             return context.MetacodeDocuments
                 .AsNoTracking()
-                .Where(document => document.Path.StartsWith(prefix))
+                .Where(document => document.Path.StartsWith(path))
                 .OrderBy(document => document.Path)
                 .Select(document => document.Hash)
                 .FirstOrDefault();
@@ -564,7 +580,9 @@ public sealed class MetacodeIndexStore : IDisposable
             var rows = context.MetacodeDocuments
                 .AsNoTracking()
                 .Where(document =>
-                    document.Path.StartsWith(DecompiledPrefix) || document.Path.StartsWith(NativePrefix))
+                    document.Path.StartsWith(DecompiledPrefix)
+                    || document.Path.StartsWith(NativePrefix)
+                    || document.Path.StartsWith(JavaPrefix))
                 .OrderBy(document => document.Path)
                 .Select(document => new { document.Path, document.Hash })
                 .ToList();
@@ -574,15 +592,20 @@ public sealed class MetacodeIndexStore : IDisposable
                 var path = row.Path;
                 var identity = row.Hash;
 
-                // assembly://<file>/<type> and native://<file>: the file name is everything before the
-                // first '/' — and for a native document there is no '/', so the rest is the name itself.
-                var native = path.StartsWith(NativePrefix, StringComparison.Ordinal);
-                var rest = path[(native ? NativePrefix.Length : DecompiledPrefix.Length)..];
+                // assembly://<file>/<type>, java://<file>/<unit> and native://<file>: the file name is
+                // everything before the first '/' — and for a native document there is no '/', so the
+                // rest is the name itself.
+                var (prefix, kind) = path.StartsWith(NativePrefix, StringComparison.Ordinal)
+                    ? (NativePrefix, "native")
+                    : path.StartsWith(JavaPrefix, StringComparison.Ordinal)
+                        ? (JavaPrefix, "java")
+                        : (DecompiledPrefix, "managed");
+
+                var rest = path[prefix.Length..];
                 var slash = rest.IndexOf('/');
                 var assembly = slash > 0 ? rest[..slash] : rest;
                 if (assembly.Length == 0) continue;
 
-                var kind = native ? "native" : "managed";
                 found[assembly] = found.TryGetValue(assembly, out var existing)
                     ? (identity, existing.Documents + 1, kind)
                     : (identity, 1, kind);

@@ -45,6 +45,7 @@ public sealed class FindRazorVulnerabilitiesService : IFindRazorVulnerabilitiesS
 
         var all = new List<RazorFinding>();
         var pagesAnalyzed = 0;
+        var partials = RazorAnalysis.CreatePartialResolver(collection);
 
         foreach (var file in collection.Files)
         {
@@ -52,7 +53,7 @@ public sealed class FindRazorVulnerabilitiesService : IFindRazorVulnerabilitiesS
             if (document is null) continue;
 
             pagesAnalyzed++;
-            all.AddRange(RazorRules.Run(document)
+            all.AddRange(RazorRules.Run(document, partials.For(Path.GetDirectoryName(document.FilePath)))
                 .Where(finding => RazorRuleCatalog.IsSecurity(finding.Category)));
         }
 
@@ -88,7 +89,9 @@ public sealed class FindRazorVulnerabilitiesService : IFindRazorVulnerabilitiesS
             notes = new[]
             {
                 "HTML encoding protects text and attribute values, but not a <script> block, an inline handler or a javascript: URL — those are the sinks reported here.",
-                "Heuristic: values that flow through partials, view models or client-side JavaScript are not traced. A clean result is not a proof of safety.",
+                "Heuristic: a value that flows through a view model or client-side JavaScript is not traced. " +
+                "The anti-forgery check follows the partials a form renders, so a token that lives in a " +
+                "shared partial counts. A clean result is not a proof of safety.",
             },
         };
     }

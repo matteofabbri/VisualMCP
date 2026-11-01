@@ -122,7 +122,12 @@ public sealed class MarkupService : IMarkupService
         };
 
         var pages = analyses.Where(entry => entry.Analysis.Kind == "html").ToList();
-        var nodes = pages.SelectMany(entry => entry.Analysis.Nodes ?? []).ToList();
+
+        // One element index PER PAGE: a parent index and a sibling index are positions in that page's own
+        // list, so merging the pages would let one page's <div> parent another page's <span>.
+        var pageNodes = pages
+            .Select(entry => (IReadOnlyList<MarkupNode>)(entry.Analysis.Nodes ?? []))
+            .ToList();
 
         // A <style> block inside a page is a stylesheet too: its selectors and classes are attached to the
         // page's analysis, so they take part in the same match and the finding keeps the page's file.
@@ -132,13 +137,19 @@ public sealed class MarkupService : IMarkupService
 
         if (pages.Count > 0 && selectorSources.Count > 0)
         {
-            notes.Add("CSS0009 resolves only simple selectors (tag, .class, #id, tag.class) against the tag/class/id " +
-                      "index of the scanned pages, <style> blocks included; a combinator, an attribute, a " +
-                      "pseudo-class and the cascade are not resolved.");
+            notes.Add("CSS0009 resolves a selector against the tag/class/id/attribute index of the scanned pages " +
+                      "(<style> blocks included): a compound part with its classes, id, attribute conditions and " +
+                      "structural pseudo-classes (:root, :first-child, :last-child, :only-child, :empty), joined " +
+                      "by descendant, child, adjacent-sibling and general-sibling combinators. A selector whose " +
+                      "meaning only a browser can decide (:hover, :checked, :nth-child(), :has()) is indexed but " +
+                      "never reported; specificity and the cascade are not resolved.");
 
             foreach (var (file, selector) in selectorSources)
             {
-                if (nodes.Any(node => MarkupAnalyzer.Matches(node, selector))) continue;
+                // A dynamic pseudo-class is not a mismatch: the element may well be there in the state the
+                // stylesheet describes, and a finding here would be a false positive.
+                if (!selector.Checkable) continue;
+                if (pageNodes.Any(nodes => nodes.Any(node => MarkupAnalyzer.Matches(nodes, node, selector)))) continue;
                 AddIfSelected(UnmatchedSelector(file, selector));
             }
 
@@ -202,7 +213,7 @@ public sealed class MarkupService : IMarkupService
 
     private static MarkupFinding UnmatchedSelector(string file, CssSimpleSelector selector) =>
         new("CSS0009", "info", "Maintainability",
-            $"The selector '{selector.Text}' matches no tag, class or id in the scanned pages.",
+            $"The selector '{selector.Text}' matches no element (tag, class, id, attribute) in the scanned pages.",
             file, selector.Line, selector.Column, selector.Text,
             "Remove the rule, or check the spelling: a typo here is a style that never applies.");
 

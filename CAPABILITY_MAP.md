@@ -696,7 +696,7 @@ tail, data flow and the ⚠️ security query. **387 → 397 tools.**
 | Context action: StringBuilder, patterns, extension block | ✅ | `concat_to_stringbuilder` (declaration, appends and reads rewritten together), `merge_patterns` (`x is A \|\| x is B` → `x is A or B`, and the `&&`/`and` form), `convert_to_extension_block` (a static class of `this` methods becomes a C# 14 `extension(T receiver)` block) |
 | Create from usage: the constructor | ✅ | `create_from_usage` — CS1729 adds the missing constructor with the argument types of the `new` expression |
 | JavaScript / TypeScript source | ✅ | `js_files` (imports, exports, functions, classes, JSX, the relative imports resolved into a module graph with its cycles) and `analyze_js` (JS0001–JS0017) over masked source |
-| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates, distinct classes, simple selectors) and `analyze_markup` (HTML0001–HTML0015, CSS0001–CSS0009) with a quote-aware tag scanner; the simple selectors (tag, `.class`, `#id`, `tag.class`) are matched against the page index (CSS0009, HTML0015), the rest of the selector grammar is not resolved |
+| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates, distinct classes, selectors) and `analyze_markup` (HTML0001–HTML0015, CSS0001–CSS0009) with a quote-aware tag scanner; a selector resolves against the page index — compound parts with tag, classes, id, attribute conditions and structural pseudo-classes, joined by descendant/child/sibling combinators (CSS0009, HTML0015). A selector with a dynamic pseudo-class is indexed but never reported; specificity and the cascade are not resolved |
 | YAML | ✅ | `yaml_files` (documents, top-level keys, `kind`/`apiVersion`/`metadata.name`) and `analyze_yaml` (YAML0001–YAML0012, including the manifest identity and container checks) |
 | F# | ✅ | `fsharp_files` (modules, types, functions, opens) and `analyze_fsharp` (FS0001–FS0010); no semantic model — the scanner resolves nothing |
 
@@ -774,6 +774,31 @@ checklist tools stop writing a Markdown file.
 
 ---
 
+## 25. Visual Basic: the refactoring tail (2026-11-01)
+
+The last C#-shaped surface of gap-inventory section 1.2 narrows. No new tool — six refactorings learn
+VB's own spelling of the same operation, each previewed, compiler-gated and recorded in the edit
+history. **416 tools (unchanged).**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Extract interface on a `.vb` class | ✅ | `VbExtractInterface`: the interface is written in VB's vocabulary (`Interface`, `ReadOnly`/`WriteOnly Property`, `Function`/`Sub`, `Event`) and the class is patched the way VB requires — an `Implements IName` **statement in the class body** (not on the `Class` line) plus `Implements IName.Member` on every member, or the file would not compile |
+| Extract method on a `.vb` method | ✅ | `VbExtractMethod`: a contiguous block becomes a private `Sub`/`Function` right after the method it came from; the locals and parameters the block reads become its parameters; a local declared inside and read after it, a jump, or a write to a parameter refuse the operation |
+| Move type to its own file | ✅ | `VbMoveType`: the declaration keeps the source file's `Imports` and the namespace it was declared in; a project that lists its files explicitly is refused |
+| Move to folder | ✅ | `MoveToFolderService` reads a VB `Namespace` block (or the project's root namespace) to derive the folder |
+| Property → auto-property | ✅ | `VbPropertyToAuto`: a `Get` that returns a field and a `Set` that assigns it become `Public Property X As T` (the initializer moves onto the property) and the field is dropped; a field used anywhere else refuses |
+| Function → property | ✅ | `VbFunctionToProperty`: a parameterless `Function` becomes `ReadOnly Property X As T` with the old body in `Get`; both VB call spellings — `GetCount()` and `GetCount` — are rewritten, and an `AddressOf` use refuses |
+
+VB's own syntax drives three of the traps: a block **is** a `StatementSyntax`, so the `Implements`
+clause has to go on the statement the block opens with; the newline after a header is the *trailing*
+trivia of the previous token, so a rebuilt block writes its own; and `Implements` on a class is a body
+statement, not part of the `Class` line.
+
+What stays C#-only is the declaration-shape tail: `extract_class`/`extract_superclass`, the inline
+family, the move family beyond `move_type`/`move_to_folder`, and the indexer conversions.
+
+---
+
 ## Summary by Category
 
 
@@ -811,7 +836,7 @@ and formatting, the "create" family, the inspection baseline, seven analyses), t
 `launch_settings`, `publish_profile`, `nuget_sources`), the **10 of section 19** (`trace_data_flow`,
 `find_throw_sites`, `js_files`, `analyze_js`, `markup_files`, `analyze_markup`, `yaml_files`,
 `analyze_yaml`, `fsharp_files`, `analyze_fsharp`) or `commit_lint` (section 20), nor `disk_usage`
-(section 21), nor the board pair of section 22. The live count is `capability_report`: **411 tools**.
+(section 21), nor the board pair of section 22. The live count is `capability_report`: **416 tools**.
 
 ---
 
@@ -828,10 +853,10 @@ What remains, in order of impact:
 
 | ReSharper / Rider feature | Priority | State |
 |---------------------------|:---:|-------|
-| Interactive debugger (breakpoints, stepping, watch, evaluate, debugging a test) | 🔴 High | ✅ closed on 2026-10-30: 16 `debug_*` tools on netcoredbg (DAP), `debug_test` included; edit-and-continue and breakpoints by exception type remain outside |
-| Language/platform scope: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Medium | ⚠️ closed on 2026-10-31 for XAML (dialect detection, inventory, XAML0001–0015 with the binding paths validated against their data type, the binding inspector, the element tree, navigation and four verified edits), Razor, SQL (SQL0001–SQL0010 scanner), EF migrations (`ef_migrations`), Kubernetes/Helm (`k8s_*`) and the Node toolchain (npm/pnpm/yarn, tsc, eslint). **JS/TS** (toolchain only) and **F#** (build/test only: it is not a Roslyn language) remain without a semantic model |
+| Interactive debugger (breakpoints, stepping, watch, evaluate, debugging a test) | 🔴 High | ✅ closed on 2026-11-01: 20 `debug_*` tools on netcoredbg (DAP), `debug_test` included — line, function and data breakpoints, per-exception-type filters with the stopped exception's details, Set Value through `debug_evaluate newValue`, hit conditions counted by the server, and `debug_restart` with a rebuild. Edit-and-continue/hot reload is the one boundary: the adapter applies metadata deltas only over GDB/MI ([limits](docs/reference/limits.md#debugger)) |
+| Language/platform scope: **XAML/WPF/WinUI/MAUI/Avalonia**, **JS/TS/HTML/CSS**, **SQL/EF Core migrations**, **Kubernetes/Helm**, **F#** | 🟡 Medium | ⚠️ closed on 2026-10-31 for XAML (dialect detection, inventory, XAML0001–0015 with the binding paths validated against their data type, the binding inspector, the element tree, navigation and four verified edits), Razor, SQL (SQL0001–SQL0010 scanner), EF migrations (`ef_migrations`, with `diff` between two migrations since 2026-11-01), Kubernetes/Helm (`k8s_*`, with an offline kustomize render and a confirmed exec since 2026-11-01) and the Node toolchain (npm/pnpm/yarn, tsc, eslint). **JS/TS** (toolchain only) and **F#** (build/test only: it is not a Roslyn language) remain without a semantic model |
 | Test flow: debugging a test, continuous testing, "which tests cover this symbol", scaffolding, mutation testing | 🟡 Medium | ✅ closed: `run_test`, `rerun_failed`, `debug_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `run_affected_tests`, `find_flaky_tests` |
-| Decompiled code as a workspace (go-to-definition, find usages) and IL view | 🟡 Medium | ✅ closed for navigation: `assembly_workspace` (search/source/references/outline over a Roslyn workspace per MVID) + `disassemble` for IL; rename and debugging in decompiled code remain impossible (there is no source to write) |
+| Decompiled code as a workspace (go-to-definition, find usages) and IL view | 🟡 Medium | ✅ closed for navigation: `assembly_workspace` (search/source/il/references/outline over a Roslyn workspace per MVID) + `disassemble` for IL; `action=il` links the decompiled symbol and its IL. Rename and debugging in decompiled code remain impossible (there is no source to write) |
 | Diagrams and exploration: interactive type/project graph, sequence diagram, structure view, code vision, TODO explorer | 🟢 Low | ⚠️ `export_dependency_graph` (projects/namespaces/types), `call_graph`, `sequence_diagram`, `control_flow_graph`, `track_value`, `find_todos`, `find_endpoints`, `solution_map` and `find_file` exist; rendering is the client's job |
 | Rest of the "create/generate" family and context actions: long tail and live/postfix/file templates | 🟡 Medium | ⚠️ `context_action` covers 26 ids; `implement_members`, `create_from_usage`, `generate_docs`, `generate_dto_from_json`, `generate_builder` cover the frequent cases; templates and the long tail remain |
 | Inspection administration (per-scope severity, suppressions, `.DotSettings`, daemon with warm compilation) | 🟡 Medium | ✅ closed: `configure_inspection`, `suppress_finding`, `read_dot_settings`, `custom_inspections`, `naming_rules`, `find_spelling_issues`, `background_analysis`/`analysis_findings`; only ReSharper's proprietary catalogue remains outside |

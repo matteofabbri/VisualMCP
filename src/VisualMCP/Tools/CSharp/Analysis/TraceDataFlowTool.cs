@@ -16,8 +16,9 @@ public static class TraceDataFlowTool
         "the sink with its CWE, and the path of assignments and calls between them. `depth` follows taint into " +
         "the in-solution methods it is passed to, so a value that is validated in the action and used in a " +
         "repository is still one flow. Sanitizers (parsed numbers, GUIDs, Path.GetFileName, encoded strings) stop " +
-        "a flow; a value parked in a field, a database or a queue is not followed, and the answer says so. " +
-        "Read-only.")]
+        "a flow. A field is followed across methods and objects, keyed by its declaration rather than by the " +
+        "instance, so writing one instance's field taints every instance's; a property, a database and a queue " +
+        "are not followed, and the answer says so. Read-only.")]
     public static Task<object> TraceDataFlow(
         ITraceDataFlowService svc,
         [Description("Optional: only this project (exact name from the loaded solution).")] string? projectName = null,

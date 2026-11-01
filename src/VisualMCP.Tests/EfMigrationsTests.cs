@@ -28,4 +28,14 @@ public sealed class EfMigrationsTests
         Assert.Equal(["ef", "dbcontext", "info"], EfMigrationsService.CommandArguments("info", null, null));
         Assert.Equal(["ef", "dbcontext", "list"], EfMigrationsService.CommandArguments("dbcontext-list", null, null));
     }
+
+    [Fact]
+    public void Diff_is_a_script_between_two_migrations()
+    {
+        Assert.Equal(["ef", "migrations", "script", "0", "Latest"],
+            EfMigrationsService.CommandArguments("diff", null, null, "0", "Latest"));
+
+        Assert.Equal(["ef", "migrations", "script", "From", "--output", "delta.sql"],
+            EfMigrationsService.CommandArguments("diff", null, "delta.sql", "From"));
+    }
 }

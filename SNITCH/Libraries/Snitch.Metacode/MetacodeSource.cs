@@ -97,15 +97,22 @@ public sealed class MetacodeSource
     public static MetacodeSource FromRazor(string text, string? path = null) =>
         new(text, path, MetacodeLanguage.Razor, null);
 
+    /// <summary>
+    /// Java source text — what <see cref="Decompilation.JadxService"/> writes when it decompiles a
+    /// .class/.dex/.jar/.apk, and what a Java project's own .java file contains.
+    /// </summary>
+    public static MetacodeSource FromJava(string text, string? path = null) =>
+        new(text, path, MetacodeLanguage.Java, null);
+
     public static MetacodeSource FromText(string text, MetacodeLanguage language, string? path = null) =>
         new(text, path, language, null);
 
     /// <summary>
     /// Reads a file and infers the source language from the extension: <c>.cs</c>, <c>.vb</c>,
-    /// <c>.cshtml</c>/<c>.razor</c> and the canonical-pseudocode extensions. A <c>.json</c> file is sniffed
-    /// for a Ghidra snapshot (an image base plus a function list) and nothing else. A Python or clang AST
-    /// dump has no extension to infer it from — pass <see cref="FromPythonAst"/> or <see cref="FromCppAst"/>
-    /// — and whoever wants to read one builds a translator with the matching reader.
+    /// <c>.java</c>, <c>.cshtml</c>/<c>.razor</c> and the canonical-pseudocode extensions. A <c>.json</c>
+    /// file is sniffed for a Ghidra snapshot (an image base plus a function list) and nothing else. A
+    /// Python or clang AST dump has no extension to infer it from — pass <see cref="FromPythonAst"/> or
+    /// <see cref="FromCppAst"/> — and whoever wants to read one builds a translator with the matching reader.
     /// </summary>
     public static MetacodeSource FromFile(string path)
     {
@@ -117,6 +124,8 @@ public sealed class MetacodeSource
                 return FromCSharp(text, path);
             case ".vb":
                 return FromVisualBasic(text, path);
+            case ".java":
+                return FromJava(text, path);
             case ".mc" or ".pseudo" or ".metacode":
                 return FromPseudocode(text, path);
             case ".cshtml" or ".razor":

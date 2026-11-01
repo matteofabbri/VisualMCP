@@ -100,11 +100,13 @@ Safety:
 
 ### Razor limits
 
-- It is a **heuristic** analysis: no data flow. A value that arrives from a partial, a view model or
-  JavaScript is not tracked. A clean result is not a security proof.
+- It is a **heuristic** analysis: no data flow. A value that arrives from a view model or JavaScript is not
+  tracked. A clean result is not a security proof.
 - Markup inside `@{ … }` and `@code { … }` is not descended: that is C#.
-- Duplicate ids and anti-forgery tokens are checked **per file**. A token in a partial rendered inside the
-  form can still be reported by `RZ1005`.
+- `RZ1005` resolves the partials a form renders (`<partial name=…>`, `@Html.Partial("…")`, the
+  `RenderPartial` family) and looks for the token inside them, nested includes included. The search is
+  textual, so a token built by a helper the rule does not name can still be reported, and a partial it
+  cannot resolve counts as having no token. Duplicate ids are checked per file.
 - Dynamic values (`method="@Model.Method"`) are not guessed: rules that depend on them stay silent.
 - Files over 2 MB and unreadable folders are reported as `skipped`/`unreadable`, not analysed.
 
