@@ -163,7 +163,7 @@ public sealed class DebuggingTests
                 .Select(v => v.GetProperty("name").GetString()).ToList();
             Assert.Contains("total", names);
 
-            var evaluate = ResultAssert.Json(await debugger.EvaluateAsync(sessionId, "total * 2", null, null));
+            var evaluate = ResultAssert.Json(await debugger.EvaluateAsync(sessionId, "total * 2", null, null, null));
             Assert.Equal("12", evaluate.GetProperty("result").GetString());
 
             var continued = ResultAssert.Json(await debugger.ContinueAsync(sessionId, null, 30));
@@ -176,6 +176,209 @@ public sealed class DebuggingTests
         {
             try { Directory.Delete(directory, recursive: true); } catch (IOException) { /* best effort */ }
         }
+    }
+
+    // ── hit conditions, data breakpoints, value edits, exception types ───────
+    [Theory]
+    [InlineData(">5", 6, true)]
+    [InlineData(">5", 5, false)]
+    [InlineData("5", 5, true)]
+    [InlineData("5", 4, false)]
+    [InlineData(">=2", 2, true)]
+    [InlineData("<=2", 3, false)]
+    [InlineData("%3", 6, true)]
+    [InlineData("%3", 7, false)]
+    [InlineData("", 1, true)]
+    [InlineData("not a number", 1, true)]
+    public void HitCondition_SpeaksTheDapSyntax(string condition, int count, bool expected) =>
+        Assert.Equal(expected, DebuggerService.HitConditionSatisfied(condition, count));
+
+    [Fact]
+    public async Task DataBreakpoints_ResolveEveryWriteSiteOfAField()
+    {
+        const string source = """
+            namespace Demo;
+
+            internal sealed class Counter
+            {
+                public int Total = 5;
+
+                public void Add(int value)
+                {
+                    Total += value;
+                    Total = Total * 2;
+                    Total++;
+                }
+
+                public int Read() => Total;
+            }
+            """;
+
+        using var workspace = FakeWorkspace.Create(("Counter.cs", source));
+        var solution = await workspace.EnsureSolutionLoadedAsync();
+
+        var (breakpoint, error) = await DataBreakpointResolver.ResolveAsync(
+            solution!, workspace.PathOf("Counter.cs"), 5, "Total");
+
+        Assert.Null(error);
+        Assert.NotNull(breakpoint);
+        Assert.Equal("Total", breakpoint!.Member);
+        Assert.Equal(
+            new[] { (5, "initializer"), (9, "compound-assignment"), (10, "assignment"), (11, "increment") },
+            breakpoint.Sites.Select(site => (site.Line, site.Kind)).ToArray());
+
+        // A read is not a write site.
+        Assert.DoesNotContain(breakpoint.Sites, site => site.Line == 14);
+
+        var (parameter, parameterError) = await DataBreakpointResolver.ResolveAsync(
+            solution!, workspace.PathOf("Counter.cs"), 7, "value");
+        Assert.Null(parameter);
+        Assert.Contains("Parameter", parameterError);
+
+        var (missing, missingError) = await DataBreakpointResolver.ResolveAsync(
+            solution!, workspace.PathOf("Counter.cs"), 5, "Nope");
+        Assert.Null(missing);
+        Assert.Contains("neither declared nor used", missingError);
+    }
+
+    [Fact]
+    public async Task Debugger_HitConditionsWriteSitesValueEditsExceptionTypesAndRestart()
+    {
+        var adapter = new NetCoreDbgTool(new DebugOptions()).Locate();
+        if (adapter is null)
+            return; // netcoredbg is optional here: debug_install downloads it
+
+        const string program = """
+            using Demo;
+            using System;
+
+            var counter = new Counter();
+            for (var i = 1; i <= 3; i++)
+            {
+                counter.Add(i);
+            }
+
+            try
+            {
+                throw new InvalidOperationException("boom");
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            Console.WriteLine($"total={counter.Total}");
+            """;
+
+        const string counter = """
+            namespace Demo;
+
+            internal sealed class Counter
+            {
+                public int Total;
+
+                public void Add(int value) => Total += value;
+            }
+            """;
+
+        // The same folder is the solution the tools read and the project that is built, so the
+        // document path Roslyn sees is the path the adapter reports.
+        using var workspace = FakeWorkspace.Create(("Program.cs", program), ("Counter.cs", counter));
+        var directory = workspace.RootDirectory;
+        await File.WriteAllTextAsync(Path.Combine(directory, "Demo.csproj"),
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0</TargetFramework>
+                <Nullable>enable</Nullable>
+                <ImplicitUsings>enable</ImplicitUsings>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var build = await RunAsync("dotnet", ["build", Path.Combine(directory, "Demo.csproj"), "-c", "Debug"], directory);
+        Assert.True(build.ExitCode == 0, build.Output);
+        var assembly = Directory.EnumerateFiles(Path.Combine(directory, "bin"), "Demo.dll", SearchOption.AllDirectories).First();
+
+        var debugger = new DebuggerService(workspace, new DebugOptions());
+        var breakpoint = new BreakpointSpec { File = workspace.PathOf("Program.cs"), Line = 7, HitCondition = "%2" };
+
+        var launch = ResultAssert.Json(await debugger.LaunchAsync(
+            assembly, null, null, directory, null, stopAtEntry: false, [breakpoint], waitForStopSeconds: 60));
+        if (launch.GetProperty("state").GetString() != "stopped")
+        {
+            await debugger.TerminateAsync(launch.GetProperty("sessionId").GetString()!);
+            launch = ResultAssert.Json(await debugger.LaunchAsync(
+                assembly, null, null, directory, null, stopAtEntry: false, [breakpoint], waitForStopSeconds: 60));
+        }
+
+        Assert.Equal("stopped", launch.GetProperty("state").GetString());
+        Assert.EndsWith("Program.cs:7", launch.GetProperty("stopLocation").GetString());
+
+        // The first hit was absorbed: %2 means the second one stops.
+        Assert.Equal(1, launch.GetProperty("hitConditionSkips").GetInt32());
+
+        var sessionId = launch.GetProperty("sessionId").GetString()!;
+        var iteration = ResultAssert.Json(await debugger.EvaluateAsync(sessionId, "i", null, null, null));
+        Assert.Equal("2", iteration.GetProperty("result").GetString());
+
+        var data = ResultAssert.Json(await debugger.SetDataBreakpointsAsync(
+            sessionId, workspace.PathOf("Counter.cs"), 5, "Total", clear: false));
+        ResultAssert.Succeeded(data);
+        Assert.Contains(data.GetProperty("sites").EnumerateArray(), site =>
+            site.GetProperty("line").GetInt32() == 7 &&
+            site.GetProperty("kind").GetString()!.Contains("compound-assignment"));
+
+        var atWrite = ResultAssert.Json(await debugger.ContinueAsync(sessionId, null, 30));
+        Assert.Equal("stopped", atWrite.GetProperty("state").GetString());
+        Assert.Equal("breakpoint", atWrite.GetProperty("stopReason").GetString());
+        Assert.EndsWith("Counter.cs:7", atWrite.GetProperty("stopLocation").GetString());
+
+        // The stop is inside Counter.Add, where the member is reached as this.Total.
+        var before = ResultAssert.Json(await debugger.EvaluateAsync(sessionId, "this.Total", null, null, null));
+        Assert.Equal("1", before.GetProperty("result").GetString());
+
+        var assigned = ResultAssert.Json(await debugger.EvaluateAsync(sessionId, "this.Total", null, null, "41"));
+        Assert.True(assigned.GetProperty("assigned").GetBoolean());
+        Assert.Equal("41", assigned.GetProperty("result").GetString());
+
+        var exceptions = ResultAssert.Json(await debugger.SetExceptionBreakpointsAsync(sessionId, ["all"],
+            ["System.InvalidOperationException"], details: false));
+        ResultAssert.Succeeded(exceptions);
+        Assert.Contains("System.InvalidOperationException", exceptions.GetProperty("exceptionTypes").EnumerateArray()
+            .Select(type => type.GetString()));
+
+        ResultAssert.Succeeded(await debugger.SetDataBreakpointsAsync(
+            sessionId, workspace.PathOf("Counter.cs"), 5, "Total", clear: true));
+
+        var onException = ResultAssert.Json(await debugger.ContinueAsync(sessionId, null, 30));
+        Assert.Equal("stopped", onException.GetProperty("state").GetString());
+        Assert.Equal("exception", onException.GetProperty("stopReason").GetString());
+        Assert.Contains("InvalidOperationException",
+            onException.GetProperty("exception").GetProperty("type").GetString());
+
+        // With no setting to change, the tool answers what is stopped.
+        var described = ResultAssert.Json(await debugger.SetExceptionBreakpointsAsync(sessionId, null, null, details: true));
+        Assert.Contains("InvalidOperationException",
+            described.GetProperty("exception").GetProperty("id").GetString());
+
+        var exit = ResultAssert.Json(await debugger.ContinueAsync(sessionId, null, 30));
+        Assert.Equal("exited", exit.GetProperty("state").GetString());
+        Assert.Contains(exit.GetProperty("output").EnumerateArray(),
+            line => line.GetString()!.Contains("total=46"));
+
+        // Restart rebuilds and carries the breakpoints over: a new session stops at the same line.
+        var restart = ResultAssert.Json(await debugger.RestartAsync(sessionId, rebuild: true));
+        ResultAssert.Succeeded(restart);
+        Assert.True(restart.GetProperty("build").GetProperty("rebuilt").GetBoolean(), restart.GetRawText());
+
+        var restarted = restart.GetProperty("sessionId").GetString();
+        Assert.NotNull(restarted);
+        Assert.NotEqual(sessionId, restarted);
+        Assert.Equal("stopped", restart.GetProperty("session").GetProperty("state").GetString());
+        Assert.EndsWith("Program.cs:7", restart.GetProperty("session").GetProperty("stopLocation").GetString());
+
+        await debugger.TerminateAsync(restarted!);
     }
 
     private static async Task<(int ExitCode, string Output)> RunAsync(string file, string[] arguments, string directory)

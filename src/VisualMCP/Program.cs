@@ -142,11 +142,17 @@ static async Task RunServerAsync(string[] args)
         "(debug_status says whether it is there; a few MB from the Samsung release); start a built .dll or a " +
         "project -> debug_launch (breakpoints can be set in the same call and the call waits for the first stop); " +
         "attach to an already-running pid -> debug_attach; set/replace one file's breakpoints -> debug_breakpoints " +
-        "(reports verified vs unverified lines); advance -> debug_continue, debug_step (over|into|out), debug_pause; " +
+        "(line + condition + hit count, which this server enforces; reports verified vs unverified lines), a method " +
+        "by name -> debug_function_breakpoints, or a field/property's every write site -> debug_data_breakpoints; " +
+        "advance -> debug_continue, debug_step (over|into|out), debug_pause; " +
         "read -> debug_stack (file:line), debug_variables (Locals/Arguments/Autos, depth for members), " +
-        "debug_evaluate (watch expression), debug_threads, debug_output; break on exceptions -> debug_exceptions; " +
+        "debug_evaluate (watch expression — pass newValue to WRITE it into the running process), debug_threads, " +
+        "debug_output; break on exceptions -> debug_exceptions (filters all|user-unhandled, narrowed to named types; " +
+        "with no arguments it returns the stopped exception's type and stage); after editing and rebuilding the " +
+        "source -> debug_restart rebuild=true (same program, same breakpoints, new session); " +
         "close -> debug_terminate; list live sessions -> debug_sessions. Sessions survive across calls, so a stop " +
-        "that happened between two calls is still there.\n" +
+        "that happened between two calls is still there. Edit-and-continue/hot reload is not available: the adapter " +
+        "applies metadata deltas only over GDB/MI.\n" +
         "- Run the configured Roslyn analyzers (StyleCop/Roslynator/.NET analyzers) and get their diagnostics -> run_code_analysis.\n" +
         "- Run BenchmarkDotNet benchmarks and get the summary table -> run_benchmarks; benchmark an arbitrary snippet without writing a [Benchmark] class -> quick_benchmark.\n" +
         "- Run a build/export/packaging script or any shell command — PowerShell, pwsh, cmd or bash (incl. nested shells, pipes, grep/sed, redirection, or commands too long for the normal shell) -> run_command.\n" +

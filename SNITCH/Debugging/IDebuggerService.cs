@@ -28,6 +28,18 @@ public interface IDebuggerService
     /// <summary>Replace the breakpoints of one source file (clear: remove them all).</summary>
     Task<object> SetBreakpointsAsync(string sessionId, string file, BreakpointSpec[]? breakpoints, bool clear);
 
+    /// <summary>
+    /// Replace the function breakpoints (break on a method by name). The adapter has a single
+    /// function-breakpoint set, so this replaces the whole set rather than one name.
+    /// </summary>
+    Task<object> SetFunctionBreakpointsAsync(string sessionId, FunctionBreakpointSpec[]? breakpoints, bool clear);
+
+    /// <summary>
+    /// Break wherever the solution's source writes a member: the write sites are resolved by Roslyn
+    /// and installed as line breakpoints (the adapter has no data-breakpoint request).
+    /// </summary>
+    Task<object> SetDataBreakpointsAsync(string sessionId, string file, int line, string member, bool clear);
+
     /// <summary>Continue, then wait up to <paramref name="timeoutSeconds"/> for the next stop or exit.</summary>
     Task<object> ContinueAsync(string sessionId, int? threadId, int timeoutSeconds);
 
@@ -46,17 +58,32 @@ public interface IDebuggerService
     /// <summary>Locals/Autos/Arguments of a frame, with one level of object expansion.</summary>
     Task<object> VariablesAsync(string sessionId, int? frameId, string? scope, int maxVariables, int depth);
 
-    /// <summary>Evaluate a watch expression in the stopped frame.</summary>
-    Task<object> EvaluateAsync(string sessionId, string expression, int? frameId, string? context);
+    /// <summary>
+    /// Evaluate a watch expression in the stopped frame; with <paramref name="newValue"/> the
+    /// expression is assigned that value first (the adapter's <c>setExpression</c>).
+    /// </summary>
+    Task<object> EvaluateAsync(string sessionId, string expression, int? frameId, string? context,
+        string? newValue);
 
-    /// <summary>Break on exceptions: "all", "user-unhandled" (the .NET adapter filters).</summary>
-    Task<object> SetExceptionBreakpointsAsync(string sessionId, string[] filters);
+    /// <summary>
+    /// Break on exceptions: the adapter filters are "all" (every throw) and "user-unhandled"; the
+    /// optional type conditions narrow them to named exception types (<c>!Type</c> excludes one).
+    /// <paramref name="details"/> reads the stopped exception instead of changing the settings.
+    /// </summary>
+    Task<object> SetExceptionBreakpointsAsync(string sessionId, string[]? filters, string[]? exceptionTypes,
+        bool details);
 
     /// <summary>The console output the debuggee produced so far.</summary>
     Task<object> OutputAsync(string sessionId, int lines);
 
     /// <summary>End a session, terminating the debuggee.</summary>
     Task<object> TerminateAsync(string sessionId);
+
+    /// <summary>
+    /// Relaunch a launched session with the same program, arguments, environment and breakpoints —
+    /// optionally rebuilding its project first. A new session id replaces the old one.
+    /// </summary>
+    Task<object> RestartAsync(string sessionId, bool rebuild);
 
     /// <summary>Every live session with its state.</summary>
     Task<object> SessionsAsync();

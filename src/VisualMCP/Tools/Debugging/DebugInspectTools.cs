@@ -43,12 +43,17 @@ public static class DebugInspectTools
     [McpServerTool(Name = "debug_evaluate"), Description(
         "Evaluate a watch expression in the stopped frame — a variable, a property chain, a method call the " +
         "adapter can run, e.g. 'order.Total' or 'items.Count'. Returns the value, its static type and, for an " +
-        "object, its members. This is the watch/data-tip window. The process must be stopped.")]
+        "object, its members. This is the watch/data-tip window. Pass newValue to WRITE into the running process " +
+        "instead (the Set Value action): the expression is assigned the value and the answer shows what it holds " +
+        "afterwards, so a breakpoint plus newValue changes state and debug_continue resumes with it. The process " +
+        "must be stopped.")]
     public static Task<object> DebugEvaluate(
         IDebuggerService debugger,
         [Description("Session id.")] string sessionId,
         [Description("The C# expression to evaluate.")] string expression,
         [Description("Frame id from debug_stack (default: the top frame of the stopped thread).")] int? frameId = null,
-        [Description("Evaluation context: watch (default), repl, hover.")] string? context = null)
-        => debugger.EvaluateAsync(sessionId, expression, frameId, context);
+        [Description("Evaluation context: watch (default), repl, hover.")] string? context = null,
+        [Description("Optional: a C# value expression (e.g. \"42\", \"\\\"text\\\"\", \"null\") assigned to the " +
+                     "expression before it is read back. This is the debugger's Set Value.")] string? newValue = null)
+        => debugger.EvaluateAsync(sessionId, expression, frameId, context, newValue);
 }

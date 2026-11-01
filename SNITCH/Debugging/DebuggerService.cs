@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Snitch.Workspace;
@@ -61,7 +62,11 @@ public sealed class DebuggerService : IDebuggerService
 
         var directory = ResolveWorkingDirectory(workingDirectory, target);
         var client = DapClient.StartProcess(adapter, ["--interpreter=vscode"], directory);
-        var session = new DebugSession(NextSessionId(), client, "launch") { Program = target };
+        var session = new DebugSession(NextSessionId(), client, "launch")
+        {
+            Program = target,
+            Launch = new LaunchSpec(target, programArgs, workingDirectory, environmentJson, stopAtEntry),
+        };
         _sessions[session.Id] = session;
         var breakpointReports = new List<object>();
 
@@ -99,12 +104,9 @@ public sealed class DebuggerService : IDebuggerService
             session.State = "running";
 
             if (waitForStopSeconds > 0)
-            {
-                var stop = await client.WaitForStopAsync(TimeSpan.FromSeconds(Math.Clamp(waitForStopSeconds, 1, 300)));
-                await ApplyStopAsync(session, stop);
-            }
+                await WaitForStopAsync(session, TimeSpan.FromSeconds(Math.Clamp(waitForStopSeconds, 1, 300)));
 
-            return Describe(session, breakpointReports);
+            return await DescribeAsync(session, breakpointReports);
         }
         catch (Exception ex)
         {
@@ -155,12 +157,9 @@ public sealed class DebuggerService : IDebuggerService
             session.State = "running";
 
             if (waitForStopSeconds > 0)
-            {
-                var stop = await client.WaitForStopAsync(TimeSpan.FromSeconds(Math.Clamp(waitForStopSeconds, 1, 300)));
-                await ApplyStopAsync(session, stop);
-            }
+                await WaitForStopAsync(session, TimeSpan.FromSeconds(Math.Clamp(waitForStopSeconds, 1, 300)));
 
-            return Describe(session, null);
+            return await DescribeAsync(session, null);
         }
         catch (Exception ex)
         {
@@ -187,12 +186,139 @@ public sealed class DebuggerService : IDebuggerService
             else
                 session.Breakpoints[full] = breakpoints ?? [];
 
+            ResetHitCounts(session, full);
             return await SendBreakpointsAsync(session, full);
         }
         catch (Exception ex)
         {
             return new { error = ex.Message, sessionId, file = full };
         }
+    }
+
+    public async Task<object> SetFunctionBreakpointsAsync(string sessionId, FunctionBreakpointSpec[]? breakpoints,
+        bool clear)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return NoSession(sessionId);
+
+        session.FunctionBreakpoints = clear
+            ? []
+            : (breakpoints ?? []).Where(spec => !string.IsNullOrWhiteSpace(spec.Name)).ToArray();
+
+        try
+        {
+            var payload = session.FunctionBreakpoints.Select(spec =>
+            {
+                var entry = new Dictionary<string, object?> { ["name"] = spec.Name.Trim() };
+                if (!string.IsNullOrWhiteSpace(spec.Condition)) entry["condition"] = spec.Condition;
+                return entry;
+            }).ToList();
+
+            var body = await session.Client.RequestAsync("setFunctionBreakpoints",
+                new Dictionary<string, object?> { ["breakpoints"] = payload }, TimeSpan.FromSeconds(15));
+
+            var verified = new List<object>();
+            var unverified = new List<object>();
+            if (body.ValueKind == JsonValueKind.Object &&
+                body.TryGetProperty("breakpoints", out var array) && array.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in array.EnumerateArray())
+                {
+                    var ok = item.TryGetProperty("verified", out var value) && value.ValueKind == JsonValueKind.True;
+                    var entry = new
+                    {
+                        id = Int(item, "id"),
+                        line = Int(item, "line"),
+                        file = SourcePath(item),
+                        verified = ok,
+                        message = Str(item, "message"),
+                    };
+                    (ok ? verified : unverified).Add(entry);
+                }
+            }
+
+            return new
+            {
+                sessionId,
+                requested = payload.Count,
+                verified,
+                unverified,
+                note = payload.Count == 0
+                    ? "The function-breakpoint set is now empty."
+                    : "A function breakpoint is set before the method is loaded: an unverified one names a method the " +
+                      "runtime has not reached yet, and it binds when the module loads.",
+            };
+        }
+        catch (Exception ex)
+        {
+            return new { error = ex.Message, sessionId };
+        }
+    }
+
+    public async Task<object> SetDataBreakpointsAsync(string sessionId, string file, int line, string member,
+        bool clear)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return NoSession(sessionId);
+
+        if (clear)
+        {
+            var removed = session.DataBreakpoints.Values
+                .Where(data => string.IsNullOrWhiteSpace(member) ||
+                               string.Equals(data.Member, member.Trim(), StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (removed.Length == 0) return new { error = $"No data breakpoint is set on '{member}'.", sessionId };
+
+            foreach (var data in removed) session.DataBreakpoints.TryRemove(data.Member, out _);
+
+            var restored = new List<object>();
+            foreach (var affected in removed.SelectMany(data => data.Sites)
+                         .Select(site => site.File)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                ResetHitCounts(session, affected);
+                restored.Add(await SendOrReportAsync(session, affected));
+            }
+
+            return new { sessionId, cleared = removed.Select(data => data.Member).ToArray(), breakpoints = restored };
+        }
+
+        if (string.IsNullOrWhiteSpace(file)) return new { error = "A source file is required." };
+        if (string.IsNullOrWhiteSpace(member))
+            return new { error = "A member (field or property) name is required." };
+        if (line <= 0) return new { error = "A 1-based line where the member appears is required." };
+
+        var full = ResolveFile(file, BaseDirectory())!;
+
+        var solution = await _workspace.EnsureSolutionLoadedAsync();
+        if (solution is null)
+            return new
+            {
+                error = "No solution is loaded, so the member's write sites cannot be resolved: pass a file that belongs to it.",
+                sessionId,
+            };
+
+        var (breakpoint, error) = await DataBreakpointResolver.ResolveAsync(solution, full, line, member.Trim());
+        if (breakpoint is null) return new { error, sessionId };
+
+        session.DataBreakpoints[breakpoint.Member] = breakpoint;
+
+        var reports = new List<object>();
+        foreach (var affected in breakpoint.Sites.Select(site => site.File).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            ResetHitCounts(session, affected);
+            reports.Add(await SendOrReportAsync(session, affected));
+        }
+
+        return new
+        {
+            sessionId,
+            member = breakpoint.Member,
+            symbol = breakpoint.Symbol,
+            sites = breakpoint.Sites.Select(site => new { file = site.File, line = site.Line, kind = site.Kind }),
+            count = breakpoint.Sites.Length,
+            breakpoints = reports,
+            note = "The adapter has no data-breakpoint request, so these are the solution's write sites for the member, " +
+                   "installed as line breakpoints: a write from code outside the solution's source does not stop.",
+        };
     }
 
     // ── running ──────────────────────────────────────────────────────────────
@@ -224,9 +350,8 @@ public sealed class DebuggerService : IDebuggerService
             await session.Client.RequestAsync("pause",
                 new Dictionary<string, object?> { ["threadId"] = thread }, Short);
 
-            var stop = await session.Client.WaitForStopAsync(TimeSpan.FromSeconds(10), session.LastStopSequence);
-            await ApplyStopAsync(session, stop);
-            return Describe(session, null);
+            await WaitForStopAsync(session, TimeSpan.FromSeconds(10));
+            return await DescribeAsync(session, null);
         }
         catch (Exception ex)
         {
@@ -343,7 +468,8 @@ public sealed class DebuggerService : IDebuggerService
         }
     }
 
-    public async Task<object> EvaluateAsync(string sessionId, string expression, int? frameId, string? context)
+    public async Task<object> EvaluateAsync(string sessionId, string expression, int? frameId, string? context,
+        string? newValue)
     {
         if (!_sessions.TryGetValue(sessionId, out var session)) return NoSession(sessionId);
         if (string.IsNullOrWhiteSpace(expression)) return new { error = "An expression is required." };
@@ -351,6 +477,21 @@ public sealed class DebuggerService : IDebuggerService
         try
         {
             var frame = frameId ?? await TopFrameIdAsync(session);
+
+            string? assignedValue = null;
+            if (newValue is not null)
+            {
+                var assignment = new Dictionary<string, object?>
+                {
+                    ["expression"] = expression,
+                    ["value"] = newValue,
+                };
+                if (frame is int assignmentFrame) assignment["frameId"] = assignmentFrame;
+
+                var assigned = await session.Client.RequestAsync("setExpression", assignment, Short);
+                assignedValue = Str(assigned, "value") ?? newValue;
+            }
+
             var arguments = new Dictionary<string, object?>
             {
                 ["expression"] = expression,
@@ -365,11 +506,16 @@ public sealed class DebuggerService : IDebuggerService
             {
                 sessionId,
                 expression,
+                assigned = assignedValue is not null,
+                newValue = assignedValue,
                 result = Str(body, "result"),
                 type = Str(body, "type"),
                 frameId = frame,
                 expandable = reference > 0,
                 variables = reference > 0 ? await ReadVariablesAsync(session, reference, 50, 1) : null,
+                note = assignedValue is null
+                    ? null
+                    : $"'{expression}' was written into the running process: the value above is what it holds now.",
             };
         }
         catch (Exception ex)
@@ -378,26 +524,69 @@ public sealed class DebuggerService : IDebuggerService
         }
     }
 
-    public async Task<object> SetExceptionBreakpointsAsync(string sessionId, string[] filters)
+    public async Task<object> SetExceptionBreakpointsAsync(string sessionId, string[]? filters,
+        string[]? exceptionTypes, bool details)
     {
         if (!_sessions.TryGetValue(sessionId, out var session)) return NoSession(sessionId);
 
+        var wantedFilters = (filters ?? []).Where(filter => !string.IsNullOrWhiteSpace(filter)).ToArray();
+        var wantedTypes = (exceptionTypes ?? []).Where(type => !string.IsNullOrWhiteSpace(type)).ToArray();
+        if (wantedFilters.Length == 0 && wantedTypes.Length == 0)
+        {
+            // Nothing to configure: answer the question a caller actually asks here — what was thrown.
+            var current = await ReadExceptionInfoAsync(session);
+            return new
+            {
+                sessionId,
+                state = session.State,
+                exception = current ?? (object)new
+                {
+                    available = false,
+                    reason = "The process is not stopped on an exception. Pass filters (\"all\", \"user-unhandled\") " +
+                             "or exceptionTypes to change the settings instead.",
+                },
+                configured = new { filters = session.ExceptionFilters, exceptionTypes = session.ExceptionTypes },
+            };
+        }
+
         try
         {
-            var body = await session.Client.RequestAsync("setExceptionBreakpoints",
-                new Dictionary<string, object?> { ["filters"] = filters ?? [] }, Short);
+            var arguments = new Dictionary<string, object?>();
+            if (wantedFilters.Length > 0) arguments["filters"] = wantedFilters;
+
+            if (wantedTypes.Length > 0)
+            {
+                // A type condition belongs to a filter: it narrows when that filter breaks. The first
+                // filter named is the one that carries them, "all" (every throw) by default.
+                var filterId = wantedFilters.FirstOrDefault() ?? "all";
+                arguments["filterOptions"] = wantedTypes
+                    .Select(type => new Dictionary<string, object?> { ["filterId"] = filterId, ["condition"] = type })
+                    .ToArray();
+            }
+
+            var body = await session.Client.RequestAsync("setExceptionBreakpoints", arguments, Short);
+
+            session.ExceptionFilters = wantedFilters;
+            session.ExceptionTypes = wantedTypes;
+
+            var exception = details ? await ReadExceptionInfoAsync(session) : null;
 
             return new
             {
                 sessionId,
-                filters = filters ?? [],
+                filters = wantedFilters,
+                exceptionTypes = wantedTypes,
                 breakpoints = body.ValueKind == JsonValueKind.Object &&
                               body.TryGetProperty("breakpoints", out var array) && array.ValueKind == JsonValueKind.Array
                     ? array.EnumerateArray()
                         .Select(item => (object)new { verified = item.TryGetProperty("verified", out var v) && v.ValueKind == JsonValueKind.True, message = Str(item, "message") })
                         .ToList()
                     : new List<object>(),
-                note = "The .NET adapter understands 'all' and 'user-unhandled'.",
+                exception,
+                note = wantedTypes.Length > 0
+                    ? "A type condition matches the exception's full type name exactly (System.NullReferenceException); " +
+                      "prefix ! to exclude it. Base classes are not matched: name each type you want."
+                    : "The adapter understands 'all' (every throw) and 'user-unhandled'; add exceptionTypes to narrow them.",
             };
         }
         catch (Exception ex)
@@ -436,6 +625,77 @@ public sealed class DebuggerService : IDebuggerService
         };
     }
 
+    /// <summary>
+    /// Relaunch a launched session: the same program, arguments and environment, the same breakpoints,
+    /// function breakpoints and exception settings. The restart is the edit → build → run loop in the
+    /// absence of edit-and-continue, which this adapter only offers over GDB/MI.
+    /// </summary>
+    public async Task<object> RestartAsync(string sessionId, bool rebuild)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return NoSession(sessionId);
+
+        var launch = session.Launch;
+        if (launch is null)
+            return new
+            {
+                error = $"Session '{sessionId}' attached to a running process: there is no launcher to repeat.",
+                hint = "Restart the process where it was started, then debug_attach again.",
+            };
+
+        var breakpoints = session.Breakpoints
+            .SelectMany(entry => entry.Value.Select(spec => new BreakpointSpec
+            {
+                File = entry.Key,
+                Line = spec.Line,
+                Condition = spec.Condition,
+                HitCondition = spec.HitCondition,
+            }))
+            .ToArray();
+        var functions = session.FunctionBreakpoints;
+        var exceptionFilters = session.ExceptionFilters;
+        var exceptionTypes = session.ExceptionTypes;
+
+        object? build = null;
+        if (rebuild)
+        {
+            build = await RebuildAsync(launch.Program);
+            if (build is not null &&
+                JsonSerializer.SerializeToElement(build).TryGetProperty("rebuilt", out var rebuilt) &&
+                rebuilt.ValueKind == JsonValueKind.False)
+                return new { error = "The rebuild failed, so the session was left running.", build };
+        }
+
+        await TerminateAsync(sessionId);
+
+        var relaunched = await LaunchAsync(launch.Program, null, launch.Args, launch.WorkingDirectory,
+            launch.EnvironmentJson, launch.StopAtEntry, breakpoints, waitForStopSeconds: 15);
+
+        var relaunchedJson = JsonSerializer.SerializeToElement(relaunched);
+        var newSessionId = relaunchedJson.TryGetProperty("sessionId", out var idValue) ? idValue.GetString() : null;
+
+        var reapplied = new List<object>();
+        if (newSessionId is not null)
+        {
+            if (functions.Length > 0)
+                reapplied.Add(await SetFunctionBreakpointsAsync(newSessionId, functions, clear: false));
+            if (exceptionFilters.Length > 0 || exceptionTypes.Length > 0)
+                reapplied.Add(await SetExceptionBreakpointsAsync(newSessionId, exceptionFilters, exceptionTypes, details: false));
+        }
+
+        return new
+        {
+            restarted = true,
+            previousSessionId = sessionId,
+            sessionId = newSessionId,
+            build,
+            reapplied,
+            session = relaunched,
+            note = newSessionId is null
+                ? "The relaunch failed: the error is in 'session'."
+                : "The breakpoints, function breakpoints and exception settings carried over; the previous session is gone.",
+        };
+    }
+
     public Task<object> SessionsAsync()
     {
         var sessions = _sessions.Values
@@ -452,6 +712,8 @@ public sealed class DebuggerService : IDebuggerService
                 stopReason = session.StopReason,
                 stopLocation = session.StopLocation,
                 breakpointFiles = session.Breakpoints.Keys.ToList(),
+                functionBreakpoints = session.FunctionBreakpoints.Select(spec => spec.Name).ToList(),
+                dataBreakpoints = session.DataBreakpoints.Keys.ToList(),
                 startedAt = session.StartedAt,
             })
             .ToList<object>();
@@ -496,17 +758,44 @@ public sealed class DebuggerService : IDebuggerService
         return reports;
     }
 
+    /// <summary>A failed re-send is reported in place: the write sites stay known, the adapter did not take them.</summary>
+    private static async Task<object> SendOrReportAsync(DebugSession session, string file)
+    {
+        try
+        {
+            return await SendBreakpointsAsync(session, file);
+        }
+        catch (Exception ex)
+        {
+            return new { file, error = ex.Message };
+        }
+    }
+
     private static async Task<object> SendBreakpointsAsync(DebugSession session, string file)
     {
         var specs = session.Breakpoints.TryGetValue(file, out var current) ? current : [];
 
         var payload = new List<Dictionary<string, object?>>();
+        var lines = new HashSet<int>();
         foreach (var spec in specs)
         {
+            if (spec.Line <= 0 || !lines.Add(spec.Line)) continue;
             var entry = new Dictionary<string, object?> { ["line"] = spec.Line };
             if (!string.IsNullOrWhiteSpace(spec.Condition)) entry["condition"] = spec.Condition;
-            if (!string.IsNullOrWhiteSpace(spec.HitCondition)) entry["hitCondition"] = spec.HitCondition;
             payload.Add(entry);
+        }
+
+        // A data breakpoint is the set of lines that write the member. Installing them with the
+        // file's own breakpoints keeps them alive when debug_breakpoints replaces that list.
+        var dataLines = new List<int>();
+        foreach (var data in session.DataBreakpoints.Values)
+        {
+            foreach (var site in data.Sites)
+            {
+                if (!DebugPath.Equal(site.File, file) || !lines.Add(site.Line)) continue;
+                dataLines.Add(site.Line);
+                payload.Add(new Dictionary<string, object?> { ["line"] = site.Line });
+            }
         }
 
         var arguments = new Dictionary<string, object?>
@@ -537,7 +826,9 @@ public sealed class DebuggerService : IDebuggerService
             }
         }
 
-        return new { file, requested = payload.Count, verified, unverified };
+        return dataLines.Count == 0
+            ? (object)new { file, requested = payload.Count, verified, unverified }
+            : new { file, requested = payload.Count, verified, unverified, dataBreakpointLines = dataLines };
     }
 
     private async Task<object> ResumeAsync(string sessionId, string command, int? threadId, int timeoutSeconds)
@@ -556,12 +847,13 @@ public sealed class DebuggerService : IDebuggerService
             session.StopReason = null;
             session.StoppedThreadId = null;
             session.StopLocation = null;
+            session.StopFile = null;
+            session.StopLine = 0;
+            session.HitConditionSkips = 0;
 
-            var stop = await session.Client.WaitForStopAsync(
-                TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, 300)), session.LastStopSequence);
-            await ApplyStopAsync(session, stop);
+            await WaitForStopAsync(session, TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, 300)));
 
-            return Describe(session, null);
+            return await DescribeAsync(session, null);
         }
         catch (Exception ex)
         {
@@ -595,6 +887,100 @@ public sealed class DebuggerService : IDebuggerService
         session.StopReason = stop.Event;
         session.StoppedThreadId = null;
         session.StopLocation = null;
+        session.StopFile = null;
+        session.StopLine = 0;
+    }
+
+    /// <summary>
+    /// Waits for the next stop the caller should see. A breakpoint whose hit condition is not
+    /// satisfied yet is resumed transparently: the adapter has no hit counter, so the counting is
+    /// here, and <see cref="DebugSession.HitConditionSkips"/> reports what was absorbed.
+    /// </summary>
+    private async Task<DapMessage?> WaitForStopAsync(DebugSession session, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (true)
+        {
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+
+            var stop = await session.Client.WaitForStopAsync(remaining, session.LastStopSequence);
+            if (stop is null) return null;
+
+            await ApplyStopAsync(session, stop);
+            if (stop.Event != "stopped" || session.StopReason != "breakpoint") return stop;
+
+            var spec = FindHitConditionedSpec(session);
+            if (spec is null) return stop;
+
+            var count = session.HitCounts.AddOrUpdate(HitKey(session), 1, (_, seen) => seen + 1);
+            if (HitConditionSatisfied(spec.HitCondition, count)) return stop;
+
+            // Not the hit the caller asked for: resume and keep looking, bounded so a condition that
+            // can never be satisfied (a typo, a line revisited forever) still returns a stop.
+            if (session.HitConditionSkips >= 500) return stop;
+            session.HitConditionSkips++;
+
+            await session.Client.RequestAsync("continue",
+                new Dictionary<string, object?> { ["threadId"] = session.StoppedThreadId ?? 0 }, Short);
+
+            session.State = "running";
+            session.StopReason = null;
+            session.StoppedThreadId = null;
+            session.StopLocation = null;
+            session.StopFile = null;
+            session.StopLine = 0;
+        }
+    }
+
+    private static string HitKey(DebugSession session) => $"{session.StopFile}:{session.StopLine}";
+
+    /// <summary>The breakpoint the current stop belongs to, when it carries a hit condition.</summary>
+    private static BreakpointSpec? FindHitConditionedSpec(DebugSession session)
+    {
+        if (session.StopFile is null || session.StopLine <= 0) return null;
+        foreach (var entry in session.Breakpoints)
+        {
+            if (!DebugPath.Equal(entry.Key, session.StopFile)) continue;
+            return entry.Value.FirstOrDefault(spec =>
+                spec.Line == session.StopLine && !string.IsNullOrWhiteSpace(spec.HitCondition));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The DAP hit-condition syntax: <c>&gt;5</c>, <c>&gt;=5</c>, <c>&lt;5</c>, <c>&lt;=5</c>, <c>5</c>
+    /// (exactly), <c>%3</c> (every third hit). An unreadable condition stops rather than loops.
+    /// </summary>
+    public static bool HitConditionSatisfied(string? hitCondition, int count)
+    {
+        if (string.IsNullOrWhiteSpace(hitCondition)) return true;
+
+        var text = hitCondition.Trim();
+        try
+        {
+            if (text.StartsWith("%", StringComparison.Ordinal))
+                return int.Parse(text[1..].Trim()) is var every && every > 0 && count % every == 0;
+
+            if (text.StartsWith(">=", StringComparison.Ordinal))
+                return count >= int.Parse(text[2..].Trim());
+            if (text.StartsWith("<=", StringComparison.Ordinal))
+                return count <= int.Parse(text[2..].Trim());
+            if (text.StartsWith(">", StringComparison.Ordinal))
+                return count > int.Parse(text[1..].Trim());
+            if (text.StartsWith("<", StringComparison.Ordinal))
+                return count < int.Parse(text[1..].Trim());
+            if (text.StartsWith("==", StringComparison.Ordinal))
+                return count == int.Parse(text[2..].Trim());
+
+            return count == int.Parse(text);
+        }
+        catch (FormatException)
+        {
+            return true;
+        }
     }
 
     private static async Task FillStopLocationAsync(DebugSession session)
@@ -606,6 +992,8 @@ public sealed class DebuggerService : IDebuggerService
 
             var frame = frames[0];
             session.StopLocation = frame.File is null ? frame.Name : $"{frame.File}:{frame.Line}";
+            session.StopFile = frame.File;
+            session.StopLine = frame.Line;
         }
         catch
         {
@@ -693,12 +1081,16 @@ public sealed class DebuggerService : IDebuggerService
         throw new DebugAdapterException("The adapter reported no threads.");
     }
 
-    private object Describe(DebugSession session, List<object>? breakpointReports)
+    private async Task<object> DescribeAsync(DebugSession session, List<object>? breakpointReports)
     {
         var processEvent = session.Client.LatestEvent("process");
         if (processEvent is not null && processEvent.Body.ValueKind == JsonValueKind.Object &&
             processEvent.Body.TryGetProperty("systemProcessId", out var pid) && pid.ValueKind == JsonValueKind.Number)
             session.DebuggeeProcessId = pid.GetInt32();
+
+        var exception = session.State == "stopped" && session.StopReason == "exception"
+            ? await ReadExceptionInfoAsync(session)
+            : null;
 
         return new
         {
@@ -711,15 +1103,144 @@ public sealed class DebuggerService : IDebuggerService
             stopReason = session.StopReason,
             stopLocation = session.StopLocation,
             breakpoints = breakpointReports,
+            functionBreakpoints = session.FunctionBreakpoints.Select(spec => spec.Name).ToList(),
+            dataBreakpoints = session.DataBreakpoints.Values
+                .Select(data => new { member = data.Member, sites = data.Sites.Length })
+                .ToList(),
+            exceptionBreakpoints = new { filters = session.ExceptionFilters, exceptionTypes = session.ExceptionTypes },
+            hitConditionSkips = session.HitConditionSkips,
+            exception,
             output = session.Client.ReadOutput(40),
             note = session.State switch
             {
-                "stopped" => "Stopped. debug_stack for the frames, debug_variables for the locals, debug_evaluate for an expression; debug_continue or debug_step to move.",
-                "running" => "Running: nothing stopped within the wait window. Call debug_continue again (it waits for the next stop) or debug_pause.",
-                "exited" => "The debuggee exited. debug_output has the console output; debug_terminate closes the session.",
+                "stopped" when session.StopReason == "exception" =>
+                    "Stopped on an exception: the type, the stage and the details are in 'exception'. debug_stack walks " +
+                    "the throw site, debug_variables the frame; debug_continue resumes.",
+                "stopped" => "Stopped. debug_stack for the frames, debug_variables for the locals, debug_evaluate for an " +
+                             "expression (pass newValue to change one); debug_continue or debug_step to move.",
+                "running" => "Running: nothing stopped within the wait window. Call debug_continue again (it waits for the " +
+                             "next stop) or debug_pause.",
+                "exited" => "The debuggee exited. debug_output has the console output; debug_restart relaunches it, " +
+                            "debug_terminate closes the session.",
                 _ => "The session is starting.",
             },
         };
+    }
+
+    /// <summary>The stopped exception, as the adapter reports it: type, stage, message and the frames it carries.</summary>
+    private static async Task<object?> ReadExceptionInfoAsync(DebugSession session)
+    {
+        if (session.StoppedThreadId is not int threadId) return null;
+
+        try
+        {
+            var body = await session.Client.RequestAsync("exceptionInfo",
+                new Dictionary<string, object?> { ["threadId"] = threadId }, Short);
+
+            var hasDetails = body.ValueKind == JsonValueKind.Object &&
+                             body.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Object;
+
+            return new
+            {
+                id = Str(body, "exceptionId"),
+                description = Str(body, "description"),
+                breakMode = Str(body, "breakMode"),
+                type = hasDetails ? Str(body.GetProperty("details"), "typeName") : null,
+                fullTypeName = hasDetails ? Str(body.GetProperty("details"), "fullTypeName") : null,
+                message = hasDetails ? Str(body.GetProperty("details"), "message") : null,
+                details = hasDetails ? body.GetProperty("details").Clone() : (JsonElement?)null,
+            };
+        }
+        catch
+        {
+            // The stop is still valid without the description: a failed read is not a failed stop.
+            return null;
+        }
+    }
+
+    // ── restart ──────────────────────────────────────────────────────────────
+    private static async Task<object> RebuildAsync(string program)
+    {
+        try
+        {
+            var project = FindProjectFile(program);
+            if (project is null)
+                return new { rebuilt = false, error = $"No .csproj was found above '{Path.GetFileName(program)}' to rebuild." };
+
+            var configuration = program.Contains(
+                $"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                ? "Release"
+                : "Debug";
+
+            var start = new ProcessStartInfo("dotnet")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(project)!,
+            };
+            start.ArgumentList.Add("build");
+            start.ArgumentList.Add(project);
+            start.ArgumentList.Add("-c");
+            start.ArgumentList.Add(configuration);
+            start.ArgumentList.Add("--nologo");
+
+            using var process = Process.Start(start);
+            if (process is null) return new { rebuilt = false, project, error = "'dotnet build' could not start." };
+
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) { try { process.Kill(entireProcessTree: true); } catch { /* already gone */ } }
+
+            var output = await stdout + await stderr;
+            return new
+            {
+                rebuilt = process.HasExited && process.ExitCode == 0,
+                project,
+                configuration,
+                exitCode = process.HasExited ? process.ExitCode : (int?)null,
+                output = output.Split('\n', StringSplitOptions.RemoveEmptyEntries).TakeLast(40).ToList(),
+            };
+        }
+        catch (Exception ex)
+        {
+            return new { rebuilt = false, error = $"The rebuild failed to run: {ex.Message}" };
+        }
+    }
+
+    /// <summary>The project that produced an assembly: the nearest .csproj above its output folder.</summary>
+    private static string? FindProjectFile(string program)
+    {
+        var assembly = Path.GetFileNameWithoutExtension(program);
+        var directory = Path.GetDirectoryName(program);
+
+        for (var depth = 0; depth < 6 && !string.IsNullOrEmpty(directory); depth++)
+        {
+            var candidates = Directory.EnumerateFiles(directory, "*.csproj").OrderBy(name => name).ToList();
+            if (candidates.Count > 0)
+            {
+                return candidates.FirstOrDefault(candidate => string.Equals(
+                    Path.GetFileNameWithoutExtension(candidate), assembly, StringComparison.OrdinalIgnoreCase))
+                    ?? candidates[0];
+            }
+
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return null;
+    }
+
+    private static void ResetHitCounts(DebugSession session, string file)
+    {
+        var prefix = file + ":";
+        foreach (var key in session.HitCounts.Keys)
+        {
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                session.HitCounts.TryRemove(key, out _);
+        }
     }
 
     // ── resolution ───────────────────────────────────────────────────────────
