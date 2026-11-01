@@ -43,6 +43,10 @@ public sealed class InlineParameterService : IInlineParameterService
         if (string.IsNullOrWhiteSpace(methodName)) return new { error = "A method name is required." };
         if (string.IsNullOrWhiteSpace(parameterName)) return new { error = "A parameter name is required." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.InlineParameterAsync(
+                _workspace, filePath, methodName, parameterName, containingType, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

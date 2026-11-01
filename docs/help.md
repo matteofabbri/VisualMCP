@@ -168,7 +168,8 @@ C# is the main surface, and Visual Basic is a supported language: the symbol ind
 analyzers and `apply_code_fix` (their VB fixers), the analysis tools (dead code, code smells,
 async/performance, complexity, metrics, clones, Big-O), the refactorings that are not C#-idiom-specific
 (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `change_type`, `use_base_type`,
-`type_to_partial`, `safe_delete`), `context_action` (33 of its 41 ids
+`type_to_partial`, `safe_delete`, the extract/inline/move families and the indexer conversions),
+`context_action` (33 of its 41 ids
 have a VB spelling; the C#-only ones are refused with the reason), `simplify_vb_code` (41 ids) and the
 language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only is named in
 [Limits → Language coverage](reference/limits.md#language-and-platform-coverage).

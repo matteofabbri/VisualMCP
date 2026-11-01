@@ -44,6 +44,10 @@ public sealed class ExtractClassService : IExtractClassService
         if (string.IsNullOrWhiteSpace(newClassName) || !SyntaxFacts.IsValidIdentifier(newClassName))
             return new { error = $"'{newClassName}' is not a valid class name." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.ExtractClassAsync(
+                _workspace, filePath, typeName, memberNames, newClassName, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null) return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
 

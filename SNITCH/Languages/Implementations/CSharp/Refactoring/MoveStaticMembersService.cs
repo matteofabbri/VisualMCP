@@ -43,6 +43,10 @@ public sealed class MoveStaticMembersService : IMoveStaticMembersService
         if (memberNames is null || memberNames.Length == 0) return new { error = "Name the members to move." };
         if (string.IsNullOrWhiteSpace(targetTypeName)) return new { error = "The target type is required." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.MoveStaticMembersAsync(
+                _workspace, filePath, sourceTypeName, memberNames, targetTypeName, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

@@ -45,6 +45,10 @@ public sealed class ExtractSuperclassService : IExtractSuperclassService
         if (string.IsNullOrWhiteSpace(baseClassName) || !SyntaxFacts.IsValidIdentifier(baseClassName))
             return new { error = $"'{baseClassName}' is not a valid class name." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.ExtractSuperclassAsync(
+                _workspace, filePath, typeName, memberNames, baseClassName, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

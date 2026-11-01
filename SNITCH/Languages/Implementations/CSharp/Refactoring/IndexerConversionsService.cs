@@ -48,6 +48,10 @@ public sealed class IndexerConversionsService : IIndexerConversionsService
         if (string.IsNullOrWhiteSpace(filePath)) return new { error = "A file path is required." };
         if (string.IsNullOrWhiteSpace(methodName)) return new { error = "A method name is required." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.FunctionToIndexerAsync(
+                _workspace, filePath, methodName, containingType, dryRun, cancellationToken);
+
         var prepared = await PrepareAsync(filePath, cancellationToken);
         if (prepared.Error is not null) return prepared.Error;
 
@@ -168,6 +172,10 @@ public sealed class IndexerConversionsService : IIndexerConversionsService
         bool dryRun = false,
         CancellationToken cancellationToken = default)
     {
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.IndexerToFunctionAsync(
+                _workspace, filePath, containingType, getterName, setterName, dryRun, cancellationToken);
+
         var prepared = await PrepareAsync(filePath, cancellationToken);
         if (prepared.Error is not null) return prepared.Error;
 

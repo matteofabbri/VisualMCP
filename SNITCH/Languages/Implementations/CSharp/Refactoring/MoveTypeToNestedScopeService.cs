@@ -45,6 +45,10 @@ public sealed class MoveTypeToNestedScopeService : IMoveTypeToNestedScopeService
         if (string.IsNullOrWhiteSpace(typeName)) return new { error = "The type to move is required." };
         if (string.IsNullOrWhiteSpace(targetTypeName)) return new { error = "The target type is required." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.MoveTypeToNestedScopeAsync(
+                _workspace, filePath, typeName, targetTypeName, targetFilePath, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

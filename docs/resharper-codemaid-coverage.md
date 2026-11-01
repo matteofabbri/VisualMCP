@@ -63,13 +63,16 @@ an exception explained below it.
 | Structural search & replace as a refactoring | `structural_search` | ✅ |
 
 All ~51 refactorings of Rider's "main set" are implemented; the table above is the tool for each one.
-Fifteen of them also run on a `.vb` document, each under the same compiler gate: the ones whose
+**Twenty-nine of them also run on a `.vb` document**, each under the same compiler gate: the ones whose
 operation is a declaration (`apply_rename`, `encapsulate_field`, `add_params`/`remove_params`,
 `change_signature`, `change_type`, `use_base_type`, `type_to_partial`, `safe_delete`) and the ones
-whose VB spelling is its own operation (`extract_interface`, `extract_method`, `move_type`,
-`move_to_folder`, `property_to_auto`, `function_to_property`). What stays C#-only is the
-declaration-shape tail: `extract_class`/`extract_superclass`, the inline family, the move family
-beyond `move_type`/`move_to_folder`, and the indexer conversions.
+whose VB spelling is its own operation (`extract_interface`, `extract_method`, `extract_class`,
+`extract_superclass`, `move_type`, `move_to_folder`, `move_to_namespace`, `move_instance_method`,
+`move_static_members`, `move_type_to_nested_scope`, `move_type_to_outer_scope`, `property_to_auto`,
+`function_to_property`, `property_to_function`, `inline_field`, `inline_symbol`, `inline_parameter`,
+`inline_class`, `function_to_indexer`, `indexer_to_function`). What stays C#-only is the refactoring whose output is a
+C# construct — a record, a primary constructor, an anonymous type, a generic parameter, a nullable
+annotation, INPC boilerplate, a using, an extension method, a pull or a push across a hierarchy.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
 `simplify_code` (97 IDE ids) and `simplify_vb_code` (41 VB ids), the fixes come from `apply_code_fix`,
 and 41 context-action ids are applied directly by `context_action` — the guards, the wrap actions, the
@@ -129,7 +132,7 @@ pattern merging and the extension block, named in its table below.
 | Branch protection and rulesets | `gh_branch_protection` | ✅ protection, required status checks and the repository rulesets that apply |
 | GitLab, Azure DevOps, Bitbucket Cloud | `git_host` | ✅ merge/pull requests, comments, merge, `review-pr`, close/reopen/update, issues/work items and pipelines; provider and coordinates parsed from the remote, credentials from `GITLAB_TOKEN`/`AZURE_DEVOPS_EXT_PAT`/`BITBUCKET_*`; GitLab's missing request-changes vote is stated, not faked |
 | The review brief for a diff | `code_review` | ✅ changed files by kind, the risk checklist, new TODO/FIXME markers with their line, the worst methods of each changed C# file, and optionally the inspection findings inside them |
-| Real-time collaborative editing | — | 💀 a shared transport and an editor surface, not a tool a local stdio server can offer ([gaps.md §10](gaps.md#10-ui-bound-features--not-applicable-by-design)) |
+| Real-time collaborative editing | — | 💀 a shared transport and an editor surface, not a tool a local stdio server can offer ([gaps.md §9](gaps.md#9-ui-bound-features--not-applicable-by-design)) |
 
 ### Analysis & inspections
 
@@ -173,9 +176,9 @@ pattern merging and the extension block, named in its table below.
 
 | Feature | Tool | Status |
 |---|---|---|
-| Run tests, structured results | `run_tests` | ✅ `dotnet test`, project filter, raw args |
-| Per-class/per-method coverage | `get_test_coverage_map` | ✅ coverlet, branch coverage included |
-| Run one test / rerun failed | `run_test`, `rerun_failed` | ✅ TRX result, and exactly the failures of the last run |
+| Run tests, structured results | `run_tests` | ✅ `dotnet test` — the whole solution or the test projects whose name a `projectFilter` selects, raw args forwarded, TRX parsed into per-project results with the failing tests and their messages; the failures are recorded |
+| Per-class/per-method coverage | `get_test_coverage_map` | ✅ coverlet (`coverlet.collector` in the test projects), line **and** branch rates per class and per method, for the named project or the whole solution |
+| Run one test / rerun failed | `run_test`, `rerun_failed` | ✅ TRX result for a name, a class or a raw filter, and exactly the failures the last `run_test` or `run_tests` recorded — per project, cleared by a green run |
 | Test discovery, with parameterized data | `list_tests` | ✅ class, method, framework, and the `[InlineData]`/`[TestCase]`/`[DataRow]` rows; `MemberData`/`TestCaseSource`/`DynamicData` named as dynamic |
 | Debug a test / continuous testing / covering tests | `debug_test`, `continuous_testing`, `tests_covering_symbol` | ✅ the test host under the DAP debugger, run-on-save, and the test methods that reference a symbol |
 | Test scaffolding | `generate_tests` | ✅ xUnit, compiler-gated |
@@ -254,7 +257,7 @@ and, in the last column, exactly where it stops.
 
 The batches that changed this page or the count it quotes, newest first. A count is the live inventory at
 the end of the batch (`capability_report` prints the current one); the product-wide numbered log, with
-every batch and the rows it closed, is [gaps.md §14](gaps.md#14-revision-log).
+every batch and the rows it closed, is [gaps.md §13](gaps.md#13-revision-log).
 
 | Date | What changed | Tools |
 |---|---|---|

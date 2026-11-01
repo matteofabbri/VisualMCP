@@ -27,6 +27,10 @@ public sealed class InlineSymbolService : IInlineSymbolService
         [Description("Optional: containing type name to disambiguate methods/properties")] string? containingType = null,
         [Description("Dry run — show what would change without writing to disk (default: false)")] bool dryRun = false)
     {
+        if (await Snitch.Languages.VB.Refactoring.VbRefactoringTail.InlineSymbolAsync(
+                _workspace, symbolName, containingType, dryRun, CancellationToken.None) is { } visualBasic)
+            return visualBasic;
+
         var solution = await _workspace.EnsureSolutionLoadedAsync();
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with an explicit path to the .sln/.slnx." };

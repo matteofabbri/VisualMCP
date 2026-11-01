@@ -794,8 +794,14 @@ clause has to go on the statement the block opens with; the newline after a head
 trivia of the previous token, so a rebuilt block writes its own; and `Implements` on a class is a body
 statement, not part of the `Class` line.
 
-What stays C#-only is the declaration-shape tail: `extract_class`/`extract_superclass`, the inline
-family, the move family beyond `move_type`/`move_to_folder`, and the indexer conversions.
+The declaration-shape tail closed on **2026-11-01**: `extract_class`/`extract_superclass`, the whole
+inline family (`inline_class`, `inline_parameter`, `inline_symbol`, beside `inline_field`), the move
+family (`move_instance_method`, `move_static_members`, `move_type_to_nested_scope`,
+`move_type_to_outer_scope`) and the indexer conversions (`function_to_indexer`, `indexer_to_function`)
+now run on a `.vb` document too, each under the same compiler gate. What stays C#-only is the
+refactoring whose output *is* a C# construct — a record, a primary constructor, an anonymous type, a
+generic parameter, a nullable annotation, INPC boilerplate, a using, an extension method, a pull or a
+push across a hierarchy.
 
 ---
 

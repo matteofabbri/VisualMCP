@@ -46,6 +46,10 @@ public sealed class MoveInstanceMethodService : IMoveInstanceMethodService
         if (string.IsNullOrWhiteSpace(targetTypeName)) return new { error = "The target type is required." };
         if (!SyntaxFacts.IsValidIdentifier(receiverName)) return new { error = $"'{receiverName}' is not a valid parameter name." };
 
+        if (filePath.EndsWith(".vb", StringComparison.OrdinalIgnoreCase))
+            return await Snitch.Languages.VB.Refactoring.VbRefactoringTail.MoveInstanceMethodAsync(
+                _workspace, filePath, typeName, methodName, targetTypeName, receiverName, dryRun, cancellationToken);
+
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
             return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };

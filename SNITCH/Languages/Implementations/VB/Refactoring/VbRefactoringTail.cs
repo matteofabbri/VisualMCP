@@ -14,7 +14,7 @@ namespace Snitch.Languages.VB.Refactoring;
 /// replacements it can prove, projects them over the solution and asks the compiler gate; nothing is
 /// written when the projection adds an error. Shapes the model cannot prove are refused with the reason.
 /// </summary>
-internal static class VbRefactoringTail
+internal static partial class VbRefactoringTail
 {
     private sealed record TextEdit(Document Document, TextSpan Span, string Replacement);
 
