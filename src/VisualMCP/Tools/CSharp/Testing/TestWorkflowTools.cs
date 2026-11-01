@@ -57,8 +57,24 @@ public static class TestWorkflowTools
         [Description("The project that declares the type, when the name is ambiguous.")] string? projectName = null,
         [Description("The test project to write into (default: the solution's single test project).")] string? testProjectName = null,
         [Description("Class name, when the default <Type>Tests is taken.")] string? className = null,
+        [Description("Only this member (one [Fact] for it) — the 'add a test for this member' action.")]
+        string? memberName = null,
         [Description("Preview only (default: false).")] bool dryRun = false)
-        => tests.GenerateTestsAsync(typeName, projectName, testProjectName, className, dryRun);
+        => tests.GenerateTestsAsync(typeName, projectName, testProjectName, className, dryRun, memberName);
+
+    [McpServerTool(Name = "run_covering_tests"), Description(
+        "Run exactly the tests that reference a symbol, in one call: the covering tests are resolved through " +
+        "Roslyn (tests_covering_symbol), their names become a dotnet test filter, and the run returns the TRX " +
+        "result. It is the 'run the covering test' action — a symbol no test references is answered with that " +
+        "sentence instead of an empty run.")]
+    public static Task<object> RunCoveringTests(
+        ITestWorkflowService tests,
+        [Description("The symbol name (method, property, type).")] string symbolName,
+        [Description("Containing type, when the name is ambiguous.")] string? containingType = null,
+        [Description("The test project to run (default: the solution's single test project).")]
+        string? projectName = null,
+        [Description("Timeout in seconds (default 300).")] int timeoutSeconds = 300)
+        => tests.RunCoveringTestsAsync(symbolName, containingType, projectName, timeoutSeconds);
 
     [McpServerTool(Name = "test_impact_analysis"), Description(
         "Which tests a change can affect: git diff against baseRef (default HEAD) names the changed .cs files, " +

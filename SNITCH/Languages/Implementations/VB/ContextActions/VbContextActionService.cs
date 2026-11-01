@@ -60,8 +60,9 @@ public sealed partial class VbContextActionService : IVbContextActionService
     ];
 
     /// <summary>
-    /// The C# action ids that have no Visual Basic spelling, with the reason. They are refused with the
-    /// sentence rather than reported as unknown, so "not applicable to VB" never reads as "not found".
+    /// The C# action ids a Visual Basic document cannot run, with the reason. Most have no VB spelling at
+    /// all; a few are rewrites the VB engine has not been taught yet, and the reason says which is which,
+    /// so the answer never claims a language limit that does not exist.
     /// </summary>
     public static IReadOnlyList<(string Id, string Reason)> NotApplicable { get; } =
     [
@@ -73,6 +74,19 @@ public sealed partial class VbContextActionService : IVbContextActionService
         ("migrate_to_nullable", "Visual Basic has no nullable-reference-type directives: #nullable is C# syntax."),
         ("merge_patterns", "Visual Basic has no pattern combinators: 'is A or B' does not exist in this language."),
         ("convert_to_extension_block", "The C# 14 extension block has no Visual Basic counterpart; write the extension method in a Module."),
+        ("empty_string_to_string_empty", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine has one (String.Empty exists in VB too)."),
+        ("string_empty_to_empty_string", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine has one (\"\" exists in VB too)."),
+        ("auto_property_to_explicit", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine has one (an auto-Property can be expanded in VB too)."),
+        ("insert_file_header", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine inserts the .editorconfig file_header_template."),
+        ("block_body_to_expression", "Visual Basic has no expression-bodied members: a Sub or Function always has a block body."),
+        ("expression_body_to_block", "Visual Basic has no expression-bodied members to convert from."),
+        ("import_static_member", "Not a language limit: Visual Basic imports a type with 'Imports System.Math'; the VB engine has no rewrite for this id yet."),
+        ("qualify_member", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine qualifies a static member with its type."),
+        ("unqualify_member", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine unqualifies and adds 'using static'."),
+        ("wrap_in_quotes", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine wraps the selected lines in a literal."),
+        ("split_string", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine splits a literal at a separator."),
+        ("join_string", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine joins a '+' concatenation."),
+        ("check_span_index", "Not a language limit: the VB engine has no rewrite for this id yet. The C# engine inserts a bounds guard."),
     ];
 
     public async Task<object> Apply(
@@ -98,7 +112,9 @@ public sealed partial class VbContextActionService : IVbContextActionService
             {
                 return new
                 {
-                    error = $"'{id}' does not apply to Visual Basic: {refused.Reason}",
+                    error = refused.Reason.StartsWith("Not a language limit", StringComparison.Ordinal)
+                        ? $"'{id}' cannot run on a Visual Basic document yet: {refused.Reason}"
+                        : $"'{id}' does not apply to Visual Basic: {refused.Reason}",
                     language = "vb",
                     notApplicable = NotApplicable.Select(entry => new { id = entry.Id, reason = entry.Reason }).ToList(),
                 };

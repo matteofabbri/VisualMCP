@@ -25,7 +25,11 @@ public interface ITestWorkflowService
     Task<object> TestsCoveringSymbolAsync(string symbolName, string? containingType, int maxResults);
 
     Task<object> GenerateTestsAsync(string typeName, string? projectName, string? testProjectName,
-        string? className, bool dryRun);
+        string? className, bool dryRun, string? memberName = null);
+
+    /// <summary>Finds the tests that reference a symbol and runs exactly those.</summary>
+    Task<object> RunCoveringTestsAsync(string symbolName, string? containingType, string? projectName,
+        int timeoutSeconds);
 
     /// <summary>Which tests a change can affect: the tests that reference the symbols declared by the files git says changed.</summary>
     Task<object> ImpactAnalysisAsync(string? baseRef, string? projectName, int maxResults);
@@ -260,6 +264,46 @@ public sealed class TestWorkflowService : ITestWorkflowService
         };
     }
 
+    /// <summary>
+    /// The covering tests of a symbol, run in one call: <c>tests_covering_symbol</c> names them and
+    /// <c>run_test</c> runs a filter, so the two are composed here instead of by the caller.
+    /// </summary>
+    public async Task<object> RunCoveringTestsAsync(string symbolName, string? containingType,
+        string? projectName = null, int timeoutSeconds = 300)
+    {
+        var covering = await TestsCoveringSymbolAsync(symbolName, containingType, 200);
+
+        var json = System.Text.Json.JsonSerializer.SerializeToNode(covering);
+        if (json is System.Text.Json.Nodes.JsonObject failure && failure["error"] is not null)
+            return covering;
+
+        var names = (json?["tests"] as System.Text.Json.Nodes.JsonArray ?? [])
+            .Select(entry => entry?["test"]?.GetValue<string>())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .ToList();
+
+        if (names.Count == 0)
+            return new { error = $"No test references '{symbolName}': there is nothing to run.", symbol = symbolName };
+
+        // The display name carries the parameter list; vstest matches the name without it.
+        var filter = string.Join("|", names
+            .Select(name => name.Split('(')[0])
+            .Distinct(StringComparer.Ordinal)
+            .Select(name => "FullyQualifiedName~" + name));
+
+        var run = await RunTestAsync(null, null, projectName, filter, timeoutSeconds);
+
+        return new
+        {
+            symbol = symbolName,
+            tests = names,
+            filter,
+            run,
+            note = "The filter is built from the tests that reference the symbol, so a run whose filter matches nothing means the naming changed.",
+        };
+    }
+
     private static bool IsTestMethod(MethodDeclarationSyntax method) =>
         method.AttributeLists.SelectMany(list => list.Attributes)
             .Any(attribute => attribute.Name.ToString().Split('.').Last() is
@@ -267,7 +311,8 @@ public sealed class TestWorkflowService : ITestWorkflowService
 
     // ── scaffolding a test class ────────────────────────────────────────────
     public async Task<object> GenerateTestsAsync(string typeName, string? projectName = null,
-        string? testProjectName = null, string? className = null, bool dryRun = false)
+        string? testProjectName = null, string? className = null, bool dryRun = false,
+        string? memberName = null)
     {
         if (string.IsNullOrWhiteSpace(typeName)) return new { error = "A type name is required." };
 
@@ -302,7 +347,7 @@ public sealed class TestWorkflowService : ITestWorkflowService
             ? ns.ToDisplayString() + ".Tests"
             : "Tests";
 
-        var source = BuildTestClass(type, name, namespaceName);
+        var source = BuildTestClass(type, name, namespaceName, memberName);
 
         // ── Gate: the new file must compile inside the test project ─────────────────────
         var updated = testProject.AddDocument(name + ".cs", Microsoft.CodeAnalysis.Text.SourceText.From(source), filePath: filePath);
@@ -374,7 +419,8 @@ public sealed class TestWorkflowService : ITestWorkflowService
         }
     }
 
-    private static string BuildTestClass(INamedTypeSymbol type, string className, string namespaceName)
+    private static string BuildTestClass(INamedTypeSymbol type, string className, string namespaceName,
+        string? memberName = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine("using Xunit;");
@@ -391,7 +437,8 @@ public sealed class TestWorkflowService : ITestWorkflowService
         var methods = type.GetMembers().OfType<IMethodSymbol>()
             .Where(method => method.MethodKind == MethodKind.Ordinary &&
                              method.DeclaredAccessibility == Accessibility.Public &&
-                             !method.IsStatic && !method.IsGenericMethod)
+                             !method.IsStatic && !method.IsGenericMethod &&
+                             (memberName is null || string.Equals(method.Name, memberName, StringComparison.Ordinal)))
             .ToList();
 
         if (methods.Count == 0)

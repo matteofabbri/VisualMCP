@@ -117,6 +117,9 @@ public static class SnitchServiceCollectionExtensions
         // The runtime half of analysis: the suite on both sides of a change, diffed test by test.
         services.AddSingleton<Languages.CSharp.Testing.IVerifyChangeService, Languages.CSharp.Testing.VerifyChangeService>();
         services.AddSingleton<Runtime.IHttpFileService, Runtime.HttpFileService>();
+        // The read/write side of the same format: what the file declares, what is wrong with it, and the
+        // two edits (a request appended, a variable upserted) instead of editing the text by hand.
+        services.AddSingleton<Runtime.IHttpFileDocumentService, Runtime.HttpFileDocumentService>();
         services.AddSingleton<IFixLineEndingsService, FixLineEndingsService>();
         services.AddSingleton<Web.IDownloadFileService, Web.DownloadFileService>();
 
@@ -234,6 +237,8 @@ public static class SnitchServiceCollectionExtensions
         services.AddSingleton<Languages.CSharp.Refactoring.IConstructorToFactoryService, Languages.CSharp.Refactoring.ConstructorToFactoryService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IUseBaseTypeService, Languages.CSharp.Refactoring.UseBaseTypeService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IConvertToPrimaryConstructorService, Languages.CSharp.Refactoring.ConvertToPrimaryConstructorService>();
+        // A feature-level migration: one named rewrite across a solution or project, gated on the compiler.
+        services.AddSingleton<Languages.CSharp.Refactoring.IMigrationCampaignService, Languages.CSharp.Refactoring.MigrationCampaignService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IPushMembersDownService, Languages.CSharp.Refactoring.PushMembersDownService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IExtractClassService, Languages.CSharp.Refactoring.ExtractClassService>();
         services.AddSingleton<Languages.CSharp.Refactoring.IPropertyToFunctionService, Languages.CSharp.Refactoring.PropertyToFunctionService>();

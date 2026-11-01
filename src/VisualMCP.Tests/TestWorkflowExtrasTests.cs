@@ -233,6 +233,7 @@ public sealed class TestWorkflowExtrasTests
 
         public Task<object> RerunFailedAsync(string? projectName, int timeoutSeconds) => throw new NotSupportedException();
         public Task<object> TestsCoveringSymbolAsync(string symbolName, string? containingType, int maxResults) => throw new NotSupportedException();
-        public Task<object> GenerateTestsAsync(string typeName, string? projectName, string? testProjectName, string? className, bool dryRun) => throw new NotSupportedException();
+        public Task<object> GenerateTestsAsync(string typeName, string? projectName, string? testProjectName, string? className, bool dryRun, string? memberName = null) => throw new NotSupportedException();
+        public Task<object> RunCoveringTestsAsync(string symbolName, string? containingType, string? projectName, int timeoutSeconds) => throw new NotSupportedException();
     }
 }

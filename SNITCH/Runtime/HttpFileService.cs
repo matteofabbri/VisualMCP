@@ -98,133 +98,30 @@ public sealed class HttpFileService : IHttpFileService
         };
     }
 
-    /// <summary>Parses the file: public so the format is testable without sending anything.</summary>
+    /// <summary>
+    /// Parses the file: public so the format is testable without sending anything. It is the same parser
+    /// <c>http_file</c> inspects with, so the executor sends what the inspector validated.
+    /// </summary>
     public static HttpFileDocument Parse(string text)
     {
+        var parsed = HttpFileParser.Parse(text);
+
         var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var requests = new List<HttpFileRequest>();
+        foreach (var variable in parsed.Variables) variables[variable.Name] = variable.Value;
 
-        string? pendingName = null;
-        string? method = null;
-        string? url = null;
-        int requestLine = 0;
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var body = new StringBuilder();
-        var inBody = false;
+        var requests = parsed.Blocks
+            .Select(block => new HttpFileRequest(
+                block.Index,
+                block.Name,
+                block.Method,
+                block.Url,
+                block.Headers,
+                block.Body,
+                block.Line))
+            .ToList();
 
-        void Flush()
-        {
-            if (method is not null && url is not null)
-                requests.Add(new HttpFileRequest(
-                    requests.Count + 1,
-                    pendingName,
-                    method,
-                    url,
-                    new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase),
-                    body.Length > 0 ? body.ToString().TrimEnd('\r', '\n') : null,
-                    requestLine));
-
-            pendingName = null;
-            method = null;
-            url = null;
-            requestLine = 0;
-            headers.Clear();
-            body.Clear();
-            inBody = false;
-        }
-
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        for (var index = 0; index < lines.Length; index++)
-        {
-            var line = lines[index];
-            var trimmed = line.Trim();
-
-            if (trimmed.StartsWith("###", StringComparison.Ordinal))
-            {
-                Flush();
-                continue;
-            }
-
-            if (inBody)
-            {
-                body.Append(line).Append('\n');
-                continue;
-            }
-
-            if (trimmed.Length == 0)
-            {
-                if (url is not null) inBody = true;
-                continue;
-            }
-
-            if (trimmed.StartsWith('#'))
-            {
-                var directive = trimmed.TrimStart('#').Trim();
-                if (directive.StartsWith("@name", StringComparison.OrdinalIgnoreCase))
-                    pendingName = directive[5..].Trim();
-                else if (directive.StartsWith("name", StringComparison.OrdinalIgnoreCase) && method is null)
-                    pendingName = directive[4..].Trim();
-                continue;
-            }
-
-            if (trimmed.StartsWith("//", StringComparison.Ordinal))
-                continue;
-
-            // A variable definition before any request line of this block.
-            if (url is null && trimmed.StartsWith('@'))
-            {
-                var equals = trimmed.IndexOf('=');
-                if (equals > 1)
-                {
-                    var name = trimmed[1..equals].Trim();
-                    var value = trimmed[(equals + 1)..].Trim();
-                    if (value.Length > 0) variables[name] = value;
-                    continue;
-                }
-            }
-
-            if (url is null)
-            {
-                var (parsedMethod, parsedUrl) = ParseRequestLine(trimmed);
-                if (parsedUrl is null) continue; // not a request line yet
-
-                method = parsedMethod;
-                url = parsedUrl;
-                requestLine = index + 1;
-                continue;
-            }
-
-            var colon = trimmed.IndexOf(':');
-            if (colon > 0)
-            {
-                var name = trimmed[..colon].Trim();
-                var value = trimmed[(colon + 1)..].Trim();
-                headers[name] = value;
-            }
-        }
-
-        Flush();
         return new HttpFileDocument(variables, requests);
     }
-
-    /// <summary><c>METHOD url</c> when the first token is a known method, otherwise <c>GET url</c>.</summary>
-    private static (string Method, string? Url) ParseRequestLine(string line)
-    {
-        var space = line.IndexOf(' ');
-        if (space <= 0) return (string.Empty, null);
-
-        var first = line[..space].ToUpperInvariant();
-        if (KnownMethods.Contains(first))
-            return (first, line[(space + 1)..].Trim());
-
-        // "GET http://…" only: a bare URL has no space, so this is the fallback for "GET  http://…".
-        return first.All(char.IsLetter) ? (first, line[(space + 1)..].Trim()) : (string.Empty, null);
-    }
-
-    private static readonly HashSet<string> KnownMethods = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE",
-    };
 
     private static string Substitute(string value, IReadOnlyDictionary<string, string> variables, ISet<string> unresolved)
     {

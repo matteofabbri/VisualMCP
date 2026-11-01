@@ -34,6 +34,15 @@ DiskPolicy.ApplyStartupPolicy(Directory.GetCurrentDirectory());
 // Must be called before any MSBuild/Roslyn types are JIT-compiled.
 MSBuildLocator.RegisterDefaults();
 
+// The standalone command line (--cli inspect|duplicates|cleanup): the same engines without an MCP
+// client, for a pipeline. MSBuild is located by now, so Roslyn can load a solution; the answer goes to
+// the real stdout, which is why the CLI opens its own writer instead of Console.Out.
+if (VisualMCP.Cli.CliCommandLine.TryRun(args, out var cliExitCode))
+{
+    Environment.ExitCode = cliExitCode;
+    return;
+}
+
 await RunServerAsync(args);
 
 // Separate method so the JIT doesn't compile Roslyn types before RegisterDefaults().
@@ -459,6 +468,12 @@ static async Task RunServerAsync(string[] args)
             // The EF Core migration workflow ('dotnet ef' with a structured result).
             services.AddSingleton<Snitch.Execution.IEfMigrationsService, Snitch.Execution.EfMigrationsService>();
 
+            // The last build/run/packaging targets: a project from a template, an installer (WiX/ClickOnce),
+            // and the two deployment destinations (IIS through a Web Deploy profile, Azure through az).
+            services.AddSingleton<Snitch.Execution.IProjectTemplateService, Snitch.Execution.ProjectTemplateService>();
+            services.AddSingleton<Snitch.Execution.IInstallerAuthoringService, Snitch.Execution.InstallerAuthoringService>();
+            services.AddSingleton<Snitch.Execution.IDeploymentService, Snitch.Execution.DeploymentService>();
+
             // VisualMCP-side inspection services: the packs ship analyzers *and* the code fixes,
             // and these two wrappers are injected into inspect_code / apply_code_fix.
             services.AddSingleton<Snitch.Languages.CSharp.Inspections.IInspectCodeService,
@@ -522,6 +537,14 @@ static async Task RunServerAsync(string[] args)
                                   Snitch.Languages.CSharp.Generation.DtoFromJsonService>();
             services.AddSingleton<Snitch.Languages.CSharp.Generation.IBuilderGeneratorService,
                                   Snitch.Languages.CSharp.Generation.BuilderGeneratorService>();
+            // The rest of the generation/analysis pair that closes §5: a DTO from an XML sample, an
+            // IComparer<T> from a type's own members, and the regex validator.
+            services.AddSingleton<Snitch.Languages.CSharp.Generation.IXmlDtoService,
+                                  Snitch.Languages.CSharp.Generation.XmlDtoService>();
+            services.AddSingleton<Snitch.Languages.CSharp.Generation.IComparerGeneratorService,
+                                  Snitch.Languages.CSharp.Generation.ComparerGeneratorService>();
+            services.AddSingleton<Snitch.Languages.CSharp.Analysis.IRegexValidationService,
+                                  Snitch.Languages.CSharp.Analysis.RegexValidationService>();
 
             // The IL view of a compiled assembly (the C# ↔ IL toggle of the decompiled workspace).
             services.AddSingleton<Snitch.Metacode.Decompilation.IDisassemblyService,
