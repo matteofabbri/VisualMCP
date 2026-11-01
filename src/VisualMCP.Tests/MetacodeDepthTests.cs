@@ -1058,14 +1058,11 @@ public sealed class MetacodeDepthTests
         MetacodeTranslator.Default.Render(MetacodeSource.FromCSharp(source, "sample.cs"), options);
 
     /// <summary>
-    /// The opt-in readers for an AST dump. Python and C++ are not in <see cref="MetacodeTranslator.Default"/>:
-    /// nothing in this product produces their dump, so a caller who has one asks for that reader explicitly.
+    /// The two dump readers are part of <see cref="MetacodeTranslator.Default"/>: what they need is an AST
+    /// dump, and something in this product produces one (translate_python_file / translate_cpp_file, or
+    /// metacode_translate on a .py/.cpp path).
     /// </summary>
-    private static readonly MetacodeTranslator DumpTranslator = new(new ILanguageFrontend[]
-    {
-        new PythonFrontend(),
-        new CppFrontend(),
-    });
+    private static readonly MetacodeTranslator DumpTranslator = MetacodeTranslator.Default;
 
     private static string RenderPython(string json) =>
         DumpTranslator.Render(MetacodeSource.FromPythonAst(json, "sample.py"));

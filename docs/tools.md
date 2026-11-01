@@ -110,11 +110,11 @@ Conventions:
 | `get_metrics` | Per-method complexity, lines of code, nesting depth and parameter count |
 | `analyze_complexity` | Static Big-O estimate of time and space per callable, with loops, recursion shape, allocation sites and evidence |
 | `find_dead_code` | Unreachable statements and always-false branches, from the control-flow graph |
-| `find_unused_symbols` | Public/internal types and members with zero references, with the framework-invoked ones reported separately (`frameworkInvoked`) |
+| `find_unused_symbols` | Public/internal types and members with zero references; the framework-invoked ones come back separately (`frameworkInvoked`) and so do the ones a reflective lookup names (`reflectionInvoked`) |
 | `framework_entry_points` | The members a framework calls by convention — MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests — with the reason |
-| `find_reflection_usage` | Reflective lookups (`Activator`, `Type.GetType`/`GetMethod`, `Assembly.Load`, …) with the name each uses, and which names resolve to the solution |
-| `list_generated_sources` | Source generators a project references and the syntax trees they emit, which live in the compilation but not as documents; `includeSource=true` returns each tree's text |
-| `find_external_usages` | The used surface of assemblies outside the solution: types, members, call sites, per-assembly summary |
+| `find_reflection_usage` | Reflective lookups (`Activator`, `Type.GetType`/`GetMethod`, `Assembly.Load`, …) with the name each uses — a literal, `nameof`, `typeof` or a constant concatenation — and whether it resolves to a declaration in the solution (simple or metadata name) |
+| `list_generated_sources` | Source generators a project references and the syntax trees they emit, which live in the compilation but not as documents; `symbol=` searches the declarations inside those trees, `includeSource=true` returns each tree's text or each match's code. `find_symbol`/`read_symbol` fall back to these trees |
+| `find_external_usages` | The used surface of assemblies outside the solution: types, members, call sites, per-assembly summary with version and path (the handoff to `decompile_type`/`assembly_workspace` for the internals) |
 | `verify_change` | Run the suite on the working tree and on a git revision in a detached worktree, then diff the outcomes test by test: regressions, fixes, new/removed tests, verdict |
 | `find_breaking_changes` | Removed or re-signed public/protected members between a git revision and the working tree |
 | `get_quality_trend` | Did a branch make the code better or worse: two revisions (or `to=worktree`) measured with one syntactic rule set — average complexity per method, methods over 10/20, long methods, TODOs, size as context — with improved/regressed/unchanged and the files that moved most. Nothing is compiled, so a revision that no longer builds is still comparable |
@@ -293,7 +293,7 @@ Roslyn (`debug_data_breakpoints`) and a hit count the server itself enforces. `d
 | `debug_continue` | ✎ Continue and wait for the next stop or exit |
 | `debug_step` | ✎ Step over / into / out |
 | `debug_pause` | ✎ Break into the running process |
-| `debug_exceptions` | ✎ Break on exceptions — `all` / `user-unhandled`, narrowed to named types (`!Type` excludes); with no setting, returns the stopped exception's type, stage and details |
+| `debug_exceptions` | ✎ Break on exceptions — named types matched against the **hierarchy** (a base class catches its derived types, `!Type` excludes a branch), or `all` / `user-unhandled` as the when; with no setting, returns the stopped exception's type, stage and details |
 | `debug_threads` | The threads, with the stopped one marked |
 | `debug_stack` | The call stack with file:line per frame |
 | `debug_variables` | Locals / Arguments / Autos of a frame, with optional member expansion |
@@ -482,8 +482,8 @@ compiler's own `FS####` diagnostics.
 
 | Tool | What it does |
 |---|---|
-| `metacode_translate` | Lower C#, Visual Basic, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed |
-| `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check |
+| `metacode_translate` | Lower C#, Visual Basic, Java, JavaScript, Rust, Python, C/C++, a Razor page, a Ghidra snapshot or canonical pseudocode into one pseudocode language, with `RAW` constructs and diagnostics listed; a `.py`/`.cpp` path is put through its dumper first, a `.rs` path is read directly with no toolchain |
+| `metacode_compare` | Translate two sources and diff the canonical text line by line — the "same algorithm?" check, Python, C++ and Rust included |
 | `metacode_index` | The solution's metacode persisted in `.visualMCP/visualmcp.db`: status, build, model-level cyclomatic/cognitive complexity, stored trees, and the complete AST (`ast`: every node with parent link, property slot, position, depth, span and payload) |
 | `metacode_generate` | Generate C# from pseudocode, a stored tree or a file; what C# cannot express is lowered with a diagnostic |
 | `translate_python_file` | Translate a `.py` file into canonical pseudocode (runs CPython's `ast` dumper, or accepts a supplied dump) |
@@ -593,7 +593,7 @@ structured answer, not an exception.
 | `k8s_apply` | ✎ Apply a manifest from a file or from `content`; server-side dry run unless `dryRun=false` with `confirm=true` |
 | `k8s_delete` | ✎ Delete one resource; requires `confirm=true`, `ignoreNotFound` for idempotence |
 | `k8s_rollout` | `status`, `restart` or `undo` (with `toRevision`) of a workload; restart/undo require `confirm=true` |
-| `k8s_helm` | `list`, `status`, `history`, `get-values`, `template` (offline render with values file / `--set`) and `repo-list` |
+| `k8s_helm` | `list`, `status`, `history`, `get-values`, `template` (offline render with values file / `--set`), `lint` (a chart checked offline: templates, values, `Chart.yaml`) and `repo-list` |
 
 ## Node and JavaScript/TypeScript
 

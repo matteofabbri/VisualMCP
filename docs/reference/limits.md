@@ -24,15 +24,25 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
 - **Heuristic rules are finders, not proofs.** `analyze_complexity`, the Razor rules and security scanning
   report patterns with their confidence; a green run means "no pattern matched", and `inspection_baseline`
   is what makes that a statement about a change rather than about a moment.
-- **Source generators are outside the model.** `list_generated_sources` names the generators a project
-  references and the trees they emit, and with `includeSource=true` returns their text; the trees are not
-  documents, so no symbol navigation reaches them.
-- **Reflection and framework conventions are invisible to the reference graph.** `find_reflection_usage`
-  resolves the reflective lookups whose name matches a declaration in the solution, and
-  `framework_entry_points` classifies what a framework calls by convention; a name neither tool resolves
-  still looks dead.
-- **A referenced assembly is metadata, not analysed source.** `find_external_usages` reports the surface
-  the solution actually uses, with call sites; the internals stay outside.
+- **Source-generated code is reachable, but it is not a document.** A generator's tree belongs to the
+  compilation and no project document points at it. `list_generated_sources` names the generators, the trees
+  and — with `symbol=` — the declarations inside them, and `find_symbol`/`read_symbol` fall back to those
+  trees, so a generated type or member is located and read like a source one. What stays outside is every
+  tool that works from documents: the editors and refactorings (they write documents), the symbol index
+  (`reference_index`), `inspect_code` and `text_index`. `search_text`/`search_code` are a text scan of the
+  folder, so they reach the emitted `.g.cs` file on disk when the glob covers it — the file, not its
+  symbols.
+- **Reflection and framework conventions are named, not followed.** `find_unused_symbols` reports two lists
+  apart from `unused`: `frameworkInvoked` (what routing, DI, the test runner or the component renderer calls
+  by convention — `framework_entry_points` is the full classification) and `reflectionInvoked` (the symbols
+  a reflective lookup names: a literal, `nameof`, `typeof` or any compile-time concatenation, resolved by
+  simple or metadata name — `find_reflection_usage` is the full list). A name that is not a compile-time
+  constant, such as `Type.GetType(assembledName)`, is not guessed, so what such a lookup reaches can still
+  look dead.
+- **A referenced assembly is metadata, analysed on request.** `find_external_usages` reports the surface the
+  solution actually uses, with call sites, and each assembly's version and path; `decompile_type` and
+  `assembly_workspace` read that assembly's internals from the same path. What the used surface does not
+  tell you is what the assembly does internally, and no call graph crosses that boundary.
 
 ## Razor and Blazor
 
@@ -42,7 +52,10 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
   `@Html.Partial("…")`, the `RenderPartial` family) and looks for the token inside them, following the
   partials those include in turn. It searches their text, so a token built by a helper it does not name is
   a false positive to review, and a partial it cannot resolve counts as having no token. Duplicate ids are
-  still checked **per file**.
+  compared across the **rendered composition** — the page, the layout it declares (`@layout` or
+  `Layout = "…"`) and the partials either renders, followed recursively — with a collision reported on the
+  occurrence that comes later and naming the first. A layout selected in `_ViewStart` is not followed, and a
+  partial that collides with itself is reported when that file is analysed, not for every page that renders it.
 - **Dynamic values are not guessed.** A rule whose answer depends on a runtime value stays silent.
 - Files over **2 MB** and unreadable folders are reported as skipped, not analysed.
 - `.cshtml`/`.razor` are not Roslyn documents. Tools that require the semantic model do not see them;
@@ -51,10 +64,11 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
 ## Metacode and decompilation
 
 - **The pseudocode model is a syntax model, not a language service.** Python and C++ are read from their
-  AST dumps by `translate_python_file` and `translate_cpp_file`, which produce the dump when the
-  interpreter or compiler is installed (or take one you supply): no type checking, no symbol navigation,
-  no editing. Java has a frontend (`JavaFrontend`) but still no symbol navigation; Go and Rust have labels
-  in the model, not frontends.
+  AST dumps, which `metacode_translate` / `metacode_compare` (and the dedicated `translate_python_file` /
+  `translate_cpp_file`) produce when the interpreter or compiler is installed, or take from you: no type
+  checking, no symbol navigation, no editing. Java and Rust have a frontend (`JavaFrontend`,
+  `RustFrontend`) — Rust reads the source itself, with no toolchain — but still no symbol navigation; Go has
+  a label in the model, not a frontend.
 - **Unsupported constructs stay visible** as `RAW[lang] … // reason` plus a diagnostic. A translation can
   therefore be incomplete; the diagnostics say where.
 - **Ghidra is an external dependency** with a real runtime cost. `analyze_native_binary` can take tens of
@@ -117,8 +131,13 @@ A tool is only trustworthy if it is clear about what it cannot do. This page is 
   absorbed hits and returns the stop. The stop is matched to its breakpoint by file and line, so a
   breakpoint the runtime moved to a different line is not counted — the adapter reports no breakpoint
   id on the stop event.
-- **Exception type filters match the full type name exactly** (`System.NullReferenceException`); base
-  classes are not matched, so each type you care about is named, and `!Type` excludes one.
+- **Exception type conditions are evaluated by this server, not by the adapter.** A condition is matched
+  against the thrown type's hierarchy, resolved through the loaded solution, so a base class matches the
+  types derived from it — a framework base included — and `!Type` excludes a whole branch. The adapter
+  compares a full type name exactly, so to judge them it is set to break on every throw: a stop that does
+  not match is resumed transparently (`exceptionTypeSkips` says how many), the walk gives up after 500
+  absorbed stops and returns the one it has, and a type the model cannot resolve is matched by name only —
+  which is also the fallback when no solution is loaded.
 - **The debugger windows are the client's** — breakpoints list, modules, parallel stacks:
   `debug_sessions`, `debug_stack` and `debug_threads` return the data, nothing renders it.
 
@@ -151,7 +170,7 @@ indexing, and the non-.NET toolchains are wrapped rather than reimplemented. Thi
 | **HTML / CSS** | `markup_files` (per file: elements, distinct classes, selectors, duplicate ids) and `analyze_markup` (HTML0001–HTML0015, CSS0001–CSS0009), over a quote-aware tag scanner. A selector resolves against the page's element index — compound parts with tag, classes, id, attribute conditions and the structural pseudo-classes `:root`/`:first-child`/`:last-child`/`:only-child`/`:empty`, joined by descendant, child, adjacent-sibling and general-sibling combinators — the CSS rules run on every `<style>` block with the finding reported on the page's line, and an inline `style` attribute is checked for `!important`, a `javascript:` URL and `expression()`; a selector that matches nothing is CSS0009, a class used in markup and defined in no scanned stylesheet is HTML0015. It is not a renderer: a selector whose meaning only a browser can decide (`:hover`, `:checked`, `:nth-child()`, `:has()`) is never reported as unmatched, the tag nesting is the one the markup writes (optional end tags are closed by the next sibling), specificity and the cascade are not resolved, and a stylesheet loaded from a CDN or built in JavaScript (CSS-in-JS) is outside the scan |
 | **SQL** | `sql_files` (statements, verbs, tables) and `analyze_sql` (SQL0001–SQL0010, comments and literals masked first). A pattern scanner, not a dialect parser: no schema model, no validation against a database, no execution or query plan |
 | **EF Core** | The `DbContext` and entities are C# and fully analysed; migrations run through `ef_migrations` (`dotnet ef`), including `script` (the migration SQL), `diff` (the SQL between two migrations) and `pending-model-changes` (does the model still match the snapshot). The SQL a single query will generate and a field-level comparison of the model itself against the snapshot are still absent |
-| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster and `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod, and `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases; `yaml_files`/`analyze_yaml` read a manifest's identity and structure. No manifest/chart schema validation, no port-forward |
+| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster and `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod, and `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases and lints a chart offline (`lint`: templates, values, `Chart.yaml`, no cluster); `yaml_files`/`analyze_yaml` read a manifest's identity and structure. No schema validation of a rendered manifest beyond `kubectl apply --dry-run=server`, no port-forward |
 | **Python / C++ / Java / Go / Rust** | `translate_python_file` / `translate_cpp_file` lower a file to pseudocode through its AST dump (no type checker, no navigation); Java, Go and Rust have labels in the model, not frontends |
 
 Full inventory, with the exact boundary for each gap: [docs/gaps.md](../gaps.md).

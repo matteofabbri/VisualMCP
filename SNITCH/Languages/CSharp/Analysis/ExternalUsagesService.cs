@@ -47,6 +47,25 @@ public sealed class ExternalUsagesService : IExternalUsagesService
             .Select(project => project.AssemblyName ?? project.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // The path and version of each referenced assembly: what decompile_type / assembly_workspace need
+        // to open the internals this call does not analyse.
+        var referenced = new Dictionary<string, (string? Path, string? Version)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            var compilation = await project.GetCompilationAsync();
+            if (compilation is null) continue;
+
+            foreach (var reference in compilation.References)
+            {
+                if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly) continue;
+                if (referenced.ContainsKey(assembly.Name)) continue;
+
+                referenced[assembly.Name] = (
+                    (reference as PortableExecutableReference)?.FilePath,
+                    assembly.Identity.Version.ToString());
+            }
+        }
+
         var limit = Math.Clamp(maxResults < 1 ? 200 : maxResults, 1, 5000);
         var filter = string.IsNullOrWhiteSpace(assemblyName) ? null : assemblyName.Trim();
 
@@ -108,6 +127,8 @@ public sealed class ExternalUsagesService : IExternalUsagesService
             .Select(group => new
             {
                 assembly = group.Key,
+                version = referenced.GetValueOrDefault(group.Key).Version,
+                path = referenced.GetValueOrDefault(group.Key).Path,
                 distinctMembers = group.Count(),
                 usages = group.Sum(usage => usage.Count),
                 topTypes = group.GroupBy(usage => usage.Type)
@@ -131,7 +152,9 @@ public sealed class ExternalUsagesService : IExternalUsagesService
             byAssembly,
             usages = ordered.Take(limit).ToList(),
             truncated = ordered.Count > limit,
-            note = "The internals of a referenced assembly are not analysed; this is its used surface. " +
+            note = "This is the used surface of each referenced assembly; its other internals are not analysed here. " +
+                   "Each assembly row carries the path and version that decompile_type and assembly_workspace read " +
+                   "the internals from. " +
                    (includeFramework ? "Framework assemblies are included." : "System/Microsoft assemblies are excluded; pass includeFramework=true to include them."),
         };
     }

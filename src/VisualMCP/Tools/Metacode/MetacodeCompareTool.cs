@@ -3,6 +3,7 @@ using System.Text;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using VisualMCP.Formatting;
+using VisualMCP.Translation;
 
 namespace VisualMCP.Tools.Metacode;
 
@@ -14,20 +15,26 @@ public static class MetacodeCompareTool
 
     [McpServerTool(Name = "metacode_compare"), Description(
         "Translate TWO sources into canonical pseudocode and diff the result line by line — the equivalence check. Each " +
-        "side is read independently (path, or text + language: C#, a Razor page, a Ghidra snapshot, or canonical " +
-        "pseudocode), then both are lowered into the same model and printed, so the same algorithm comes out identical " +
-        "while a real difference shows as -/+ lines. Use it to review a translation someone wrote by hand, to check that " +
-        "a refactor kept the shape of a body, or to see what a change did. Comparison is the rendered text, which is this " +
-        "library's own definition of equivalence (same body, line for line); diagnostics of either side (RAW constructs) " +
-        "are listed after the diff, because two texts can agree only by both being incomplete in the same place.")]
-    public static CallToolResult Compare(
+        "side is read independently (path, or text + language: C#, Visual Basic, Java, JavaScript, a Razor page, Python, " +
+        "C/C++, a Ghidra snapshot, or canonical pseudocode), then both are lowered into the same model and printed, so the " +
+        "same algorithm comes out identical while a real difference shows as -/+ lines. A `.py`/`.cpp` side, or language " +
+        "'python'/'cpp' with source text, gets its AST dump produced for you (CPython's ast, `clang -Xclang " +
+        "-ast-dump=json`); pass the dump itself to skip the external process. Use it to review a translation someone wrote " +
+        "by hand — a C++ algorithm and its C# port included, or a JavaScript function and the TypeScript port of it — to " +
+        "check that a refactor kept the shape of a body, or to see what a change did. Comparison is the rendered text, " +
+        "which is this library's own definition of equivalence (same body, line for line); diagnostics of either side (RAW " +
+        "constructs) are listed after the diff, because two texts can agree only by both being incomplete in the same place.")]
+    public static async Task<CallToolResult> Compare(
+        ISourceDumpTranslationService dumps,
         [Description("Left/baseline file. Omit when passing leftText.")] string? leftPath = null,
         [Description("Left/baseline source text.")] string? leftText = null,
-        [Description("For leftText (required), or to override leftPath's extension: 'cs', 'razor', 'ghidra' or 'pseudo'.")]
+        [Description("For leftText (required), or to override leftPath's extension: 'cs', 'vb', 'java', 'js', 'cpp', 'python', " +
+                     "'razor', 'ghidra' or 'pseudo'.")]
         string? leftLanguage = null,
         [Description("Right/current file. Omit when passing rightText.")] string? rightPath = null,
         [Description("Right/current source text.")] string? rightText = null,
-        [Description("For rightText (required), or to override rightPath's extension: 'cs', 'razor', 'ghidra' or 'pseudo'.")]
+        [Description("For rightText (required), or to override rightPath's extension: 'cs', 'vb', 'java', 'js', 'cpp', 'python', " +
+                     "'razor', 'ghidra' or 'pseudo'.")]
         string? rightLanguage = null,
         [Description("Prefix every declaration and statement with '// @file:line' on both sides, so a mismatch names the line it came from.")]
         bool showOrigin = false,
@@ -36,12 +43,16 @@ public static class MetacodeCompareTool
         [Description("Normalize a C-style for into a WHILE on both sides (default true) — without it a for and a while differ by design.")]
         bool normalizeControlFlow = true,
         [Description("Fold a block whose only statement is a block into its parent, on both sides (default true).")]
-        bool flattenNestedBlocks = true)
+        bool flattenNestedBlocks = true,
+        [Description("Timeout in seconds per side for the Python/C++ dumper when that side needs one (default 120, max 900).")]
+        int timeoutSeconds = 120)
     {
-        var (left, leftLoadError) = MetacodeToolHelpers.Load(leftPath, leftText, leftLanguage, "left");
+        var (left, leftLoadError) = await MetacodeToolHelpers.LoadAsync(
+            leftPath, leftText, leftLanguage, "left", dumps, timeoutSeconds);
         if (left is null) return ToolText.Fail(leftLoadError!);
 
-        var (right, rightLoadError) = MetacodeToolHelpers.Load(rightPath, rightText, rightLanguage, "right");
+        var (right, rightLoadError) = await MetacodeToolHelpers.LoadAsync(
+            rightPath, rightText, rightLanguage, "right", dumps, timeoutSeconds);
         if (right is null) return ToolText.Fail(rightLoadError!);
 
         var (leftDocument, leftRendered, leftError) = MetacodeToolHelpers.Render(

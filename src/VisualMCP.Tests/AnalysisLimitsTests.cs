@@ -32,9 +32,12 @@ public sealed class AnalysisLimitsTests
 
         var result = ResultAssert.Json(await new FindReflectionUsageService(workspace).FindReflectionUsage());
 
+        // A typeof argument and a metadata name both reach the declaration: the first through the semantic
+        // model, the second because "Probe.Foo" is the type's metadata name.
         Assert.Equal(2, result.GetProperty("totalLookups").GetInt32());
-        Assert.Equal(1, result.GetProperty("resolvedInSolution").GetInt32());
+        Assert.Equal(2, result.GetProperty("resolvedInSolution").GetInt32());
         Assert.Contains("Foo", result.GetProperty("resolvedNames")[0].GetString());
+        Assert.Contains("Probe.Foo", result.GetProperty("resolvedNames").EnumerateArray().Select(name => name.GetString()));
 
         var findings = result.GetProperty("findings");
         Assert.Contains(findings.EnumerateArray(), finding =>
@@ -176,6 +179,14 @@ public sealed class AnalysisLimitsTests
         Assert.True(withFramework.GetProperty("externalAssemblies").GetInt32() > 0);
         Assert.Contains(withFramework.GetProperty("usages").EnumerateArray(), usage =>
             usage.GetProperty("Type").GetString()!.Contains("StringBuilder", StringComparison.Ordinal));
+
+        // The path and version are the handoff to decompile_type / assembly_workspace: without them the
+        // internals of the assembly are reachable only by finding the DLL first.
+        var row = Assert.Single(withFramework.GetProperty("byAssembly").EnumerateArray(), entry =>
+            entry.GetProperty("topTypes").EnumerateArray()
+                .Any(type => type.GetProperty("type").GetString()!.Contains("StringBuilder", StringComparison.Ordinal)));
+        Assert.EndsWith(".dll", row.GetProperty("path").GetString()!);
+        Assert.False(string.IsNullOrEmpty(row.GetProperty("version").GetString()));
     }
 
     [Fact]
@@ -188,5 +199,96 @@ public sealed class AnalysisLimitsTests
         Assert.Equal(0, result.GetProperty("generatedTreeCount").GetInt32());
         Assert.Equal(1, result.GetProperty("projects").GetInt32());
         Assert.Contains("No generated tree", result.GetProperty("note").GetString());
+    }
+
+    [Fact]
+    public async Task A_symbol_search_over_generated_trees_answers_with_an_empty_list_when_nothing_is_generated()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", "namespace Probe; public class C { }"));
+
+        var result = ResultAssert.Json(await new GeneratedSourcesService(workspace).ListAsync(symbol: "C"));
+
+        Assert.Equal("C", result.GetProperty("symbolFilter").GetString());
+        Assert.Equal(0, result.GetProperty("symbolMatches").GetArrayLength());
+    }
+
+    [Fact]
+    public void Declarations_are_found_by_name_inside_the_trees_no_document_points_at()
+    {
+        var document = CSharpSyntaxTree.ParseText("public class Visible { }", path: "/repo/Visible.cs");
+        var generated = CSharpSyntaxTree.ParseText("""
+            namespace Emitted
+            {
+                public class Order { public int Count; }
+                internal static class Program { internal static void Main() { } }
+            }
+            """, path: "/repo/obj/generated/Emitted.g.cs");
+
+        var compilation = CSharpCompilation.Create(
+            "Probe",
+            [document, generated],
+            [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var documentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Path.GetFullPath("/repo/Visible.cs"),
+        };
+
+        var order = Assert.Single(GeneratedSourcesService.FindDeclarations(compilation, "Probe", documentPaths, "Order"));
+        Assert.Equal("Order", order.Symbol.Name);
+        Assert.Equal(GeneratedSourcesService.ExactMatch, order.Rank);
+        Assert.EndsWith("Emitted.g.cs", order.Path);
+        Assert.Equal(3, order.Line);
+
+        // A field of a generated type is a declaration too, and so is a method.
+        Assert.Equal("Count", Assert.Single(
+            GeneratedSourcesService.FindDeclarations(compilation, "Probe", documentPaths, "Count")).Symbol.Name);
+        Assert.Equal("Main", Assert.Single(
+            GeneratedSourcesService.FindDeclarations(compilation, "Probe", documentPaths, "Main")).Symbol.Name);
+
+        // A tree the project has as a document is not a generated one: the search does not duplicate it.
+        Assert.Empty(GeneratedSourcesService.FindDeclarations(compilation, "Probe", documentPaths, "Visible"));
+    }
+
+    [Fact]
+    public async Task A_constant_reflective_name_is_folded_and_keeps_its_symbol_out_of_unused()
+    {
+        using var workspace = FakeWorkspace.Create(("C.cs", """
+            using System;
+
+            namespace Probe
+            {
+                public class ReflectOnly { }
+
+                public class Uses
+                {
+                    public Type? A() => Type.GetType("Probe" + "." + "ReflectOnly");
+                    public Type? B() => Type.GetType("Probe.ReflectOnly, Probe");
+                }
+            }
+            """));
+
+        var reflection = ResultAssert.Json(await new FindReflectionUsageService(workspace).FindReflectionUsage());
+
+        Assert.Equal(2, reflection.GetProperty("totalLookups").GetInt32());
+
+        // Two spellings resolve — the plain metadata name and the assembly-qualified one — so two names.
+        Assert.Equal(2, reflection.GetProperty("resolvedInSolution").GetInt32());
+
+        var findings = reflection.GetProperty("findings").EnumerateArray().ToList();
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, finding => Assert.True(finding.GetProperty("ResolvedInSolution").GetBoolean()));
+        Assert.Equal("Probe.ReflectOnly", findings[0].GetProperty("Target").GetString());
+        Assert.Equal("Probe.ReflectOnly, Probe", findings[1].GetProperty("Target").GetString());
+
+        var unused = ResultAssert.Json(
+            await new FindUnusedSymbolsService(workspace).FindUnusedSymbols(kinds: "Type"));
+
+        Assert.Contains(unused.GetProperty("reflectionInvoked").EnumerateArray(), entry =>
+            entry.GetProperty("Symbol").GetString()!.Contains("ReflectOnly", StringComparison.Ordinal) &&
+            entry.GetProperty("Api").GetString() == "Type.GetType");
+        Assert.DoesNotContain(unused.GetProperty("unused").EnumerateArray(), entry =>
+            entry.GetProperty("Symbol").GetString()!.Contains("ReflectOnly", StringComparison.Ordinal));
     }
 }

@@ -333,6 +333,15 @@ public sealed class XamlTypeResolver
             return new XamlDataContext(document.DesignDataContextType, "d:DataContext", symbol);
         }
 
+        // The runtime spelling, when the file writes the data context as a property element:
+        // <Window.DataContext><local:MainViewModel/></Window.DataContext>. A code-behind assignment
+        // (checked first) still wins, because it is what actually runs.
+        if (!string.IsNullOrWhiteSpace(document.ElementDataContextType))
+        {
+            var symbol = await ResolveTypeAsync(document, document.ElementDataContextType);
+            return new XamlDataContext(document.ElementDataContextType, "DataContext property element", symbol);
+        }
+
         return null;
     }
 

@@ -8,23 +8,35 @@ namespace Snitch.Languages.CSharp.Analysis;
 public sealed record GeneratedTreeInfo(string Path, int Length, bool HasGeneratedCodeAttribute, IReadOnlyList<string> Types);
 
 /// <summary>
-/// Shows what source generators contributed to a project: the generators the project references and the
-/// trees they produced, which exist in the compilation but not as documents. The tools read documents,
-/// so this is the answer to "is that type generated, and where does it come from" instead of a silent
-/// absence from navigation and analysis.
+/// A declaration found in a generated tree, with the rank its name match earned (4 exact, 3 prefix,
+/// 1 contains) so a caller can rank it the same way it ranks a source declaration.
+/// </summary>
+public sealed record GeneratedDeclaration(ISymbol Symbol, string Project, string Path, int Line, int Column, int Rank);
+
+/// <summary>
+/// Shows what source generators contributed to a project: the generators the project references, the trees
+/// they produced — which exist in the compilation but not as documents — and, asked by name, the
+/// declarations those trees hold. This is the way into generated code that a document-based search cannot
+/// reach, so "is that type generated, and where" has an answer instead of a silent absence.
 /// </summary>
 public interface IGeneratedSourcesService
 {
-    Task<object> ListAsync(string? projectName, bool includeSource = false, int maxCharsPerTree = 20_000);
+    Task<object> ListAsync(string? projectName, bool includeSource = false, int maxCharsPerTree = 20_000,
+        string? symbol = null);
 }
 
 public sealed class GeneratedSourcesService : IGeneratedSourcesService
 {
+    /// <summary>The rank an exact name match earns; prefix and contains are lower. Same scale as find_symbol.</summary>
+    public const int ExactMatch = 4;
+    public const int PrefixMatch = 3;
+    public const int ContainsMatch = 1;
+
     private readonly IRoslynWorkspace _workspace;
     public GeneratedSourcesService(IRoslynWorkspace workspace) => _workspace = workspace;
 
     public async Task<object> ListAsync(string? projectName = null, bool includeSource = false,
-        int maxCharsPerTree = 20_000)
+        int maxCharsPerTree = 20_000, string? symbol = null)
     {
         maxCharsPerTree = Math.Clamp(maxCharsPerTree, 200, 200_000);
         var solution = await _workspace.EnsureSolutionLoadedAsync();
@@ -46,12 +58,7 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
             var compilation = await project.GetCompilationAsync();
             if (compilation is null) continue;
 
-            var documentPaths = project.Documents
-                .Select(document => document.FilePath)
-                .Where(path => path is not null)
-                .Select(path => Path.GetFullPath(path!))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+            var documentPaths = DocumentPaths(project);
             var generated = FindGeneratedTrees(documentPaths, compilation.SyntaxTrees);
             totalGenerated += generated.Count;
 
@@ -72,6 +79,30 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
             });
         }
 
+        // Asked by name, the answer is the declarations inside the generated trees — the half of the model
+        // a document search cannot see, returned with the same exact/prefix/contains ranking it uses.
+        var matches = string.IsNullOrWhiteSpace(symbol)
+            ? null
+            : (await FindDeclarationsAsync(projects, symbol.Trim(), maxResults: 200))
+                .Select(match => new
+                {
+                    project = match.Project,
+                    match.Path,
+                    match.Line,
+                    match.Column,
+                    kind = match.Symbol.Kind.ToString(),
+                    symbol = match.Symbol.ToDisplayString(),
+                    accessibility = match.Symbol.DeclaredAccessibility.ToString(),
+                    matchKind = match.Rank switch
+                    {
+                        ExactMatch => "exact",
+                        PrefixMatch => "prefix",
+                        _ => "contains",
+                    },
+                    source = includeSource ? SourceOf(match.Symbol, maxCharsPerTree) : null,
+                })
+                .ToList();
+
         return new
         {
             projectFilter = projectName ?? "all",
@@ -80,11 +111,14 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
             includeSource,
             maxCharsPerTree,
             byProject = perProject,
+            symbolFilter = symbol,
+            symbolMatches = matches,
             note = totalGenerated == 0
                 ? "No generated tree was found: either the project uses no source generator, or this workspace does not run them (an Adhoc workspace never does)."
-                : "Generated trees exist in the compilation but not as documents: navigation, read_symbol and the editors " +
-                  "cannot address them. Their types are visible to the compiler, so a symbol with no source location is " +
-                  "usually one of these. includeSource=true returns each tree's text, capped at maxCharsPerTree.",
+                : "Generated trees exist in the compilation but not as documents. This tool is the inventory; " +
+                  "find_symbol and read_symbol fall back to these trees, so a generated declaration can be located and " +
+                  "read like a source one. Pass symbol= to search the generated declarations alone (exact, then prefix, " +
+                  "then contains) — includeSource=true adds each match's code.",
         };
     }
 
@@ -95,6 +129,128 @@ public sealed class GeneratedSourcesService : IGeneratedSourcesService
         return source.Length > maxChars
             ? (source[..maxChars], true)
             : (source, false);
+    }
+
+    /// <summary>The full paths of the documents of a project, which are what tells a generated tree apart.</summary>
+    public static HashSet<string> DocumentPaths(Project project) =>
+        project.Documents
+            .Select(document => document.FilePath)
+            .Where(path => !string.IsNullOrEmpty(path))
+            .Select(path => Path.GetFullPath(path!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The declarations in a compilation's generated trees (the trees no document points at) whose name
+    /// matches <paramref name="name"/>, best match first. This is the syntax-level way into generated code:
+    /// a document search never sees these trees, and their symbols do have a location — in the emitted file.
+    /// </summary>
+    public static List<GeneratedDeclaration> FindDeclarations(
+        Compilation compilation,
+        string projectName,
+        IReadOnlySet<string> documentPaths,
+        string name,
+        int maxResults = 200)
+    {
+        var results = new List<GeneratedDeclaration>();
+        if (string.IsNullOrWhiteSpace(name)) return results;
+
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            if (tree.FilePath.Length == 0) continue;
+            if (documentPaths.Contains(Path.GetFullPath(tree.FilePath))) continue;
+
+            var root = tree.GetRoot();
+
+            // Filter by the written name first, so the semantic model is built only for a tree that can answer.
+            var candidates = root.DescendantNodes()
+                .Where(node => DeclarationName(node) is { Length: > 0 } declared &&
+                               declared.Contains(name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (candidates.Count == 0) continue;
+
+            var model = compilation.GetSemanticModel(tree);
+            var text = tree.GetText();
+
+            foreach (var node in candidates)
+            {
+                var symbol = model.GetDeclaredSymbol(node);
+                if (symbol is null) continue;
+                if (symbol is ILocalSymbol) continue;
+
+                var position = text.Lines.GetLinePosition(node.SpanStart);
+                results.Add(new GeneratedDeclaration(
+                    symbol,
+                    projectName,
+                    tree.FilePath,
+                    position.Line + 1,
+                    position.Character + 1,
+                    RankOf(symbol.Name, name)));
+            }
+        }
+
+        return results
+            .OrderByDescending(declaration => declaration.Rank)
+            .ThenBy(declaration => declaration.Symbol.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(declaration => declaration.Path, StringComparer.OrdinalIgnoreCase)
+            .Take(maxResults)
+            .ToList();
+    }
+
+    /// <summary>The same search over the projects of a solution, one compilation at a time.</summary>
+    public static async Task<List<GeneratedDeclaration>> FindDeclarationsAsync(
+        IEnumerable<Project> projects,
+        string name,
+        int maxResults = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<GeneratedDeclaration>();
+
+        foreach (var project in projects)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var compilation = await project.GetCompilationAsync(cancellationToken);
+            if (compilation is null) continue;
+
+            results.AddRange(FindDeclarations(compilation, project.Name, DocumentPaths(project), name, maxResults));
+        }
+
+        return results
+            .OrderByDescending(declaration => declaration.Rank)
+            .ThenBy(declaration => declaration.Symbol.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(maxResults)
+            .ToList();
+    }
+
+    /// <summary>4 exact, 3 prefix, 1 contains — the ranking find_symbol applies to a source declaration too.</summary>
+    public static int RankOf(string candidate, string requested) =>
+        candidate.Equals(requested, StringComparison.OrdinalIgnoreCase) ? ExactMatch
+        : candidate.StartsWith(requested, StringComparison.OrdinalIgnoreCase) ? PrefixMatch
+        : ContainsMatch;
+
+    /// <summary>The name a node declares, or null for a node that declares nothing.</summary>
+    private static string? DeclarationName(SyntaxNode node) => node switch
+    {
+        BaseTypeDeclarationSyntax type => type.Identifier.ValueText,
+        DelegateDeclarationSyntax @delegate => @delegate.Identifier.ValueText,
+        MethodDeclarationSyntax method => method.Identifier.ValueText,
+        LocalFunctionStatementSyntax local => local.Identifier.ValueText,
+        PropertyDeclarationSyntax property => property.Identifier.ValueText,
+        IndexerDeclarationSyntax => "this[]",
+        EventDeclarationSyntax @event => @event.Identifier.ValueText,
+        VariableDeclaratorSyntax variable => variable.Identifier.ValueText,
+        EnumMemberDeclarationSyntax member => member.Identifier.ValueText,
+        _ => null,
+    };
+
+    /// <summary>The declaration's own text, capped — the code block a generated symbol stands for.</summary>
+    private static string? SourceOf(ISymbol symbol, int maxChars)
+    {
+        var node = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+        if (node is null) return null;
+
+        var text = node.ToString();
+        return text.Length > maxChars ? text[..maxChars] : text;
     }
 
     /// <summary>The report row for one tree: its metadata, or metadata plus text when the text was asked for.</summary>

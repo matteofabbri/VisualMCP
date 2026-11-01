@@ -31,6 +31,18 @@ public sealed class MetacodeTests
         }
         """;
 
+    private const string RustSum = """
+        fn sum(n: i32) -> i32 {
+            let mut total = 0;
+            for i in 0..n {
+                if i % 2 == 0 {
+                    total += i;
+                }
+            }
+            total
+        }
+        """;
+
     private const string PythonSum = """
         {
           "_type": "Module",
@@ -204,14 +216,11 @@ public sealed class MetacodeTests
         MetacodeTranslator.Default.Render(MetacodeSource.FromCSharp(source, "sample.cs"), options);
 
     /// <summary>
-    /// The opt-in readers for an AST dump. Python and C++ are not in <see cref="MetacodeTranslator.Default"/>:
-    /// nothing in this product produces their dump, so a caller who has one asks for that reader explicitly.
+    /// The two dump readers are part of <see cref="MetacodeTranslator.Default"/>: what they need is an AST
+    /// dump, and something in this product produces one (translate_python_file / translate_cpp_file, or
+    /// metacode_translate on a .py/.cpp path).
     /// </summary>
-    private static readonly MetacodeTranslator DumpTranslator = new(new ILanguageFrontend[]
-    {
-        new PythonFrontend(),
-        new CppFrontend(),
-    });
+    private static readonly MetacodeTranslator DumpTranslator = MetacodeTranslator.Default;
 
     private static string RenderPython(string json) =>
         DumpTranslator.Render(MetacodeSource.FromPythonAst(json, "sample.py"));
@@ -282,14 +291,17 @@ public sealed class MetacodeTests
     }
 
     [Fact]
-    public void The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp()
+    public void The_same_algorithm_prints_the_same_body_from_csharp_python_cpp_and_rust()
     {
         var csharp = Body(RenderCSharp(CSharpSum));
         var python = Body(RenderPython(PythonSum));
         var cpp = Body(RenderCpp(CppSum));
+        // Rust is in the default pipeline: its reader parses the source, so no dump step is involved.
+        var rust = Body(MetacodeTranslator.Default.Render(MetacodeSource.FromRust(RustSum, "sample.rs")));
 
         Assert.Equal(csharp, python);
         Assert.Equal(csharp, cpp);
+        Assert.Equal(csharp, rust);
 
         Assert.Equal(new[]
         {
@@ -496,7 +508,7 @@ public sealed class MetacodeTests
     }
 
     [Fact]
-    public void A_python_or_cpp_file_is_not_read_by_the_default_pipeline()
+    public void A_python_or_cpp_source_is_not_a_dump_and_the_pipeline_says_so()
     {
         var directory = Path.Combine(Path.GetTempPath(), "metacode-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -507,13 +519,18 @@ public sealed class MetacodeTests
             File.WriteAllText(python, "def f():\n    pass\n");
             File.WriteAllText(cpp, "int f() { return 0; }\n");
 
-            // Those readers take an AST dump, and nothing in this product produces one, so the default
-            // pipeline does not claim the languages: it says no frontend reads the source instead of
-            // failing on it as if it were a malformed dump.
+            // The readers take an AST dump, not the source, so a .py/.cpp file is not handed to one (it
+            // would be parsed as a malformed dump). The diagnostic names what produces the dump instead:
+            // the two translate_*_file tools, or metacode_translate/metacode_compare on that path.
+            var cppDiagnostic = Assert.Single(MetacodeTranslator.Default.Translate(MetacodeSource.FromFile(cpp)).Diagnostics);
+            Assert.Equal(MetacodeDiagnosticCodes.NoFrontend, cppDiagnostic.Code);
+            Assert.Contains("translate_cpp_file", cppDiagnostic.Message);
+
             Assert.Equal(MetacodeDiagnosticCodes.NoFrontend,
                 Assert.Single(MetacodeTranslator.Default.Translate(MetacodeSource.FromFile(python)).Diagnostics).Code);
-            Assert.Equal(MetacodeDiagnosticCodes.NoFrontend,
-                Assert.Single(MetacodeTranslator.Default.Translate(MetacodeSource.FromFile(cpp)).Diagnostics).Code);
+
+            Assert.False(new CppFrontend().CanHandle(MetacodeSource.FromFile(cpp)));
+            Assert.False(new PythonFrontend().CanHandle(MetacodeSource.FromFile(python)));
         }
         finally
         {
@@ -524,7 +541,8 @@ public sealed class MetacodeTests
     [Fact]
     public void A_source_no_frontend_reads_is_its_own_diagnostic()
     {
-        var document = MetacodeTranslator.Default.Translate(MetacodeSource.FromText("module x;", MetacodeLanguage.Rust, "x.rs"));
+        // Go has no reader in this pipeline; Rust, which used to be this test's example, has one now.
+        var document = MetacodeTranslator.Default.Translate(MetacodeSource.FromText("package main", MetacodeLanguage.Go, "main.go"));
 
         Assert.Equal(MetacodeDiagnosticCodes.NoFrontend, Assert.Single(document.Diagnostics).Code);
         Assert.Empty(document.Modules);

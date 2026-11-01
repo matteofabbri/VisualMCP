@@ -77,19 +77,21 @@ this section keeps.
 | **YAML** | `yaml_files` (documents, top-level keys, and `kind`/`apiVersion`/`metadata.name` for a manifest) and `analyze_yaml`: YAML0001–YAML0008 (tab indentation, duplicate key, trailing whitespace, YAML 1.1 booleans, a colon glued to its key, a value that parses as a nested mapping, unbalanced flow collection, an alias with no anchor) and YAML0009–YAML0012 (kind without apiVersion or the reverse, a metadata block with no name, a container with no image, two containers with the same name) | No schema validation (Kubernetes, Helm or CI); port-forward is absent and kustomize is an offline render, not a schema check. An indentation-aware line scan, not a YAML parser |
 | **SQL** | `sql_files` (per-file statements, verbs and tables) and `analyze_sql` (SQL0001–SQL0010: lexical, correctness, safety, security and performance rules); SQL built in C# is followed by `trace_data_flow` (a request value reaching `FromSqlRaw`/`ExecuteSqlRaw`/Dapper/`CommandText`) | No dialect parser, no schema model, no validation against a database, no execution, no query plan, no formatting |
 | **EF Core** | The C# model — `DbContext`, entities, configurations — is analysed like any C#; `ef_migrations` runs the project's own `dotnet ef` (list, add, script, diff, remove, update, info, dbcontext-list, pending-model-changes) | Model drift is detected by `pending-model-changes`, `script` returns the migration SQL and `diff` the SQL between two migrations; no field-level comparison of the model itself against the snapshot, no inspection of the SQL a single query will generate, no seeding help |
-| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true`; `k8s_helm` covers releases; `yaml_files`/`analyze_yaml` read a manifest's identity and its structural mistakes | No manifest or chart schema validation, no port-forward |
+| **Kubernetes / Helm** | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs` read the cluster; `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`, `k8s_delete`, `k8s_rollout` write with `confirm=true`; `k8s_helm` covers releases and lints a chart offline (`lint`); `yaml_files`/`analyze_yaml` read a manifest's identity and its structural mistakes | No schema validation of a rendered manifest beyond `kubectl apply --dry-run=server` (a chart is linted by `helm lint`), no port-forward |
 | **Razor / Blazor** | Page inventory, 17 markup/accessibility rules (RZ2001–RZ2017), 11 security rules (RZ1001–RZ1011), verified edits, Razor→metacode | No Razor compilation: `@model` members, tag helpers, component parameters, cascading values, `@bind` types, CSS isolation and JS interop are unchecked |
-| **Python / C++** | `translate_python_file` (CPython's `ast` dumper) and `translate_cpp_file` (`clang -ast-dump=json`) lower a file to canonical pseudocode, with origin lines and a diagnostic per unmodelled construct; `dumpJson` accepts a dump produced elsewhere | No type checker, no symbol navigation, no editing — the readers model syntax for comparison, not a language service |
-| **Java, Go, Rust** | `MetacodeLanguage` has labels | No frontend, no analysis, no navigation, no editing |
+| **Python / C++** | `metacode_translate` / `metacode_compare` take a `.py`/`.cpp` path (or `language=python|cpp` with source text) and run the dumper for it, and `translate_python_file` (CPython's `ast`) / `translate_cpp_file` (`clang -ast-dump=json`) return the dump itself; a saved dump is lowered too, with origin lines and a diagnostic per unmodelled construct | No type checker, no symbol navigation, no editing — the readers model syntax for comparison, not a language service |
+| **Java, Rust** | `metacode_translate` / `metacode_compare` read `.java` and `.rs` (and `language=java|rust`): Java through `JavaFrontend`, Rust through `RustFrontend`, both recursive-descent readers over the source | No symbol navigation, no analysis, no editing |
+| **Go** | `MetacodeLanguage` has a label | No frontend, no analysis, no navigation, no editing |
 
 ### 1.1 C#
 
 C# is the only language with a complete tool surface, and it is where every other documentation page
 applies. Its own limits are not language gaps and live in the general list,
-[Limits → Static analysis](reference/limits.md#static-analysis): reflection-only code looks dead,
-the trees a source generator emits are not documents (their text is returned by
-`list_generated_sources`), generated files may or may not appear, and anything that crosses the
-solution boundary is metadata rather than analysed source.
+[Limits → Static analysis](reference/limits.md#static-analysis): a reflective name built at run time is
+not guessed (so what that lookup reaches can still look dead), the trees a source generator emits are
+reachable by `find_symbol`, `read_symbol` and `list_generated_sources` but are not documents (the editors,
+the symbol index, `inspect_code` and `text_index` still do not see them; a text scan of the folder reaches
+the emitted file), and anything that crosses the solution boundary is metadata rather than analysed source.
 
 ### 1.2 Visual Basic
 
@@ -353,8 +355,8 @@ Missing:
 - Dockerfile analysis or linting, image layer/size analysis, build-cache inspection;
 - registry operations (login, tag, push), image vulnerability scanning;
 - Kubernetes: `k8s_*` wraps kubectl (status, context, get as rows, describe, logs, kustomize render,
-  exec, apply/delete/rollout with `confirm`) and `k8s_helm` wraps releases; still missing are
-  manifest/chart schema validation and port-forward;
+  exec, apply/delete/rollout with `confirm`) and `k8s_helm` wraps releases and `helm lint`; still
+  missing are manifest schema validation beyond the server-side dry run and port-forward;
 - YAML schema validation for compose/k8s manifests: `yaml_files`/`analyze_yaml` read the structure
   (YAML0001–YAML0012) and a manifest's `kind`/`apiVersion`/`name`, but no schema is applied.
 
@@ -412,8 +414,9 @@ top of it:
   `debug_data_breakpoints` (a field or property: **every write site the solution's source has**,
   resolved by Roslyn into line breakpoints, listed with their kind — the adapter has no
   `setDataBreakpoints`, so the sites are the data).
-- **Exceptions**: `debug_exceptions` takes the adapter's filters (`all`, `user-unhandled`) **and the
-  types that narrow them** (`filterOptions`, matched on the full type name, `!Type` to exclude), and
+- **Exceptions**: `debug_exceptions` takes named exception types, evaluated by the server against the
+  thrown type's **hierarchy** (resolved through the solution: a base class catches its derived types,
+  `!Type` excludes a branch); `all` / `user-unhandled` say when to break when no type is named, and
   with no setting to change it returns what the process is stopped on — id, stage, type, message and
   the nested inner exceptions. A stop on an exception carries the same block automatically.
 - **Inspection**: `debug_threads`, `debug_stack` (file:line per frame), `debug_variables`
@@ -690,7 +693,7 @@ where the answer stops and why.
 | SQL diagnostics | `sql_files` and `analyze_sql` (SQL0001–SQL0010). A pattern scanner, not a dialect parser: no schema, no execution, no query plan (§1.6) |
 | JS/TS diagnostics and build | `node_info`/`node_install`/`node_script` for the toolchain; `node_typecheck` (tsc → `TSxxxx`) and `node_lint` (eslint → findings) for the diagnostics; `node_outdated`/`node_audit` for the dependency health; `js_files` and `analyze_js` (JS0001–JS0017) for the source itself, with a relative import resolved to a file and a module graph that reports its cycles. No type model or symbol table (§1.5) |
 | EF Core migrations | `ef_migrations` (list/add/script/diff/remove/update/info/dbcontext-list/pending-model-changes): the migration SQL, the schema delta between two migrations, and whether the model still matches the snapshot. A field-level comparison of the model itself and per-query SQL inspection are not covered (§1.6) |
-| Kubernetes and Helm | `k8s_status`/`k8s_context`/`k8s_get`/`k8s_describe`/`k8s_logs` read; `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`/`k8s_delete`/`k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases. No manifest/chart schema validation, no port-forward (§1.7) |
+| Kubernetes and Helm | `k8s_status`/`k8s_context`/`k8s_get`/`k8s_describe`/`k8s_logs` read; `k8s_kustomize` renders an overlay offline; `k8s_exec` runs one confirmed command inside a pod; `k8s_apply`/`k8s_delete`/`k8s_rollout` write with `confirm=true` (apply defaults to a server-side dry run); `k8s_helm` covers releases and `lint` checks a chart offline. No manifest schema validation beyond the server-side dry run, no port-forward (§1.7) |
 | VB refactoring and editing | `apply_rename`, `encapsulate_field`, `add_params`/`remove_params`, `change_signature` (declaration and every plain call site, call parentheses optional), `change_type`, `use_base_type`, `type_to_partial`, `safe_delete`, `extract_interface` (an `Interface` plus the `Implements` clause on the type and on each member), `extract_method`, `move_type`, `move_to_folder` (the folder derived from the `Namespace` block), `property_to_auto`, `function_to_property` (both call spellings) and `simplify_vb_code` (41 ids) apply; `context_action` on a `.vb` file implements the 33 ids that have a VB spelling (guards, Try/If/Using wrapping, Imports, interpolation, digit separators, named arguments, use var/explicit type, split declaration, StringBuilder, merge/split checks, conditional access, `Select Case`, LINQ both ways, For Each↔For, invert loop); `apply_code_fix` runs the .NET analyzers' VB fixers. What is still C#-only is the declaration-shape tail of the catalogue (§1.2) |
 | F# analysis | `fsharp_files` lists the declarations (modules, types, functions, opens) and `analyze_fsharp` applies FS0001–FS0010; `build_project` returns the compiler's FS#### diagnostics, `run_tests` runs F# tests, `search_text`/`text_index` read the files. No symbols, references or refactorings: F# is not a Roslyn language (§1.3) |
 | Debug a process | `debug_launch`/`debug_attach` with line, function and data breakpoints, per-exception-type filters, stepping, `debug_stack`, `debug_variables`, `debug_evaluate` (read or write), `debug_restart` (20 `debug_*` tools); `profile_stacks`/`profile_dump`/`profile_slowdown` remain the post-mortem path (§2) |

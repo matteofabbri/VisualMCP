@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Snitch.Workspace;
 
@@ -33,8 +34,13 @@ public sealed class FindUnusedSymbolsService : IFindUnusedSymbolsService
         if (projectName is not null && projects.Count == 0)
             return new { error = $"Project '{projectName}' not found." };
 
+        // The other half of "no reference": a name a reflective lookup asks for. Collected first,
+        // because the answer for a candidate depends on the whole solution, not on its file.
+        var reflectiveNames = await CollectReflectiveNames(projects);
+
         var unused = new List<object>();
         var frameworkInvoked = new List<object>();
+        var reflectionInvoked = new List<object>();
 
         foreach (var project in projects)
         {
@@ -81,6 +87,25 @@ public sealed class FindUnusedSymbolsService : IFindUnusedSymbolsService
                         continue;
                     }
 
+                    // Nor is it a reflective caller: Type.GetType("Probe.Foo") names the type without
+                    // referencing it. The lookup that names this symbol is the evidence, in the same spirit
+                    // as the framework classification above.
+                    if (reflectiveNames.TryGetValue(sym.Name, out var lookup))
+                    {
+                        reflectionInvoked.Add(new
+                        {
+                            Symbol        = sym.ToDisplayString(),
+                            Kind          = sym.Kind.ToString(),
+                            Api           = lookup.Api,
+                            Project       = project.Name,
+                            LookupFile    = lookup.File,
+                            LookupLine    = lookup.Line,
+                            loc?.SourceTree?.FilePath,
+                            Line          = loc?.GetLineSpan().StartLinePosition.Line + 1,
+                        });
+                        continue;
+                    }
+
                     unused.Add(new
                     {
                         Symbol        = sym.ToDisplayString(),
@@ -102,12 +127,52 @@ public sealed class FindUnusedSymbolsService : IFindUnusedSymbolsService
             unused,
             frameworkInvokedCount = frameworkInvoked.Count,
             frameworkInvoked,
-            note = frameworkInvoked.Count == 0
+            reflectionInvokedCount = reflectionInvoked.Count,
+            reflectionInvoked,
+            note = frameworkInvoked.Count == 0 && reflectionInvoked.Count == 0
                 ? null
-                : "frameworkInvoked lists the symbols with no in-solution reference that a framework calls by convention " +
-                  "(MVC actions, Razor Pages handlers, hub methods, hosted services, Blazor lifecycle and parameters, " +
-                  "EF overrides and DbSets, middleware, test methods). Call framework_entry_points for the full classification.",
+                : "Two lists hold the symbols with no in-solution reference that something outside the call graph calls: " +
+                  "frameworkInvoked (routing, DI, the test runner, the component renderer — call framework_entry_points " +
+                  "for the full classification) and reflectionInvoked (a reflective lookup names the symbol — call " +
+                  "find_reflection_usage for every lookup). A name built at run time is not matched, so what such a " +
+                  "lookup reaches still appears under unused.",
         };
+    }
+
+    /// <summary>
+    /// The names the solution's reflective lookups ask for, by the simple name a declaration is matched on.
+    /// <c>Type.GetType("Probe.Foo")</c> is keyed as <c>Foo</c>, which is what <see cref="ISymbol.Name"/> holds.
+    /// </summary>
+    private static async Task<Dictionary<string, (string Api, string? File, int Line)>> CollectReflectiveNames(
+        IEnumerable<Project> projects)
+    {
+        var names = new Dictionary<string, (string Api, string? File, int Line)>(StringComparer.Ordinal);
+
+        foreach (var project in projects)
+        {
+            foreach (var document in project.Documents.Where(document => document.SourceCodeKind == SourceCodeKind.Regular))
+            {
+                var root = await document.GetSyntaxRootAsync();
+                var model = await document.GetSemanticModelAsync();
+                if (root is null || model is null) continue;
+
+                foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                {
+                    if (model.GetSymbolInfo(invocation).Symbol is not IMethodSymbol target) continue;
+                    if (ReflectiveLookups.Match(target) is not { } api) continue;
+
+                    var name = ReflectiveLookups.NameOf(
+                        invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression, model);
+                    var simple = name is null ? null : ReflectiveLookups.SimpleName(name);
+                    if (simple is null) continue;
+
+                    names.TryAdd(simple, (api, document.FilePath,
+                        invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1));
+                }
+            }
+        }
+
+        return names;
     }
 
     private static bool IsCandidate(ISymbol sym, HashSet<string> kinds) => sym.Kind switch

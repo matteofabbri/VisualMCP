@@ -6,16 +6,31 @@ using Snitch.Metacode.Rendering;
 namespace VisualMCP.Translation;
 
 /// <summary>
-/// Translates a Python or C++ file into canonical pseudocode. Both readers in the library consume an AST
-/// dump rather than the source, so this service produces the dump — <c>python -m ast</c> through the
-/// four-line dumper, <c>clang -Xclang -ast-dump=json</c> — and then hands it to a translator built with
-/// the matching frontend. Passing <c>dumpJson</c> skips the external process entirely, which is how a
-/// machine without Python or clang can still translate a dump produced elsewhere.
+/// The dump a dumper produced, or why it could not and what would fix it.
+/// <see cref="Tool"/> names the interpreter/compiler that answered (<c>python3</c>, <c>clang++</c>) or
+/// <c>supplied dump</c> when the caller passed one.
+/// </summary>
+public sealed record SourceDump(string? Json, string? Error, string? Hint, string Tool);
+
+/// <summary>
+/// Produces the AST dump a Python or C++ metacode reader consumes, and translates one into canonical
+/// pseudocode. Both readers in the library read a dump rather than the source, so this service runs the
+/// dumper — <c>python -m ast</c> through the four-line script, <c>clang -Xclang -ast-dump=json</c>. A
+/// caller that already has a dump skips the external process, which is how a machine without Python or
+/// clang still translates.
 /// </summary>
 public interface ISourceDumpTranslationService
 {
     /// <summary>Translates <paramref name="path"/> (or the supplied <paramref name="dumpJson"/>) for one language.</summary>
     Task<object> TranslateAsync(string language, string? path, string? dumpJson, int timeoutSeconds);
+
+    /// <summary>
+    /// The dump alone, without translating it: <paramref name="path"/>, or <paramref name="sourceText"/>
+    /// written to a temporary file so the dumper can read it. The caller hands the JSON to the metacode
+    /// pipeline itself — which is what <c>metacode_translate</c> and <c>metacode_compare</c> do, so a
+    /// <c>.cpp</c> path goes through the same readers and options as every other language.
+    /// </summary>
+    Task<SourceDump> ProduceDumpAsync(string language, string? path, string? sourceText, int timeoutSeconds);
 }
 
 public sealed class SourceDumpTranslationService : ISourceDumpTranslationService
@@ -46,37 +61,69 @@ public sealed class SourceDumpTranslationService : ISourceDumpTranslationService
         var (kind, error) = Normalize(language);
         if (error is not null) return new { error };
 
+        if (!string.IsNullOrWhiteSpace(dumpJson))
+            return Translate(kind, dumpJson, path, "supplied dump");
+
+        if (string.IsNullOrWhiteSpace(path))
+            return new { error = "A file path is required (or pass dumpJson with the dump produced elsewhere)." };
+        if (!File.Exists(path))
+            return new { error = $"File not found: {path}" };
+
+        var dump = await ProduceDumpAsync(kind, path, null, timeoutSeconds);
+        if (dump.Error is not null)
+            return new { error = dump.Error, language = kind, hint = dump.Hint };
+
+        return Translate(kind, dump.Json!, path, dump.Tool);
+    }
+
+    public async Task<SourceDump> ProduceDumpAsync(string language, string? path, string? sourceText, int timeoutSeconds)
+    {
+        var (kind, error) = Normalize(language);
+        if (error is not null) return new SourceDump(null, error, null, language);
+
         var timeout = Math.Clamp(timeoutSeconds < 1 ? 120 : timeoutSeconds, 1, 900);
-        var json = dumpJson;
 
-        if (string.IsNullOrWhiteSpace(json))
+        string? temporary = null;
+        try
         {
-            if (string.IsNullOrWhiteSpace(path))
-                return new { error = "A file path is required (or pass dumpJson with the dump produced elsewhere)." };
-            if (!File.Exists(path))
-                return new { error = $"File not found: {path}" };
-
-            var (produced, dumpError, tool) = kind == "python"
-                ? await ProducePythonDumpAsync(path, timeout)
-                : await ProduceCppDumpAsync(path, timeout);
-
-            if (dumpError is not null)
+            var target = path;
+            if (string.IsNullOrWhiteSpace(target))
             {
-                return new
-                {
-                    error = dumpError,
-                    language = kind,
-                    hint = kind == "python"
-                        ? "Install Python 3 (the standard library's ast module is all this needs), or pass dumpJson."
-                        : "Install Clang, or pass dumpJson with the output of 'clang -Xclang -ast-dump=json -fsyntax-only <file>'.",
-                };
+                if (string.IsNullOrWhiteSpace(sourceText))
+                    return new SourceDump(null, "A file path or source text is required.", null, kind);
+
+                // The dumper is run against a file, so text becomes one. A C++ translation unit that
+                // includes a header next to the caller's text cannot resolve it: pass the path instead.
+                var extension = kind == "python" ? ".py" : ".cpp";
+                temporary = Path.Combine(Path.GetTempPath(), $"visualmcp-ast-{Guid.NewGuid():N}{extension}");
+                await File.WriteAllTextAsync(temporary, sourceText);
+                target = temporary;
+            }
+            else if (!File.Exists(target))
+            {
+                return new SourceDump(null, $"File not found: {target}", null, kind);
             }
 
-            return Translate(kind, produced!, path, tool);
-        }
+            var (json, dumpError, tool) = kind == "python"
+                ? await ProducePythonDumpAsync(target, timeout)
+                : await ProduceCppDumpAsync(target, timeout);
 
-        return Translate(kind, json, path, "supplied dump");
+            return dumpError is null
+                ? new SourceDump(json, null, null, tool)
+                : new SourceDump(null, dumpError, Hint(kind), tool);
+        }
+        finally
+        {
+            if (temporary is not null)
+            {
+                try { File.Delete(temporary); } catch { /* best-effort */ }
+            }
+        }
     }
+
+    private static string Hint(string kind) => kind == "python"
+        ? "Install Python 3 (the standard library's ast module is all this needs), or pass dumpJson."
+        : "Install Clang, or pass dumpJson with the output of 'clang -Xclang -ast-dump=json -fsyntax-only <file>'.";
 
     /// <summary>The translation half, without an external process: public so the pipeline is testable.</summary>
     public static object TranslateDump(string language, string json, string? path)
@@ -170,11 +217,14 @@ public sealed class SourceDumpTranslationService : ISourceDumpTranslationService
         }
     }
 
-    /// <summary>Runs clang's JSON AST dump against <paramref name="path"/>, trying clang++ then clang.</summary>
+    /// <summary>Runs clang's JSON AST dump against <paramref name="path"/>, trying clang++ then clang (`clang` first for a .c, which is C and not a C++ translation unit).</summary>
     private static async Task<(string? json, string? error, string tool)> ProduceCppDumpAsync(string path, int timeoutSeconds)
     {
         var failures = new List<string>();
-        foreach (var compiler in new[] { "clang++", "clang" })
+        var compilers = Path.GetExtension(path).Equals(".c", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "clang", "clang++" }
+            : new[] { "clang++", "clang" };
+        foreach (var compiler in compilers)
         {
             string output;
             try

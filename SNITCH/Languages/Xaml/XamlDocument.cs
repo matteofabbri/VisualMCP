@@ -66,6 +66,12 @@ public sealed class XamlDocument
     /// <summary>The type a design-time <c>d:DataContext="{d:DesignInstance Type=…}"</c> declares, when any.</summary>
     public string? DesignDataContextType { get; set; }
 
+    /// <summary>
+    /// The type the root's <c>&lt;Root.DataContext&gt;&lt;local:ViewModel/&gt;&lt;/Root.DataContext&gt;</c>
+    /// instantiates, when the file writes its data context as an element instead of an attribute.
+    /// </summary>
+    public string? ElementDataContextType { get; set; }
+
     public int ElementCount { get; init; }
 
     /// <summary>A page/view/component root that must name its code-behind type.</summary>

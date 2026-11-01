@@ -14,24 +14,36 @@ public sealed class MetacodeTranslator
 {
     /// <summary>
     /// The pipeline this product runs, which is exactly what it can produce: C#, Visual Basic and Java
-    /// (Roslyn for the first two, this library's recursive-descent reader for Java), Razor (this
-    /// repository's scanner), and canonical pseudocode and a Ghidra snapshot — the library's own formats,
-    /// written by its renderer and by its native pipeline.
+    /// (Roslyn for the first two, this library's recursive-descent reader for Java), JavaScript (Acornima,
+    /// an ECMAScript parser), Rust (this library's own recursive-descent reader), Razor (this repository's
+    /// scanner), Python and C++ (an AST dump: <c>python -m ast</c>, <c>clang -Xclang -ast-dump=json</c>),
+    /// and canonical pseudocode and a Ghidra snapshot — the library's own formats, written by its renderer
+    /// and by its native pipeline.
     /// </summary>
     /// <remarks>
     /// Java is here because something in this product feeds it: <see cref="Decompilation.JadxService"/>
-    /// turns a .class/.dex/.jar/.apk into .java sources. Python and C++ are still deliberately absent —
-    /// <see cref="PythonFrontend"/> and <see cref="CppFrontend"/> read an AST dump (<c>python -m ast</c>,
-    /// <c>clang -Xclang -ast-dump=json</c>) that nothing in this product generates, so listing them would
-    /// advertise languages the pipeline cannot be fed. They stay available as opt-in readers: pass one to
-    /// the constructor when the caller has such a dump.
+    /// turns a .class/.dex/.jar/.apk into .java sources. JavaScript is here because a repository beside a
+    /// .NET solution usually has some, and <see cref="Frontends.JavaScriptFrontend"/> reads the source
+    /// directly — the grammar is Acornima's, the lowering is this library's. Rust is here for the same
+    /// reason and has no external tool at all: <see cref="Frontends.RustFrontend"/> is a recursive-descent
+    /// reader over the source, because nothing here could produce a Rust AST dump without a toolchain.
+    /// <see cref="PythonFrontend"/> and <see cref="CppFrontend"/> need an AST dump rather than the source,
+    /// and something in this product produces one too: the host's <c>translate_python_file</c> /
+    /// <c>translate_cpp_file</c> run the dumper, and <c>metacode_translate</c> / <c>metacode_compare</c> run
+    /// it for a <c>.py</c> or a <c>.cpp</c> path. They are listed here because a dump is a
+    /// <see cref="MetacodeSource"/> like any other; a reader listed here still claims only its own language,
+    /// never a source file that merely has the right extension (a <c>.cpp</c> is not a clang dump).
     /// </remarks>
     public static MetacodeTranslator Default { get; } = new(new ILanguageFrontend[]
     {
         new CSharpFrontend(),
         new VisualBasicFrontend(),
         new JavaFrontend(),
+        new JavaScriptFrontend(),
+        new RustFrontend(),
         new RazorFrontend(),
+        new PythonFrontend(),
+        new CppFrontend(),
         new PseudocodeFrontend(),
         new GhidraFrontend(),
     });
@@ -57,7 +69,10 @@ public sealed class MetacodeTranslator
                     new MetacodeDiagnostic(
                         MetacodeDiagnosticCodes.NoFrontend,
                         MetacodeDiagnosticSeverity.Error,
-                        "No frontend in this pipeline can read this source. The default pipeline reads C#, Razor, canonical pseudocode and Ghidra snapshots; a Python or clang AST dump needs a translator built with that reader.",
+                        "No frontend in this pipeline can read this source. The readers it has are " +
+                        string.Join(", ", Frontends.Select(f => f.Name)) +
+                        ". A .py or .cpp source file is not an AST dump: translate_python_file / translate_cpp_file " +
+                        "(or metacode_translate / metacode_compare on that path) run the dumper that produces one.",
                         MetacodeOrigin.Unknown),
                 });
         }

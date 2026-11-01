@@ -12,7 +12,9 @@ public static class FindSymbolTool
         "It matches real declared symbols via Roslyn's semantic model, ignoring comments, strings and unrelated text that grep falsely hits, " +
         "and returns each match's kind, containing type/namespace, file and line. Ranks exact > prefix > CamelHumps > contains; " +
         "partialMatch adds contains matches, and when nothing matches a fuzzy subsequence fallback ('custord' finds " +
-        "CustomerOrder) names the closest declarations instead of returning nothing. " +
+        "CustomerOrder) names the closest declarations instead of returning nothing. A declaration a source generator " +
+        "emits is found too (its tree is in the compilation but in no project document) and reported with " +
+        "generated=true. " +
         "The working-directory solution auto-loads on first use.")]
     public static Task<object> FindSymbol(
         INavigationService nav,

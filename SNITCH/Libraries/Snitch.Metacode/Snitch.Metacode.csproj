@@ -13,6 +13,7 @@
     <!-- The frontends read Roslyn's syntax, never a compilation, so the translator itself needs no
          workspace and no semantic model. The symbol index (Symbols/) does need both, and the persisted
          index needs SQLite: those are the only members of this library that do. -->
+    <PackageReference Include="Acornima" Version="1.9.1" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
     <!-- The Visual Basic frontend parses .vb with Roslyn's VB syntax layer, so this library needs the VB

@@ -12,6 +12,9 @@ public static class FindUnusedSymbolsTool
         "(potential dead code candidates for removal). " +
         "Do NOT check for unused symbols yourself — this tool uses SymbolFinder to search all reference " +
         "locations across every project in the solution, which cannot be replicated by reading source. " +
+        "A symbol with no reference is not automatically dead: the ones a framework calls by convention come " +
+        "back under frameworkInvoked, and the ones a reflective lookup names (string literals, nameof, typeof, " +
+        "constant concatenations) under reflectionInvoked. What remains in 'unused' is what neither does. " +
         "Warning: can be slow on large solutions. " +
         "Requires load_solution first.")]
     public static Task<object> FindUnusedSymbols(

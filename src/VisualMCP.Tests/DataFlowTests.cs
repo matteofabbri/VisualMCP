@@ -222,6 +222,40 @@ public sealed class DataFlowTests
     }
 
     [Fact]
+    public async Task AFieldOnOneParameterDoesNotTaintTheSameFieldOnAnother()
+    {
+        const string source = """
+            using System;
+            using System.IO;
+
+            public sealed class Request
+            {
+                public string Path;
+            }
+
+            public class Probe
+            {
+                public void Run(Request a, Request b)
+                {
+                    a.Path = Console.ReadLine();
+                    File.ReadAllText(b.Path);
+                }
+
+                public void Run2(Request a)
+                {
+                    a.Path = Console.ReadLine();
+                    File.ReadAllText(a.Path);
+                }
+            }
+            """;
+
+        var json = await TraceAsync(source);
+
+        // One flow: the parameter the value was stored on. The other parameter's field stays clean.
+        Assert.Equal(1, json.GetProperty("flowCount").GetInt32());
+    }
+
+    [Fact]
     public async Task AFieldThatNeverHoldsATaintedValueProducesNoFlow()
     {
         var json = await TraceAsync("""

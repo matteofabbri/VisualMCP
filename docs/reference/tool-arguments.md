@@ -277,19 +277,24 @@ folder is git-ignored.
 ## Metacode
 
 The metacode tools need no loaded solution and no running process: they read a file or a text and
-print pseudocode. Python and C++ are read from their **AST JSON dumps**, not from source.
+print pseudocode. Python and C++ are read from their **AST JSON dumps**; a `.py`/`.cpp` path, or source
+text with `language=python|cpp`, is put through the dumper first (CPython's `ast`, `clang
+-Xclang -ast-dump=json`), and a dump you already have skips that step. Rust is read from the source itself
+(`language=rust`, or a `.rs` file): the reader is this library's own, so no toolchain is involved.
 
 ```
-metacode_translate(path? | text+language=cs|py|cpp|razor|ghidra|pseudo,
+metacode_translate(path? | text+language=cs|vb|java|js|rust|py|cpp|razor|ghidra|pseudo,
                    showOrigin=false, includeComments=true,
-                   normalizeControlFlow=true, flattenNestedBlocks=true)
+                   normalizeControlFlow=true, flattenNestedBlocks=true,
+                   timeoutSeconds=120)
                 → the canonical pseudocode, then `// diagnostics (n)` with one line
                   per RAW construct (MC0001–MC0008)
 
 metacode_compare(leftPath? | leftText+leftLanguage?,
                  rightPath? | rightText+rightLanguage?,
                  showOrigin=false, includeComments=true,
-                 normalizeControlFlow=true, flattenNestedBlocks=true)
+                 normalizeControlFlow=true, flattenNestedBlocks=true,
+                 timeoutSeconds=120)
                 → header per side, `-`/`+`/` ` diff of the canonical text with
                   long unchanged runs collapsed, per-side diagnostics after it
 
@@ -705,10 +710,11 @@ k8s_delete(kind, name, namespaceName?, ignoreNotFound=false, confirm=false,
 k8s_rollout(action=status|restart|undo, kind=deployment, name?, namespaceName?,
             toRevision?, confirm=false, timeoutSeconds=180)
 
-k8s_helm(action=list|status|history|get-values|template|repo-list, release?,
+k8s_helm(action=list|status|history|get-values|template|lint|repo-list, release?,
          chart?, namespaceName?, valuesFile?, setValues[]?, timeoutSeconds=120)
-                → template renders offline with -f/--set; list and history ask
-                  for -o json; a missing helm is reported, not thrown
+                → template and lint are offline (a chart rendered / checked with
+                  -f/--set); list and history ask for -o json; a missing helm
+                  is reported, not thrown
 
 node_info(directory?)
                 → nearest package.json above directory (default: cwd), the

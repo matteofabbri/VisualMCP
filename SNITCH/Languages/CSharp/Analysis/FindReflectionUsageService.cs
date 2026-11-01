@@ -21,29 +21,6 @@ public sealed class FindReflectionUsageService : IFindReflectionUsageService
     private readonly IRoslynWorkspace _workspace;
     public FindReflectionUsageService(IRoslynWorkspace workspace) => _workspace = workspace;
 
-    /// <summary>The reflective APIs worth reporting: containing type, member, and the label used in the answer.</summary>
-    private static readonly (string Type, string Member, string Api)[] ReflectiveApis =
-    [
-        ("Activator", "CreateInstance", "Activator.CreateInstance"),
-        ("Type", "GetType", "Type.GetType"),
-        ("Type", "GetMethod", "Type.GetMethod"),
-        ("Type", "GetProperty", "Type.GetProperty"),
-        ("Type", "GetField", "Type.GetField"),
-        ("Type", "GetMember", "Type.GetMember"),
-        ("Type", "GetConstructor", "Type.GetConstructor"),
-        ("Type", "GetMethods", "Type.GetMethods"),
-        ("Type", "GetProperties", "Type.GetProperties"),
-        ("Type", "GetFields", "Type.GetFields"),
-        ("Type", "GetCustomAttribute", "Type.GetCustomAttribute"),
-        ("Type", "GetCustomAttributes", "Type.GetCustomAttributes"),
-        ("Type", "InvokeMember", "Type.InvokeMember"),
-        ("Assembly", "GetType", "Assembly.GetType"),
-        ("Assembly", "Load", "Assembly.Load"),
-        ("Assembly", "LoadFrom", "Assembly.LoadFrom"),
-        ("Assembly", "LoadFile", "Assembly.LoadFile"),
-        ("Delegate", "CreateDelegate", "Delegate.CreateDelegate"),
-    ];
-
     public async Task<object> FindReflectionUsage(string? projectName = null)
     {
         var solution = await _workspace.EnsureSolutionLoadedAsync();
@@ -77,30 +54,31 @@ public sealed class FindReflectionUsageService : IFindReflectionUsageService
                     var target = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
                     if (target is null) continue;
 
-                    var api = Match(target);
+                    var api = ReflectiveLookups.Match(target);
                     if (api is null) continue;
 
                     var argument = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
-                    var name = NameOf(argument);
+                    var name = ReflectiveLookups.NameOf(argument, model);
                     var line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
 
                     byApi[api] = byApi.GetValueOrDefault(api) + 1;
 
-                    string? resolvedSymbol = null;
-                    string? resolvedFile = null;
-                    if (name is not null && LooksLikeAnIdentifier(name))
-                    {
-                        var match = compilation.GetSymbolsWithName(candidate => candidate == name,
-                                SymbolFilter.TypeAndMember, CancellationToken.None)
-                            .FirstOrDefault();
+                    // typeof(T) resolves through the semantic model, which is exact for a nested or generic
+                    // type; every other lookup has to be resolved by the name the call carries.
+                    var resolved = argument is TypeOfExpressionSyntax typeOf
+                        ? (ISymbol?)model.GetTypeInfo(typeOf.Type).Type
+                        : null;
+                    if (resolved is null && name is not null)
+                        resolved = ReflectiveLookups.Resolve(compilation, name);
 
-                        if (match is not null)
-                        {
-                            resolvedSymbol = match.ToDisplayString();
-                            resolvedFile = match.Locations.FirstOrDefault(location => location.IsInSource)?.SourceTree?.FilePath;
-                            resolvedNames.Add(name);
-                        }
-                    }
+                    // A symbol from a referenced assembly is not in the solution: only a source declaration
+                    // counts as resolved.
+                    var inSolution = resolved is not null && resolved.Locations.Any(location => location.IsInSource);
+                    var resolvedFile = inSolution
+                        ? resolved!.Locations.FirstOrDefault(location => location.IsInSource)?.SourceTree?.FilePath
+                        : null;
+
+                    if (inSolution && name is not null) resolvedNames.Add(name);
 
                     findings.Add(new
                     {
@@ -109,8 +87,8 @@ public sealed class FindReflectionUsageService : IFindReflectionUsageService
                         Line = line,
                         Api = api,
                         Target = name ?? "(runtime value)",
-                        ResolvedInSolution = resolvedSymbol is not null,
-                        ResolvedSymbol = resolvedSymbol,
+                        ResolvedInSolution = inSolution,
+                        ResolvedSymbol = inSolution ? resolved!.ToDisplayString() : null,
                         ResolvedFile = resolvedFile,
                     });
                 }
@@ -126,40 +104,9 @@ public sealed class FindReflectionUsageService : IFindReflectionUsageService
             resolvedNames = resolvedNames.ToList(),
             findings,
             note = "Reflection is enumerated, not followed: a symbol reached only by one of these lookups still has " +
-                   "no reference in the call graph. Names under resolvedNames are the ones a dead-code result must " +
-                   "treat as live by convention.",
+                   "no reference in the call graph. find_unused_symbols applies the same names (its reflectionInvoked " +
+                   "list) instead of calling those symbols dead. A name built at run time is not guessed, so what " +
+                   "such a lookup reaches can still look dead.",
         };
     }
-
-    private static string? Match(IMethodSymbol method)
-    {
-        var containingType = method.ContainingType;
-        if (containingType is null) return null;
-
-        var ns = containingType.ContainingNamespace?.ToDisplayString() ?? string.Empty;
-        if (ns is not ("System" or "System.Reflection")) return null;
-
-        foreach (var (type, member, api) in ReflectiveApis)
-            if (containingType.Name == type && method.Name == member)
-                return api;
-
-        return null;
-    }
-
-    /// <summary>The name the lookup uses: a string literal, <c>nameof(…)</c>, or <c>typeof(…)</c>.</summary>
-    private static string? NameOf(ExpressionSyntax? expression) => expression switch
-    {
-        null => null,
-        LiteralExpressionSyntax literal when literal.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StringLiteralExpression)
-            => literal.Token.ValueText,
-        InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "nameof" } } invocation
-            when invocation.ArgumentList.Arguments.Count == 1
-            => invocation.ArgumentList.Arguments[0].Expression.ToString(),
-        TypeOfExpressionSyntax typeOf => typeOf.Type.ToString(),
-        _ => null,
-    };
-
-    private static bool LooksLikeAnIdentifier(string name) =>
-        name.Length > 0 && (char.IsLetter(name[0]) || name[0] == '_') &&
-        name.All(character => char.IsLetterOrDigit(character) || character is '_' or '.');
 }

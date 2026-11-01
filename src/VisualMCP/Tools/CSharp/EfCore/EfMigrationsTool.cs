@@ -13,14 +13,17 @@ public static class EfMigrationsTool
         "fromMigration and toMigration), remove the last, apply them (update, optionally " +
         "to a name), show the DbContext info, list contexts, or check whether the model has changed since the " +
         "last migration (pending-model-changes, EF Core 8+, reported as the boolean pendingModelChanges). " +
+        "action=model-diff is the field-level half that needs no tool run: it reads the *ModelSnapshot.cs and " +
+        "compares it property by property with the entity classes Roslyn resolves, reporting the properties added " +
+        "in the model, the snapshot members with no CLR member (usually shadow properties) and the type changes. " +
         "Returns the exact command, exit code, stdout and stderr as structured data — no shell transcript to " +
         "parse. The C# model (DbContext, entities, configurations, migration classes) is analysed by the " +
         "normal tools; this runs the tooling around it.")]
     public static Task<object> EfMigrations(
         IEfMigrationsService ef,
         [Description("The migrations project (exact name from the solution). Omit when the solution has exactly one.")] string? projectName = null,
-        [Description("list | add | script | diff | remove | update | info | dbcontext-list | pending-model-changes")] string action = "list",
-        [Description("Migration name, for add (required) and update (optional target).")] string? name = null,
+        [Description("list | add | script | diff | model-diff | remove | update | info | dbcontext-list | pending-model-changes")] string action = "list",
+        [Description("Migration name, for add (required) and update (optional target); for model-diff, part of the snapshot name when there are several.")] string? name = null,
         [Description("Output file for script/diff.")] string? output = null,
         [Description("Startup project, when it differs from the migrations project.")] string? startupProject = null,
         [Description("Pass --no-build (faster when the project was just built).")] bool noBuild = false,

@@ -7,8 +7,9 @@ using Xunit;
 namespace VisualMCP.Tests;
 
 /// <summary>
-/// The Razor frontend of the metacode model: a page becomes a class that renders, the markup is kept
-/// verbatim, and a construct the scanner cannot express is reported instead of disappearing.
+/// The Razor frontend of the metacode model: a page becomes a class that renders, every Razor control
+/// construct becomes a node of the model, the markup between them is kept verbatim, and a construct the
+/// frontend cannot read is reported instead of disappearing.
 /// </summary>
 public sealed class RazorMetacodeTests
 {
@@ -45,6 +46,12 @@ public sealed class RazorMetacodeTests
         new RazorFrontend().Translate(MetacodeSource.FromRazor(text, name), MetacodeOptions.Default);
 
     private static string Render(string text) => new PseudocodeRenderer().Render(Translate(text));
+
+    private static MetacodeFunction RenderMethod(MetacodeDocument document) =>
+        document.Modules
+            .SelectMany(module => module.Declarations)
+            .OfType<MetacodeFunction>()
+            .Single(function => function.Name == "Render");
 
     [Fact]
     public void RazorFrontend_ModelsThePageAsAClassThatRenders()
@@ -93,27 +100,101 @@ public sealed class RazorMetacodeTests
     }
 
     [Fact]
-    public void RazorFrontend_KeepsAnUnmodelledBlockAsOneOpaqueStatement()
+    public void RazorFrontend_ModelsASwitchWithItsCasesAndBreak()
     {
         const string page = """
             @switch (Model.Kind)
             {
                 case 1:
-                    <p>one</p>
+                case 2:
+                    <p>one or two</p>
+                    break;
+                default:
+                    <p>other</p>
                     break;
             }
             """;
 
         var document = Translate(page);
+        var pseudocode = new PseudocodeRenderer().Render(document);
 
-        Assert.Contains("RAW[razor] @switch", new PseudocodeRenderer().Render(document));
-        Assert.Contains(document.Diagnostics, diagnostic =>
-            diagnostic.Code == MetacodeDiagnosticCodes.UnsupportedStatement &&
-            diagnostic.Message.Contains("@switch"));
+        var @switch = Assert.IsType<MetacodeSwitch>(RenderMethod(document).Body!.Statements[0]);
+        Assert.Equal(2, @switch.Cases.Count);
+        Assert.False(@switch.Cases[0].IsDefault);
+        Assert.Equal(2, @switch.Cases[0].Labels!.Count);
+        Assert.True(@switch.Cases[1].IsDefault);
+        Assert.Contains(@switch.Cases[0].Body.Statements, statement => statement is MetacodeBreak);
+        Assert.Contains(@switch.Cases[1].Body.Statements, statement => statement is MetacodeBreak);
+
+        Assert.Contains("SWITCH Model.Kind", pseudocode);
+        Assert.Contains("CASE 1, 2", pseudocode);
+        Assert.Contains("DEFAULT", pseudocode);
+        Assert.Contains("BREAK", pseudocode);
+        Assert.DoesNotContain("RAW[razor] @switch", pseudocode);
+        Assert.DoesNotContain(document.Diagnostics, diagnostic =>
+            diagnostic.Code == MetacodeDiagnosticCodes.UnsupportedStatement);
     }
 
     [Fact]
-    public void RazorFrontend_ReportsABraceLessBodyInsteadOfDroppingIt()
+    public void RazorFrontend_ModelsTryCatchFinally()
+    {
+        const string page = """
+            @try
+            {
+                <p>try</p>
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Length > 0)
+            {
+                <p>catch</p>
+            }
+            finally
+            {
+                <p>finally</p>
+            }
+            """;
+
+        var document = Translate(page);
+        var pseudocode = new PseudocodeRenderer().Render(document);
+
+        var @try = Assert.IsType<MetacodeTry>(RenderMethod(document).Body!.Statements[0]);
+        var @catch = Assert.Single(@try.Catches);
+        Assert.Equal("InvalidOperationException", @catch.ExceptionType!.Render());
+        Assert.Equal("ex", @catch.VariableName);
+        Assert.NotNull(@catch.Filter);
+        Assert.NotNull(@try.Finally);
+
+        Assert.Contains("TRY", pseudocode);
+        Assert.Contains("CATCH (InvalidOperationException ex) WHEN ex.Message.Length > 0", pseudocode);
+        Assert.Contains("FINALLY", pseudocode);
+        Assert.Contains("END TRY", pseudocode);
+        Assert.Contains("RAW[razor] <p>finally</p>", pseudocode);
+        Assert.DoesNotContain(document.Diagnostics, diagnostic =>
+            diagnostic.Code == MetacodeDiagnosticCodes.UnsupportedStatement);
+    }
+
+    [Fact]
+    public void RazorFrontend_ModelsDoWhile()
+    {
+        const string page = """
+            @do
+            {
+                <p>body</p>
+            }
+            while (Model.More);
+            """;
+
+        var document = Translate(page);
+        var pseudocode = new PseudocodeRenderer().Render(document);
+
+        Assert.Contains("REPEAT", pseudocode);
+        Assert.Contains("UNTIL Model.More", pseudocode);
+        Assert.Contains("RAW[razor] <p>body</p>", pseudocode);
+        Assert.DoesNotContain(document.Diagnostics, diagnostic =>
+            diagnostic.Code == MetacodeDiagnosticCodes.UnsupportedStatement);
+    }
+
+    [Fact]
+    public void RazorFrontend_ModelsABraceLessBody()
     {
         const string page = """
             @if (Model.Any)
@@ -121,9 +202,102 @@ public sealed class RazorMetacodeTests
             """;
 
         var document = Translate(page);
+        var pseudocode = new PseudocodeRenderer().Render(document);
 
-        Assert.Contains(document.Diagnostics, diagnostic => diagnostic.Message.Contains("@if"));
-        Assert.Contains("RAW[razor] @if (Model.Any)", new PseudocodeRenderer().Render(document));
+        var @if = Assert.IsType<MetacodeIf>(RenderMethod(document).Body!.Statements[0]);
+        var markup = Assert.IsType<MetacodeOpaqueStatement>(Assert.Single(@if.Then.Statements));
+        Assert.Equal("<p>x</p>", markup.Text);
+
+        Assert.Contains("IF Model.Any THEN", pseudocode);
+        Assert.Contains("RAW[razor] <p>x</p>", pseudocode);
+        Assert.DoesNotContain(document.Diagnostics, diagnostic =>
+            diagnostic.Code == MetacodeDiagnosticCodes.UnsupportedStatement);
+    }
+
+    [Fact]
+    public void RazorFrontend_ModelsABraceLessBodyWithItsElseBranch()
+    {
+        const string page = """
+            @if (a)
+            <p>a</p>
+            else
+            <p>b</p>
+            """;
+
+        var document = Translate(page);
+
+        var @if = Assert.IsType<MetacodeIf>(RenderMethod(document).Body!.Statements[0]);
+        Assert.NotNull(@if.Else);
+        Assert.Equal("<p>a</p>", Assert.IsType<MetacodeOpaqueStatement>(Assert.Single(@if.Then.Statements)).Text);
+        Assert.Equal("<p>b</p>", Assert.IsType<MetacodeOpaqueStatement>(Assert.Single(@if.Else!.Statements)).Text);
+    }
+
+    [Fact]
+    public void RazorFrontend_LowersATopLevelCodeBlockInPlace()
+    {
+        const string page = """
+            @{ var count = items.Count; }
+            <p>@count</p>
+            """;
+
+        var document = Translate(page);
+        var statements = RenderMethod(document).Body!.Statements;
+        var pseudocode = new PseudocodeRenderer().Render(document);
+
+        var declared = Assert.IsType<MetacodeLocalVariable>(statements[0]);
+        Assert.Equal("count", declared.Name);
+        Assert.Contains("RAW[razor] <p>@count</p>", pseudocode);
+        Assert.DoesNotContain("var count", pseudocode);
+    }
+
+    [Fact]
+    public void RazorFrontend_ModelsASectionAsItsOwnMethod()
+    {
+        const string page = """
+            @section Scripts {
+                <script src="app.js"></script>
+            }
+            <h1>hi</h1>
+            """;
+
+        var document = Translate(page);
+        var pseudocode = new PseudocodeRenderer().Render(document);
+
+        var section = document.Modules
+            .SelectMany(module => module.Declarations)
+            .OfType<MetacodeFunction>()
+            .Single(function => function.Name == "Section_Scripts");
+
+        Assert.Contains("METHOD Section_Scripts", pseudocode);
+        Assert.Contains("RAW[razor] <script src=\"app.js\"></script>", pseudocode);
+
+        // The section body belongs to the section, not to the page body.
+        Assert.Single(section.Body!.Statements);
+        Assert.Equal("<h1>hi</h1>", Assert.IsType<MetacodeOpaqueStatement>(
+            Assert.Single(RenderMethod(document).Body!.Statements)).Text);
+    }
+
+    [Fact]
+    public void RazorFrontend_ModelsAControlConstructInsideASwitchCase()
+    {
+        const string page = """
+            @switch (Model.Kind)
+            {
+                case 1:
+                    @if (Model.Any)
+                    {
+                        <p>a</p>
+                    }
+                    break;
+            }
+            """;
+
+        var document = Translate(page);
+        var @switch = Assert.IsType<MetacodeSwitch>(RenderMethod(document).Body!.Statements[0]);
+        var @case = Assert.Single(@switch.Cases);
+
+        Assert.Contains(@case.Body.Statements, statement => statement is MetacodeIf);
+        Assert.Contains(@case.Body.Statements, statement => statement is MetacodeBreak);
     }
 
     [Fact]

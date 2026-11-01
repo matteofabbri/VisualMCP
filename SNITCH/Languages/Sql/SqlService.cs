@@ -10,6 +10,9 @@ namespace Snitch.Languages.Sql;
 /// comments and literals, splits the file into statements and applies the rules whose answer does
 /// not depend on a schema. It is a pattern scanner in the same sense as the Razor and XAML layers:
 /// every rule says what it proves, and none of them claims to validate a query against a database.
+/// The one exception is explicit and opt-in: <see cref="ExtractSchema"/> reads the DDL the scan
+/// itself carries, and a statement is checked against <em>that</em> model — never against a live
+/// database, and never against a table the scanned files do not define.
 /// </summary>
 public static class SqlAnalyzer
 {
@@ -28,6 +31,8 @@ public static class SqlAnalyzer
         ["SQL0008"] = "LIKE with a leading wildcard (the index cannot be used)",
         ["SQL0009"] = "ALTER TABLE … ADD … NOT NULL without DEFAULT (fails on a non-empty table)",
         ["SQL0010"] = "INSERT column and value counts differ",
+        ["SQL0011"] = "A table the statement names is not declared by the DDL in the scanned files",
+        ["SQL0012"] = "A column the statement names is not declared on the table it reads",
     };
 
     private static readonly Regex SelectStar = new(@"\bSELECT\s+(?:DISTINCT\s+|ALL\s+)?\*", Options);
@@ -48,13 +53,42 @@ public static class SqlAnalyzer
         @"(?<table>(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*)" +
         @"(?:\.(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*))*)", Options);
 
+    private static readonly Regex CreateTable = new(
+        @"\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?<table>" +
+        @"(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*)(?:\.(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*))*)", Options);
+
+    private static readonly Regex AlterTable = new(
+        @"\bALTER\s+TABLE\s+(?<table>(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*)" +
+        @"(?:\.(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*))*)\s+(?<rest>[\s\S]*?)(?=;|\z)", Options);
+
+    private static readonly Regex LeadingIdentifier = new(
+        @"^\s*(?<name>\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*)", Options);
+
+    private static readonly Regex CteName = new(@"\b(?:WITH|,)\s*(?<name>[A-Za-z_]\w*)\s+AS\s*\(", Options);
+    private static readonly Regex TrailingAlias = new(@"\s+AS\s+[A-Za-z_]\w*\s*$", Options);
+    private static readonly Regex FromWithAlias = new(
+        @"\bFROM\s+(?<table>(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*)(?:\.(?:\[[^\]]+\]|""[^""]+""|[A-Za-z_#@][\w#@$]*))*)" +
+        @"\s+(?:AS\s+)?(?<alias>[A-Za-z_]\w*)", Options);
+
+    private static readonly HashSet<string> NonColumnWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "AS", "ON", "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT",
+        "END", "NULL", "TRUE", "FALSE", "DEFAULT", "VALUES", "SET", "FROM", "JOIN", "INNER", "LEFT", "RIGHT",
+        "FULL", "CROSS", "OUTER", "AND", "OR", "NOT", "IN", "EXISTS", "CASE", "WHEN", "THEN", "ELSE",
+    };
+
+    private static readonly HashSet<string> ConstraintKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "INDEX", "KEY", "EXCLUDE", "LIKE",
+    };
+
     /// <summary>Masked text plus the literals it contained, offsets preserved.</summary>
     private sealed record MaskResult(char[] Masked, List<Literal> Literals, List<(int Offset, string Message)> Lexical);
 
     private readonly record struct Literal(string Value, int Offset);
 
     /// <summary>Analyzes one file's text. <paramref name="filePath"/> is only echoed in the findings.</summary>
-    public static SqlAnalysis AnalyzeText(string text, string filePath = "(text)")
+    public static SqlAnalysis AnalyzeText(string text, string filePath = "(text)", SqlSchema? schema = null)
     {
         text ??= string.Empty;
         var lineStarts = LineStarts(text);
@@ -137,6 +171,9 @@ public static class SqlAnalyzer
                     $"INSERT lists {counts.Columns} column(s) but {counts.Values} value(s).",
                     InsertInto.Match(statementText).Index,
                     "Make the two lists the same length — the mismatch is an error the server rejects at run time.");
+
+            if (schema is not null && !schema.IsEmpty)
+                ValidateAgainstSchema(statementText, verb, statementTables, schema, Add);
         }
 
         // File-level rules: literals (the wildcard LIKE cannot be seen in the masked text) and
@@ -352,6 +389,239 @@ public static class SqlAnalyzer
         return tables;
     }
 
+    // ── schema model ─────────────────────────────────────────────────────────
+    /// <summary>
+    /// Reads the DDL the scanned text carries: every <c>CREATE TABLE</c> (and the columns an
+    /// <c>ALTER TABLE … ADD</c> appends) becomes the model a statement is checked against. It is the
+    /// schema of the <em>scan</em>, not of a database: a table the files do not declare stays unknown
+    /// and is reported as such, never guessed.
+    /// </summary>
+    public static void ExtractSchemaInto(SqlSchema schema, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var masked = new string(Mask(text).Masked);
+
+        foreach (Match create in CreateTable.Matches(masked))
+        {
+            var open = masked.IndexOf('(', create.Index + create.Length);
+            if (open < 0) continue;
+            if (masked[(create.Index + create.Length)..open].Trim().Length != 0) continue;
+
+            var close = MatchingClose(masked, open);
+            if (close < 0) continue;
+
+            var table = schema.Declare(UnquoteTable(create.Groups["table"].Value), LineOf(masked, create.Index));
+            foreach (var part in SplitTopLevel(masked[(open + 1)..close]))
+            {
+                var column = ColumnName(part);
+                if (column is not null) table.AddColumn(column);
+            }
+        }
+
+        foreach (Match alter in AlterTable.Matches(masked))
+        {
+            var rest = alter.Groups["rest"].Value;
+            var add = Regex.Match(rest, @"\bADD\b(?:\s+COLUMN\b)?", Options);
+            if (!add.Success) continue;
+
+            var table = schema.Find(UnquoteTable(alter.Groups["table"].Value));
+            if (table is null) continue;
+
+            foreach (var part in SplitTopLevel(rest[(add.Index + add.Length)..]))
+            {
+                var column = ColumnName(part);
+                if (column is not null) table.AddColumn(column);
+            }
+        }
+    }
+
+    private static void ValidateAgainstSchema(
+        string statement, string verb, List<string> tables, SqlSchema schema, Action<string, string, string, string, int, string?> add)
+    {
+        var ctes = CteName.Matches(statement).Select(match => match.Groups["name"].Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var known = new List<SqlSchema.Table>();
+        foreach (var name in tables)
+        {
+            if (IsExternalTableName(name) || ctes.Contains(LastSegment(name))) continue;
+
+            var table = schema.Find(name);
+            if (table is null)
+            {
+                add("SQL0011", "warning", "Correctness",
+                    $"The table '{name}' is not declared by the DDL in the scanned files, so the statement is not "
+                    + "checked against a schema for it.",
+                    IndexOf(statement, name), "Scan the script that creates it, or check the name.");
+                continue;
+            }
+
+            known.Add(table);
+        }
+
+        // A join cannot attribute a bare column to one table, and two SELECTs mean a subquery owns
+        // some of the names: in both cases the column check stays silent rather than guessing.
+        if (known.Count != 1) return;
+        var target = known[0];
+        if (target.Columns.Count == 0) return;
+        if (Regex.Matches(statement, @"\bSELECT\b", Options).Count > 1) return;
+
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { target.Name, LastSegment(target.Name) };
+        var fromAlias = FromWithAlias.Match(statement);
+        if (fromAlias.Success && !NonColumnWords.Contains(fromAlias.Groups["alias"].Value))
+            aliases.Add(fromAlias.Groups["alias"].Value);
+
+        foreach (var (column, index) in CandidateColumns(statement, verb, aliases))
+        {
+            if (column.Length == 0 || column.StartsWith('@') || NonColumnWords.Contains(column)) continue;
+            if (target.HasColumn(column)) continue;
+
+            add("SQL0012", "warning", "Correctness",
+                $"'{column}' is not a column of '{target.Name}' as the scanned DDL declares it.",
+                index, "Check the name, or add the column to the schema script.");
+        }
+    }
+
+    /// <summary>The names a statement is likely to treat as columns, for the common statement shapes.</summary>
+    private static IEnumerable<(string Column, int Index)> CandidateColumns(
+        string statement, string verb, HashSet<string> aliases)
+    {
+        switch (verb)
+        {
+            case "SELECT":
+            {
+                var select = Regex.Match(statement, @"\bSELECT\b", Options);
+                var from = Regex.Match(statement, @"\bFROM\b", Options);
+                if (!select.Success || !from.Success || from.Index <= select.Index) yield break;
+
+                var projection = statement[(select.Index + select.Length)..from.Index];
+                if (projection.Contains('*')) yield break;
+
+                foreach (var part in SplitTopLevel(projection))
+                {
+                    var text = Regex.Replace(part.Trim(), @"^(?:DISTINCT|ALL|TOP\s+\d+)\s+", string.Empty, Options);
+                    if (EndingIdentifier(text, aliases) is { } column) yield return (column, IndexOf(statement, column));
+                }
+
+                break;
+            }
+
+            case "INSERT":
+            {
+                var insert = InsertInto.Match(statement);
+                if (!insert.Success) yield break;
+
+                var open = statement.IndexOf('(', insert.Index + insert.Length);
+                if (open < 0) yield break;
+                if (statement[(insert.Index + insert.Length)..open].Trim().Length != 0) yield break;
+
+                var close = MatchingClose(statement, open);
+                if (close < 0) yield break;
+
+                foreach (var part in SplitTopLevel(statement[(open + 1)..close]))
+                {
+                    var identifier = LeadingIdentifier.Match(part.Trim());
+                    if (!identifier.Success) continue;
+                    var column = Unquote(identifier.Groups["name"].Value);
+                    yield return (column, IndexOf(statement, column));
+                }
+
+                break;
+            }
+
+            case "UPDATE":
+            {
+                var set = Regex.Match(statement, @"\bSET\b", Options);
+                if (!set.Success) yield break;
+
+                var afterSet = statement[(set.Index + set.Length)..];
+                var where = Regex.Match(afterSet, @"\bWHERE\b", Options);
+                var body = where.Success ? afterSet[..where.Index] : afterSet;
+
+                foreach (var part in SplitTopLevel(body))
+                {
+                    var equals = part.IndexOf('=');
+                    if (equals <= 0) continue;
+
+                    var left = part[..equals].Trim();
+                    if (EndingIdentifier(left, aliases) is { } column) yield return (column, IndexOf(statement, column));
+                }
+
+                break;
+            }
+        }
+    }
+
+    private static string? EndingIdentifier(string expression, HashSet<string> aliases)
+    {
+        var text = expression.Trim();
+        var alias = TrailingAlias.Match(text);
+        if (alias.Success) text = text[..alias.Index].Trim();
+
+        if (text.Length == 0 || text.Contains('(')) return null;
+
+        var match = Regex.Match(text,
+            @"(?:(?<q>\[[^\]]+\]|""[^""]+""|[A-Za-z_][\w$]*)\s*\.\s*)?(?<c>\[[^\]]+\]|""[^""]+""|[A-Za-z_][\w$]*)\s*$",
+            Options);
+        if (!match.Success) return null;
+
+        if (match.Groups["q"].Success)
+        {
+            var qualifier = Unquote(match.Groups["q"].Value);
+            if (!aliases.Contains(qualifier)) return null;
+        }
+
+        return Unquote(match.Groups["c"].Value);
+    }
+
+    private static string? ColumnName(string definition)
+    {
+        var text = definition.Trim();
+        if (text.Length == 0) return null;
+
+        var first = LeadingIdentifier.Match(text);
+        if (!first.Success) return null;
+
+        var name = Unquote(first.Groups["name"].Value);
+        return ConstraintKeywords.Contains(name) ? null : name;
+    }
+
+    private static string Unquote(string identifier)
+    {
+        var text = identifier.Trim();
+        if (text.Length >= 2 && text[0] == '[' && text[^1] == ']') text = text[1..^1];
+        else if (text.Length >= 2 && text[0] == '"' && text[^1] == '"') text = text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+        return text.Trim();
+    }
+
+    private static string UnquoteTable(string name) =>
+        string.Join(".", name.Split('.').Select(Unquote));
+
+    private static string LastSegment(string name)
+    {
+        var dot = name.LastIndexOf('.');
+        return dot < 0 ? name : name[(dot + 1)..];
+    }
+
+    private static bool IsExternalTableName(string name) =>
+        name.StartsWith('#') || name.StartsWith('@') ||
+        name.StartsWith("sys.", StringComparison.OrdinalIgnoreCase) ||
+        name.StartsWith("information_schema.", StringComparison.OrdinalIgnoreCase);
+
+    private static int IndexOf(string statement, string text)
+    {
+        var index = statement.IndexOf(text, StringComparison.OrdinalIgnoreCase);
+        return Math.Max(0, index);
+    }
+
+    private static int LineOf(string text, int offset)
+    {
+        var line = 1;
+        for (var index = 0; index < offset && index < text.Length; index++)
+            if (text[index] == '\n') line++;
+        return line;
+    }
+
     private static bool ParenthesesBalanced(string statement, out int problemIndex)
     {
         var depth = 0;
@@ -477,6 +747,92 @@ public sealed record SqlAnalysis(
     int Lines, int Statements, IReadOnlyList<string> Verbs, IReadOnlyList<string> Tables,
     IReadOnlyList<SqlStatementFacts> StatementList, IReadOnlyList<SqlFinding> Findings);
 
+/// <summary>One table the scanned DDL declares.</summary>
+public sealed record SqlTableSchema(string Name, string? Schema, IReadOnlyList<string> Columns, int Line);
+
+/// <summary>
+/// The schema a scan carries: the <c>CREATE TABLE</c> statements (and <c>ALTER TABLE … ADD</c>
+/// columns) of the files it reads. It is what makes SQL0011/SQL0012 possible without a database —
+/// and the reason they say "not declared by the scanned DDL" rather than "does not exist".
+/// </summary>
+public sealed class SqlSchema
+{
+    internal sealed class Table(string name, string? schemaName, int line)
+    {
+        private readonly HashSet<string> _columns = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _ordered = [];
+
+        public string Name { get; } = name;
+        public string? SchemaName { get; } = schemaName;
+        public int Line { get; } = line;
+        public IReadOnlyList<string> Columns => _ordered;
+
+        public void AddColumn(string column)
+        {
+            if (column.Length == 0 || !_columns.Add(column)) return;
+            _ordered.Add(column);
+        }
+
+        public bool HasColumn(string column) => _columns.Contains(column);
+
+        public SqlTableSchema Snapshot() => new(Name, SchemaName, _ordered, Line);
+    }
+
+    private readonly Dictionary<string, Table> _byFull = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Table> _bySimple = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _ambiguous = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<Table> _tables = [];
+
+    public bool IsEmpty => _tables.Count == 0;
+    public int TableCount => _tables.Count;
+    public int ColumnCount => _tables.Sum(table => table.Columns.Count);
+    public IReadOnlyList<SqlTableSchema> Tables => _tables.Select(table => table.Snapshot()).ToList();
+
+    internal Table Declare(string fullName, int line)
+    {
+        if (_byFull.TryGetValue(fullName, out var existing)) return existing;
+
+        var simple = SimpleName(fullName);
+        var schemaName = fullName.Contains('.') ? fullName[..fullName.LastIndexOf('.')] : null;
+
+        var table = new Table(simple, schemaName, line);
+        _byFull[fullName] = table;
+
+        if (_bySimple.TryGetValue(simple, out var other) && !ReferenceEquals(other, table))
+            _ambiguous.Add(simple);
+        else
+            _bySimple[simple] = table;
+
+        _tables.Add(table);
+        return table;
+    }
+
+    internal Table? Find(string rawName)
+    {
+        var full = string.Join(".", rawName.Split('.').Select(UnquotePart));
+        if (_byFull.TryGetValue(full, out var direct)) return direct;
+
+        var simple = SimpleName(full);
+        if (_ambiguous.Contains(simple)) return null;
+        return _bySimple.TryGetValue(simple, out var bySimple) ? bySimple : null;
+    }
+
+    private static string SimpleName(string fullName)
+    {
+        var dot = fullName.LastIndexOf('.');
+        return dot < 0 ? fullName : fullName[(dot + 1)..];
+    }
+
+    private static string UnquotePart(string part)
+    {
+        var text = part.Trim();
+        if (text.Length >= 2 && text[0] == '[' && text[^1] == ']') text = text[1..^1];
+        else if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
+            text = text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+        return text.Trim();
+    }
+}
+
 /// <summary>Discovery and orchestration over the solution's <c>.sql</c> files.</summary>
 public interface ISqlService
 {
@@ -484,7 +840,8 @@ public interface ISqlService
     Task<object> InventoryAsync(string? path, int maxFiles);
 
     /// <summary>The findings of the rule set, filtered by severity and rule id.</summary>
-    Task<object> AnalyzeAsync(string? path, string minSeverity, string? rule, int maxFiles, int maxFindings);
+    Task<object> AnalyzeAsync(string? path, string minSeverity, string? rule, int maxFiles, int maxFindings,
+        string? schema);
 }
 
 public sealed class SqlService : ISqlService
@@ -536,7 +893,8 @@ public sealed class SqlService : ISqlService
         };
     }
 
-    public async Task<object> AnalyzeAsync(string? path, string minSeverity, string? rule, int maxFiles, int maxFindings)
+    public async Task<object> AnalyzeAsync(string? path, string minSeverity, string? rule, int maxFiles, int maxFindings,
+        string? schema = "auto")
     {
         var severity = (minSeverity ?? "info").Trim().ToLowerInvariant();
         if (severity is not ("info" or "warning" or "error"))
@@ -550,17 +908,32 @@ public sealed class SqlService : ISqlService
                 rules = SqlAnalyzer.Rules.Select(pair => new { id = pair.Key, proves = pair.Value }).ToList(),
             };
 
+        var schemaMode = string.IsNullOrWhiteSpace(schema) ? "auto" : schema.Trim().ToLowerInvariant();
+        if (schemaMode is not ("auto" or "off"))
+            return new { error = "schema must be auto (validate against the scanned DDL) or off." };
+        var useSchema = schemaMode == "auto";
+
         maxFiles = Math.Clamp(maxFiles, 1, 5_000);
         maxFindings = Math.Clamp(maxFindings, 1, 5_000);
 
         var (root, files, truncated) = Discover(path, maxFiles);
-        var findings = new List<SqlFinding>();
-        var analyzed = 0;
+        var model = new SqlSchema();
+        var texts = new List<(string File, string Text)>();
 
         foreach (var file in files)
         {
-            var analysis = await AnalyzeFileAsync(file);
-            if (analysis is null) continue;
+            var text = await ReadTextAsync(file);
+            if (text is null) continue;
+            texts.Add((file, text));
+            if (useSchema) SqlAnalyzer.ExtractSchemaInto(model, text);
+        }
+
+        var findings = new List<SqlFinding>();
+        var analyzed = 0;
+
+        foreach (var (file, text) in texts)
+        {
+            var analysis = SqlAnalyzer.AnalyzeText(text, file, useSchema ? model : null);
             analyzed++;
 
             foreach (var finding in analysis.Findings)
@@ -589,21 +962,37 @@ public sealed class SqlService : ISqlService
             byRule = findings.GroupBy(finding => finding.RuleId)
                 .OrderByDescending(group => group.Count())
                 .ToDictionary(group => group.Key, group => group.Count()),
+            schema = new
+            {
+                enabled = useSchema,
+                tableCount = model.TableCount,
+                columnCount = model.ColumnCount,
+                tables = model.Tables.Take(200).ToList(),
+                note = useSchema
+                    ? "SQL0011/SQL0012 are checked against the DDL the scanned files declare, not against a database. " +
+                      "A table the scan does not define is reported as undeclared, never as invalid."
+                    : "Schema validation is off: only the lexical and pattern rules ran.",
+            },
             findings = shown,
             truncated = findings.Count > shown.Count,
-            note = "A pattern scan, not a dialect parser: it proves the shape of a statement, never that a " +
-                   "schema accepts it.",
+            note = "A pattern scan, not a dialect parser: it proves the shape of a statement. When the scanned files " +
+                   "carry their DDL, the table and column names are also checked against that model (SQL0011/SQL0012).",
         };
     }
 
     private async Task<SqlAnalysis?> AnalyzeFileAsync(string file)
     {
+        var text = await ReadTextAsync(file);
+        return text is null ? null : SqlAnalyzer.AnalyzeText(text, file);
+    }
+
+    private static async Task<string?> ReadTextAsync(string file)
+    {
         try
         {
             var info = new FileInfo(file);
             if (info.Length > 2_000_000) return null;
-            var text = await File.ReadAllTextAsync(file);
-            return SqlAnalyzer.AnalyzeText(text, file);
+            return await File.ReadAllTextAsync(file);
         }
         catch (IOException) { return null; }
         catch (UnauthorizedAccessException) { return null; }

@@ -10,31 +10,36 @@ public static class AnalysisLimitsTools
     [McpServerTool(Name = "find_reflection_usage"), Description(
         "List the reflective lookups in the solution — Activator.CreateInstance, Type.GetType, Assembly.Load/" +
         "LoadFrom, Type.GetMethod/GetProperty/GetField/GetMember, Delegate.CreateDelegate — with the name each " +
-        "one looks up and whether that name resolves to a declaration in the solution. Reflection is not " +
-        "followed by the call graph, so this is how you check a dead-code or unused-symbol result: the names " +
-        "under resolvedNames must be treated as live.")]
+        "one looks up and whether that name resolves to a declaration in the solution (a literal, nameof, " +
+        "typeof and any compile-time concatenation are folded to the string the call receives). Reflection is " +
+        "not followed by the call graph, so this is how you check a dead-code or unused-symbol result; " +
+        "find_unused_symbols applies the same names as reflectionInvoked. A name built at run time is not " +
+        "guessed. Read-only.")]
     public static Task<object> FindReflectionUsage(
         IFindReflectionUsageService service,
         [Description("Optional: restrict to one project (exact name).")] string? projectName = null)
         => service.FindReflectionUsage(projectName);
 
     [McpServerTool(Name = "list_generated_sources"), Description(
-        "Show what source generators contributed to each project: the generators the project references and " +
-        "the syntax trees they produced. Those trees exist in the compilation but not as documents, so " +
-        "navigation, read_symbol and the editors cannot address them — this answers 'is that type generated, " +
-        "and by what'. With includeSource=true each tree's text is returned (capped at maxCharsPerTree), which " +
-        "is how generated code is read without a document. Read-only.")]
+        "What source generators contributed to each project: the generators the project references and the " +
+        "syntax trees they produced — trees that exist in the compilation but not as documents. Pass symbol= to " +
+        "search the declarations inside those trees (exact, then prefix, then contains) and get each match's " +
+        "kind, file and line; includeSource=true adds the tree's full text (capped at maxCharsPerTree) or, with " +
+        "symbol=, each match's own code. Note that find_symbol and read_symbol fall back to these trees on their " +
+        "own, so this tool is the inventory and the targeted search. Read-only.")]
     public static Task<object> ListGeneratedSources(
         IGeneratedSourcesService service,
         [Description("Optional: restrict to one project (exact name).")] string? projectName = null,
-        [Description("Return each generated tree's text as well as its metadata (default false).")] bool includeSource = false,
-        [Description("Characters of each tree's text to return when includeSource is true (default 20000, max 200000).")] int maxCharsPerTree = 20_000)
-        => service.ListAsync(projectName, includeSource, maxCharsPerTree);
+        [Description("Return each generated tree's text as well as its metadata, or each symbol match's code when symbol= is given (default false).")] bool includeSource = false,
+        [Description("Characters of each tree's text to return when includeSource is true (default 20000, max 200000).")] int maxCharsPerTree = 20_000,
+        [Description("Optional: a declaration name to search the generated trees for (exact, then prefix, then contains).")] string? symbol = null)
+        => service.ListAsync(projectName, includeSource, maxCharsPerTree, symbol);
 
     [McpServerTool(Name = "find_external_usages"), Description(
         "Which types and members of assemblies OUTSIDE the solution it actually uses, with call sites and a " +
-        "per-assembly summary (distinct members, usage count, top types). The internals of a referenced " +
-        "assembly are still not analysed, but its used surface is: this is 'what do we depend on, and where'. " +
+        "per-assembly summary (version, path, distinct members, usage count, top types). The used surface is " +
+        "reported, not the assembly's other internals; each assembly row carries the path and version that " +
+        "decompile_type / assembly_workspace read the internals from. " +
         "System/Microsoft framework assemblies are excluded unless includeFramework=true. Read-only.")]
     public static Task<object> FindExternalUsages(
         IExternalUsagesService service,

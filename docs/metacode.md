@@ -1,16 +1,17 @@
 # Snitch.Metacode — one pseudocode for trees in different languages
 
 `SNITCH/Libraries/Snitch.Metacode` turns a syntax tree into **a single model** and prints it as canonical
-pseudocode. The product pipeline reads **C#** and **Visual Basic** (Roslyn) and **Razor**
+pseudocode. The product pipeline reads **C#** and **Visual Basic** (Roslyn), **Java** and **Rust** (this
+library's recursive-descent readers), **JavaScript** (Acornima, an ECMAScript parser) and **Razor**
 (`.cshtml`/`.razor`), plus the library's own two formats: the canonical text and the Ghidra snapshot. A type
 decompiled with ILSpy and a native binary come in through the same door.
 
-The model is neutral by construction, and two **opt-in** readers prove it: Python (JSON dump of the `ast`
-module) and C++ (`clang -ast-dump=json`). They are not in `MetacodeTranslator.Default` because that
-translator reads a source, not a dump: the `translate_python_file` / `translate_cpp_file` tools produce the
-dump and build a translator with the reader that understands it. The same algorithm written in C#, Python
-and C++ still comes out with the same body, line for line — that is the test
-`The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`, run with those readers.
+The model is neutral by construction, and the two **dump** readers prove it: Python (JSON dump of the `ast`
+module) and C++ (`clang -ast-dump=json`). They sit in `MetacodeTranslator.Default` like the rest; what they
+read is a dump rather than a source, and something in this product produces one — `translate_python_file` /
+`translate_cpp_file` run the dumper, and `metacode_translate` / `metacode_compare` run it for a `.py`/`.cpp`
+path. The same algorithm written in C#, Python, C++ and Rust still comes out with the same body, line for
+line — that is the test `The_same_algorithm_prints_the_same_body_from_csharp_python_cpp_and_rust`.
 
 The library does not use the semantic model: it reads syntax. A C# file costs a parse, not a compilation,
 and no loaded solution is needed. The one exception is the [symbol index](#the-symbol-index): "who uses this
@@ -142,12 +143,12 @@ MetacodeDocument document = MetacodeTranslator.Default.Translate(
 string pseudocode = MetacodeTranslator.Default.Render(
     MetacodeSource.FromCSharp(source, "Sample.cs"));
 
-// From a CPython JSON dump: the reader is not in the default pipeline, so it is named.
-var python = new MetacodeTranslator(new ILanguageFrontend[] { new PythonFrontend() })
+// From a CPython JSON dump, through the default pipeline.
+var python = MetacodeTranslator.Default
     .Render(MetacodeSource.FromPythonAst(json, "sample.py"));
 
-// From clang -ast-dump=json, same story.
-var cpp = new MetacodeTranslator(new ILanguageFrontend[] { new CppFrontend() })
+// From clang -ast-dump=json, the same way.
+var cpp = MetacodeTranslator.Default
     .Render(MetacodeSource.FromCppAst(json, "sample.cpp"));
 
 // From a Razor page or a Blazor component.
@@ -170,15 +171,18 @@ var options = MetacodeOptions.Default with
 };
 ```
 
-## The opt-in readers: Python and C++
+## The dump readers: Python and C++
 
-These two readers are not in `MetacodeTranslator.Default`, which remains the pipeline of the sources the
-translator reads directly: `metacode_translate` does not offer the languages (`language` is `cs`, `razor`,
-`ghidra` or `pseudo`) and `MetacodeSource.FromFile` does not infer them from the extension — a `.json` does
-not say whether it holds a CPython `ast`, a clang dump or something else. The dump is produced by the two
-dedicated tools, which then build the translator with the right reader: `translate_python_file` runs the
-dumper below, `translate_cpp_file` runs `clang -ast-dump=json`; both also accept a ready-made dump
-(`dumpJson`). The Python dumper, if you want to run it by hand — one file, no dependencies:
+`metacode_translate` and `metacode_compare` take `language='python'`/`'cpp'`, and a `.py`/`.cpp` path needs
+no language at all: the tool runs the dumper and hands the JSON to the reader — the same readers and the same
+options every other language goes through. A dump produced elsewhere is accepted as it is: pass it as `text`
+with the language, or save it as a `.json`, which `MetacodeSource.FromFile` recognises by content (a clang
+root `TranslationUnitDecl`, a CPython root `_type: Module`, alongside the Ghidra snapshot it already
+sniffed). Source text given with `language='cpp'`/`'python'` is written to a temporary file for the dumper, so
+a C++ translation unit that includes a header next to it has to be passed as a path. The two dedicated tools
+remain the shorter road when the dump is the deliverable: `translate_python_file` runs the dumper below,
+`translate_cpp_file` runs `clang -ast-dump=json`; both accept a ready-made dump (`dumpJson`). The Python
+dumper, if you want to run it by hand — one file, no dependencies:
 
 ```python
 import ast, json, sys
@@ -206,9 +210,10 @@ C++:
 clang++ -Xclang -ast-dump=json -fsyntax-only sample.cpp > sample.json
 ```
 
-`MetacodeSource.FromFile` chooses the reader by extension (`.cs`, `.cshtml`/`.razor`, `.mc`/`.pseudo`) and
-for a `.json` recognises only a Ghidra snapshot (`imageBase` + `functions`). A Python or clang dump is passed
-through `FromPythonAst`/`FromCppAst` to a `MetacodeTranslator` built with `PythonFrontend`/`CppFrontend`.
+`MetacodeSource.FromFile` chooses the reader by extension (`.cs`, `.vb`, `.java`, `.cshtml`/`.razor`,
+`.mc`/`.pseudo`) and recognises a dump inside a `.json`: a Ghidra snapshot (`imageBase` + `functions`), a
+clang AST (`TranslationUnitDecl`) or a CPython `ast` (`_type: Module`). A `.cpp`/`.py` **source** is not
+claimed by a reader on purpose — it is what the dumper is run on, not what a reader consumes.
 
 ## The canonical text
 
@@ -265,42 +270,58 @@ that has no frontend: just produce this text.
    shortest because Roslyn does the parsing).
 2. Map every construct onto a model node; what has no node becomes `MetacodeOpaque*` + `MetacodeDiagnostic`,
    with the original text.
-3. Add it to `MetacodeTranslator.Default` **only if the translator can read the source directly**: that is
-   the rule that puts C#, Visual Basic, Java and Razor there and Python/C++ not. A reader that depends on a
-   dump produced elsewhere goes through the constructor (opt-in), as `PythonFrontend` and `CppFrontend` do; if
-   the product knows how to produce that dump (like `translate_python_file` / `translate_cpp_file`), the tool
-   builds the translator with the right reader and it stays opt-in. Java is the other case: the source is
-   Java text and JADX produces it, so `JavaFrontend` reads it directly and belongs in the default pipeline.
-4. Add a fixture to the test `The_same_algorithm_prints_the_same_body_from_csharp_python_and_cpp`: it is the
-   operational definition of "same architecture".
+3. Add it to `MetacodeTranslator.Default` when the pipeline can be fed what the reader consumes. That is
+   the rule that puts C#, Visual Basic, Java, JavaScript, Rust, Razor **and Python/C++** there: the first six
+   read the source, and the last two read an AST dump the product produces (`translate_python_file` /
+   `translate_cpp_file`, or `metacode_translate` on a `.py`/`.cpp` path). Rust needs no tool at all: its
+   reader parses the source, so `metacode_translate` on a `.rs` path is the whole pipeline. What a reader
+   listed there must NOT do is claim a source file by extension when it needs a dump: a `.cpp` is not a
+   clang dump, and `CanHandle` matching the language is what keeps the diagnostic honest.
+4. Add a fixture to the test `The_same_algorithm_prints_the_same_body_from_csharp_python_cpp_and_rust`: it
+   is the operational definition of "same architecture".
 
 ## Known limits (declared, not silent)
 
-- **C++** (opt-in reader): `goto` stays opaque, as do `using`/`using namespace`, `friend`, `static_assert`,
+- **C++**: `goto` stays opaque, as do `using`/`using namespace`, `friend`, `static_assert`,
   partial template specializations, `delete`, `sizeof` and the expressions the model does not have
   (`StmtExpr`, `noexcept`, …): all `RAW[cpp]` with a diagnostic. A lambda's captures are not modelled: the
   body is, the captured state is not. The preprocessor does not exist in the dump, and an `#include` leaves
   no trace other than the declarations it brings.
-- **Python** (opt-in reader): `match`, `assert`, `global`/`nonlocal`, `del`, `yield` and the unpacked
+- **Python**: `match`, `assert`, `global`/`nonlocal`, `del`, `yield` and the unpacked
   arguments (`*xs`, `**kw`) stay opaque; decorators are read as text, not as calls. `from . import x` keeps
   the dots in the module name.
 - **C#**: `fixed`, `unsafe`, `checked`, `delegate`s, user-defined conversions and `goto case`/`goto default`
   are opaque; complex `switch` patterns (`case int n when n > 0`) stay as text inside `CASE`.
+- **JavaScript**: the grammar is Acornima's, so the parse is standard ECMAScript — a module first and a
+  classic script second, which is what makes a CommonJS file readable. What stays out is everything that is
+  not ECMAScript: **JSX** and **TypeScript annotations** are a syntax error at their own line, not a
+  half-read tree. Inside the language, these are `RAW[js]` or a `LossyLowering` with a diagnostic: `with`,
+  `debugger`, a labeled `break`/`continue`, a class declared inside a body, the comma operator,
+  `delete`/`void`, a tagged template, a dynamic `import()`, a class expression, an object literal with a
+  spread or an accessor, a `for … in` (it walks keys, the model's FOREACH walks values), an unsigned `>>>`,
+  an optional call and a generator's flag. A re-export (`export { a } from 'm'`) is lowered as the import it
+  mirrors — the model records the names that cross a module boundary, not the direction — and one
+  informational diagnostic per file says so. A top-level `const`/`let`/`var` becomes a field of the module;
+  everything else the file executes at load time becomes the body of `__module__`.
 - **Visual Basic**: `With … End With`, `ReDim`, `Erase`, `On Error` (GoTo/Resume Next), `RaiseEvent`,
   `AddHandler`/`RemoveHandler`, `Exit Try` and the `Like` operator are `RAW[vb]` with a diagnostic; `MyClass`
   lowers to `this` with a `LossyLowering` (it suppresses virtual dispatch). The direction of a `For` with a
   non-constant `Step` is assumed positive, and the diagnostic says so.
-- **Razor**: `@switch`, `@try`/`catch`/`finally` and `@do`/`while` stay **a single** `RAW[razor]` with a
-  diagnostic — their `case`/`catch`/`while` are not `@` blocks, so the scanner does not see them as
-  branches; an `@if`/`@foreach` body without braces is markup, not a block. The markup between two
-  constructs is `RAW[razor]` (one segment per line, with the newlines as `\n`) and the directives are
-  `MetacodeOpaqueDeclaration`: a page is not an algorithm, and pretending it is would be worse than saying
-  so.
+- **Razor**: every control construct the model has a node for is modelled — `@if`/`@else`, `@foreach`,
+  `@for`, `@while`, `@do … while`, `@switch` with its `case`/`default` sections, `@try`/`catch`/`finally`,
+  `@lock`, `@using (…)`, a `@{ … }` block — with a braced or a brace-less body. What stays out is markup: the
+  HTML between two constructs is `RAW[razor]` (one segment per line, with the newlines as `\n`), an
+  `@expression` written inside it is part of that text, and the directives are `MetacodeOpaqueDeclaration`.
+  A `case`/`default` is recognised at the start of a line, and only the `break;` that closes a section is
+  read as a statement of its own. A construct whose header cannot be lowered by the C# frontend stays one
+  `RAW[razor]` with a diagnostic.
 - **Pseudocode parser**: a block-bodied lambda is read back, and the lines following an open parenthesis or
   brace belong to the same statement. Two things stay out: a `RAW[…]` line with unbalanced parentheses is
   not reassembled (a `RAW` line is always a single line), and a comment with unbalanced parentheses inside a
   lambda body is not seen as a comment during reassembly.
-- **Comments**: C# captures them from trivia; the Python and clang dumps do not contain them.
+- **Comments**: C# captures them from trivia and JavaScript from the parser's comment callback (a comment
+  is printed before the statement that follows it, because the model is line-based); the Python and clang
+  dumps do not contain them.
 - **.NET decompilation**: ILSpy's C# contains constructs the C# frontend does not model — attributes
   (dropped: they are not in the model) and `x with { … }` (which stays `RAW[cs]` with a diagnostic).
   Compiler-generated types are excluded from the selection.
@@ -311,6 +332,15 @@ that has no frontend: just produce this text.
   expression and a method reference are `RAW[java]` with a diagnostic; annotations are decorators (their
   arguments stay text); a record's components become fields plus the canonical constructor; a JADX comment is
   dropped.
+- **Rust**: `macro_rules!` definitions, an `async` block, a block or a `loop`/`while` used as a value, a
+  `break` that carries a value or a label, and the `?` operator stay `RAW[rs]` with a diagnostic — the
+  expression keeps its source text (`foo()?`), so what was lost is visible. `..=` has no node either: an
+  inclusive range is opaque rather than silently exclusive. Two lowerings are deliberate and lossy in the
+  direction the model chooses: an `impl` block is a `CLASS` named after the type it implements
+  (`impl Display for Foo` is `CLASS Foo EXTENDS Display`), and an attribute is a decorator whose text is what
+  stands inside the `#[…]`. `use` items are dropped (Java's imports are), `mod` blocks become modules, and
+  lifetimes are kept in generic arguments and dropped from references. A `for` over `a..b` is the counted
+  loop Python's `range` produces, so the two print the same body.
 
 ## Decompilation: from a binary to metacode
 
@@ -570,6 +600,40 @@ plain zip), and a full `metacoding` run with JADX replaced by a recorded result:
 `java://fake.jar/…`, the `java` kind in `metacoding`'s own listing, and the second call answering "already
 stored".
 
+## Rust: the source, read directly
+
+Python and C++ need a dump because nothing here could parse them; Rust has the third option — a reader of
+its own — and that is what it gets. `RustFrontend` is a lexer plus a recursive-descent parser over the Rust
+grammar, so a `.rs` file needs no cargo, no nightly compiler and no toolchain at all, and it sits in
+`MetacodeTranslator.Default` next to Java and JavaScript:
+
+```
+counter.rs ──RustFrontend──▶ MetacodeDocument ──renderer──▶ pseudocode
+```
+
+What it reads: `mod` blocks (one module each, named by the path Rust uses — `main::inner`), `struct` (named,
+tuple and unit), `enum` with payloads, `union`, `trait` (with provided methods and associated types), `impl`,
+`type` aliases, `static`/`const` items, `fn` with generics, lifetimes, a `where` clause folded into the type
+parameters' constraints and the usual modifiers (`pub`, `async`, `unsafe`, `const`, `extern "C"`). In a body:
+`let` (with a type, `mut`, `ref`, a pattern and a `let … else`), `return`/`break`/`continue`, `if`/`else`,
+`loop`, `while`, `while let`, `for` over a range or an iterator, `match` with guards and `_`, `unsafe`
+blocks, closures, `as` casts, `await`, ranges, macros (`println!`, `vec!`), struct literals (and the
+`..base` update, which is the model's `WITH`) and `?`.
+
+**Two shapes are specific to reading the source rather than a dump.** A block's tail expression (no
+semicolon) is what the block evaluates to, so it becomes a `RETURN` — `{ total }` returns total. And
+`for i in 0..n` is a counted loop, lowered to the same `MetacodeFor` Python's `range(n)` builds, which is
+what makes the four-language equivalence test pass with no special case in the renderer.
+
+### How it is tested
+
+`RustFrontendTests` reads a file with the pieces a real one has — `use` items, an attribute, a struct, an
+enum with all three variant shapes, a trait, an inherent impl, a `impl Display for`, a `match` with a guard —
+and asserts the model: the declarations and their kinds, the impl blocks carrying the type's members, no
+`ParseError`, the range `for` becoming a counted loop, and recovery continuing after a construct with no
+node (`macro_rules!`, `?`). One test reads the same file through `MetacodeSource.FromText(...,
+MetacodeLanguage.Rust, ...)` to prove the default pipeline claims it.
+
 ## The model grew a little more
 
 | Construct | Node | Where from |
@@ -602,15 +666,22 @@ for what it is — a class with a page to draw:
   `MetacodeOpaqueDeclaration` with their text, because they configure the page, they do not declare it.
 - the members of `@code`/`@functions` go through `CSharpFrontend`: the class already contains them, so the
   frontend reads them for real (methods, properties, fields) with the **origin on the page's line**.
-- the markup body is the body of a `Render` method: `@if`/`else if`/`else`, `@foreach`, `@for`, `@while`,
-  `@lock` and `@using (…)` are the model's control nodes (the header is C#, so the C# frontend lowers it
-  onto an empty shape, and the body is the markup), and the HTML between one construct and another stays a
-  `RAW[razor]`.
+- an `@section Name { … }` becomes a `Section_Name` method of its own. It is a fragment a layout renders,
+  not part of the page body, so folding it into `Render` would say the page runs it there.
+- a `@{ … }` block is C# the page runs where it stands: its statements are lowered by the C# frontend and
+  spliced into the body at that point.
+- the markup body is the body of a `Render` method, and every control construct is a node of the model:
+  `@if`/`else if`/`else`, `@foreach`, `@for`, `@while`, `@do … while`, `@switch` with its `case`/`default`
+  sections, `@try`/`catch`/`finally`, `@lock` and `@using (…)`. The header is C#, so the C# frontend lowers
+  it onto an empty shape and the body is the markup; a body written without braces is the single statement
+  that follows the header. Only the HTML between one construct and another stays a `RAW[razor]`, because
+  markup is not an algorithm.
 
 ```razor
 @model ProductListViewModel
 <h1>Products</h1>
 @if (Model.Any) { <ul>@foreach (var p in Model.Products) { <li>@p.Name</li> }</ul> }
+@switch (Model.Kind) { case 1: <p>one</p> break; default: <p>other</p> break; }
 ```
 ```
 MODULE Index
@@ -626,14 +697,23 @@ MODULE Index
       END FOREACH
       RAW[razor] </ul> // HTML markup
     END IF
+    SWITCH Model.Kind
+      CASE 1
+        RAW[razor] <p>one</p> // HTML markup
+        BREAK
+      DEFAULT
+        RAW[razor] <p>other</p> // HTML markup
+        BREAK
+    END SWITCH
   END METHOD
 END MODULE
 ```
 
-`else` is the reason the frontend re-reads the text instead of trusting the list of blocks: in Razor
-`else`/`else if` have no `@`, so the scanner does not report them, and the chain has to be rebuilt from the
-braces. For the same reason `@switch`, `@try` and `@do` stay opaque: their `case`/`catch`/`while` are markup,
-not branches the model could represent without inventing.
+The frontend re-reads the text instead of trusting the list of blocks, and that is what makes the rest
+possible: in Razor `else`, `catch`, `finally`, the `while` of a `do` and every `case`/`default` carry no
+`@`, so the scanner never reports them and the branch has to be rebuilt from the braces. A label starts a
+line — which is what makes `case` a label and not the word inside a sentence — the section it opens runs to
+the next label, and the `break;` that closes it is read as a statement, not as markup.
 
 ## Visual Basic: a module is a class
 
@@ -911,8 +991,11 @@ method that contains them); a type has no complexity of its own — its members 
 | `MetacodeTranslator.cs` | the façade: right frontend, passes, document |
 | `Frontends/CSharpFrontend.cs`, `CSharpLowering.Expressions.cs` | Roslyn |
 | `Frontends/VisualBasicFrontend.cs`, `VisualBasicLowering.Expressions.cs` | Roslyn VB: modules, types, members, statements and expressions of a `.vb` |
-| `Frontends/PythonFrontend.cs` | `ast` dump — opt-in reader, not in the default pipeline |
-| `Frontends/CppFrontend.cs` | `clang` dump — opt-in reader, not in the default pipeline |
+| `Frontends/JavaFrontend.cs` | Java source: a lexer and a recursive-descent reader (JADX's output, or a project's own `.java`) |
+| `Frontends/JavaScriptFrontend.cs`, `JavaScriptLowering.Expressions.cs` | JavaScript: Acornima's ECMAScript tree, lowered |
+| `Frontends/RustFrontend.cs` | Rust source: a lexer and a recursive-descent reader, with no toolchain behind it |
+| `Frontends/PythonFrontend.cs` | `ast` dump: the reader, in the default pipeline; `translate_python_file`/`metacode_translate` produce the dump |
+| `Frontends/CppFrontend.cs` | `clang` dump: the reader, in the default pipeline; `translate_cpp_file`/`metacode_translate` produce the dump |
 | `Frontends/RazorFrontend.cs` | `.cshtml` pages and `.razor` components, on the scanner model of `SNITCH/Languages/Razor` |
 | `Frontends/PseudocodeFrontend.cs`, `PseudocodeExpression.cs` | reading the canonical text |
 | `Passes/MetacodePasses.cs` | `NormalizeControlFlowPass`, `FlattenSingleStatementBlocksPass` |

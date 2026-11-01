@@ -190,6 +190,18 @@ public static class XamlAnalysis
             if (document.DesignDataContextType is not null) break;
         }
 
+        // <Window.DataContext><local:MainViewModel/></Window.DataContext>: a property element on the
+        // ROOT names the type directly. A nested one applies to a subtree, which the file-wide data
+        // context this scanner reports cannot express, so it is not taken as the file's type.
+        var rootDataContext = root?.Elements()
+            .FirstOrDefault(element => element.Name.LocalName == "DataContext");
+        if (rootDataContext is not null)
+        {
+            var value = rootDataContext.Elements().FirstOrDefault();
+            if (value is not null && !string.IsNullOrWhiteSpace(value.Name.LocalName))
+                document.ElementDataContextType = value.Name.LocalName;
+        }
+
         if (root is not null) Walk(document, root, null, null, null, null);
         return document;
     }

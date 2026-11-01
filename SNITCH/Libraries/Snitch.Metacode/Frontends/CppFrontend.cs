@@ -4,9 +4,10 @@ namespace Snitch.Metacode.Frontends;
 
 /// <summary>
 /// Reads a Clang <c>-ast-dump=json</c> document (<c>clang++ -Xclang -ast-dump=json -fsyntax-only file.cpp</c>).
-/// Clang's tree is deep and wraps every expression in implicit nodes; the wrapper kinds are unwrapped,
-/// the rest is lowered like any other language. Templates, lambdas and range-for have no node yet and
-/// are kept as opaque text with a diagnostic.
+/// Clang's tree is deep and wraps every expression in implicit nodes; the wrapper kinds are unwrapped
+/// and the rest is lowered like any other language, templates, lambdas and range-for included. It
+/// claims the C++ language, never a <c>.cpp</c> source file: a source is what the dumper is run on, not
+/// what this reader consumes.
 /// </summary>
 public sealed class CppFrontend : ILanguageFrontend
 {
@@ -14,11 +15,7 @@ public sealed class CppFrontend : ILanguageFrontend
 
     public MetacodeLanguage Language => MetacodeLanguage.Cpp;
 
-    public bool CanHandle(MetacodeSource source) =>
-        source.Language == MetacodeLanguage.Cpp
-        || (source.Language is null && source.Path is not null
-            && new[] { ".cpp", ".cc", ".cxx", ".c", ".hpp", ".hh", ".hxx", ".h" }
-                .Any(extension => source.Path.EndsWith(extension, StringComparison.OrdinalIgnoreCase)));
+    public bool CanHandle(MetacodeSource source) => source.Language == MetacodeLanguage.Cpp;
 
     public MetacodeDocument Translate(MetacodeSource source, MetacodeOptions options)
     {

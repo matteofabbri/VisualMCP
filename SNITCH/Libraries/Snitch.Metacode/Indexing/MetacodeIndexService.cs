@@ -877,6 +877,8 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         ".cshtml" or ".razor" => MetacodeLanguage.Razor,
         ".vb" => MetacodeLanguage.VisualBasic,
         ".java" => MetacodeLanguage.Java,
+        ".js" or ".mjs" or ".cjs" => MetacodeLanguage.JavaScript,
+        ".rs" => MetacodeLanguage.Rust,
         _ => MetacodeLanguage.Unknown,
     };
 
@@ -930,7 +932,8 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         string text, string project, string language, string path, string hash, long mtime)
     {
         var translator = new MetacodeTranslator(
-            [new CSharpFrontend(), new VisualBasicFrontend(), new JavaFrontend(), new RazorFrontend()]);
+            [new CSharpFrontend(), new VisualBasicFrontend(), new JavaFrontend(), new JavaScriptFrontend(),
+             new RustFrontend(), new RazorFrontend()]);
         var model = translator.Translate(MetacodeSource.FromText(text, LanguageOf(path), path), MetacodeOptions.Default);
         var collected = MetacodeDeclarations.Collect(model, path);
         var hasReader = model.Diagnostics.All(diagnostic => diagnostic.Code != MetacodeDiagnosticCodes.NoFrontend);

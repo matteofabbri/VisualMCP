@@ -169,4 +169,88 @@ public sealed class SqlAnalyzerTests
         var unknown = ResultAssert.Error(await service.AnalyzeAsync(root, "info", "SQL9999", 100, 100));
         Assert.Contains("Unknown rule", unknown);
     }
+
+    [Fact]
+    public void TheSchemaModelReadsCreateTableAndAlterAdd()
+    {
+        var schema = new SqlSchema();
+
+        SqlAnalyzer.ExtractSchemaInto(schema, """
+            CREATE TABLE [dbo].[Users] (
+                [Id] INT NOT NULL PRIMARY KEY,
+                [Name] NVARCHAR(200) NOT NULL,
+                CONSTRAINT [FK_Users_Orders] FOREIGN KEY ([Id]) REFERENCES [dbo].[Orders] ([UserId]),
+                [Email] NVARCHAR(200) NULL
+            );
+
+            ALTER TABLE dbo.Users ADD [CreatedAt] DATETIME2 NOT NULL DEFAULT GETUTCDATE();
+            """);
+
+        var table = Assert.Single(schema.Tables);
+        Assert.Equal("Users", table.Name);
+        Assert.Equal("dbo", table.Schema);
+        Assert.Equal(["Id", "Name", "Email", "CreatedAt"], table.Columns);
+        Assert.Equal(1, schema.TableCount);
+        Assert.Equal(4, schema.ColumnCount);
+    }
+
+    [Fact]
+    public void ASchemaInTheScanFlagsAnUndeclaredTableButNotADeclaredOne()
+    {
+        var schema = new SqlSchema();
+        SqlAnalyzer.ExtractSchemaInto(schema, "CREATE TABLE dbo.Users (Id INT, Name NVARCHAR(100));");
+
+        var unknown = SqlAnalyzer.AnalyzeText("SELECT Id FROM dbo.Missing", "probe.sql", schema);
+        Assert.Contains("SQL0011", Rules(unknown));
+
+        var known = SqlAnalyzer.AnalyzeText("SELECT Id, Name FROM dbo.Users", "probe.sql", schema);
+        Assert.DoesNotContain("SQL0011", Rules(known));
+        Assert.DoesNotContain("SQL0012", Rules(known));
+    }
+
+    [Fact]
+    public void AColumnTheDeclaredTableDoesNotHaveIsFlaggedInSelectInsertAndUpdate()
+    {
+        var schema = new SqlSchema();
+        SqlAnalyzer.ExtractSchemaInto(schema, "CREATE TABLE dbo.Users (Id INT, Name NVARCHAR(100));");
+
+        Assert.Contains("SQL0012", Rules(
+            SqlAnalyzer.AnalyzeText("SELECT Id, Nickname FROM dbo.Users", "probe.sql", schema)));
+        Assert.Contains("SQL0012", Rules(
+            SqlAnalyzer.AnalyzeText("INSERT INTO dbo.Users (Id, Nickname) VALUES (1, 'a')", "probe.sql", schema)));
+        Assert.Contains("SQL0012", Rules(
+            SqlAnalyzer.AnalyzeText("UPDATE dbo.Users SET Nickname = 'a' WHERE Id = 1", "probe.sql", schema)));
+
+        Assert.DoesNotContain("SQL0012", Rules(
+            SqlAnalyzer.AnalyzeText("SELECT u.Id, u.Name FROM dbo.Users u", "probe.sql", schema)));
+    }
+
+    [Fact]
+    public void AJoinOrASubqueryStopsTheColumnCheckInsteadOfGuessing()
+    {
+        var schema = new SqlSchema();
+        SqlAnalyzer.ExtractSchemaInto(schema,
+            "CREATE TABLE dbo.Users (Id INT, Name NVARCHAR(100)); CREATE TABLE dbo.Orders (Id INT, UserId INT);");
+
+        Assert.DoesNotContain("SQL0012", Rules(SqlAnalyzer.AnalyzeText(
+            "SELECT Users.Id, Orders.UserId FROM dbo.Users JOIN dbo.Orders ON Orders.UserId = Users.Id",
+            "probe.sql", schema)));
+
+        Assert.DoesNotContain("SQL0012", Rules(SqlAnalyzer.AnalyzeText(
+            "SELECT Id FROM dbo.Users WHERE Id IN (SELECT UserId FROM dbo.Orders)", "probe.sql", schema)));
+    }
+
+    [Fact]
+    public void ACteAndAnExternalTableAreNotUndeclared()
+    {
+        var schema = new SqlSchema();
+        SqlAnalyzer.ExtractSchemaInto(schema, "CREATE TABLE dbo.Users (Id INT);");
+
+        var cte = SqlAnalyzer.AnalyzeText(
+            "WITH recent AS (SELECT Id FROM dbo.Users) SELECT Id FROM recent", "probe.sql", schema);
+        Assert.DoesNotContain("SQL0011", Rules(cte));
+
+        var external = SqlAnalyzer.AnalyzeText("SELECT name FROM sys.objects", "probe.sql", schema);
+        Assert.DoesNotContain("SQL0011", Rules(external));
+    }
 }

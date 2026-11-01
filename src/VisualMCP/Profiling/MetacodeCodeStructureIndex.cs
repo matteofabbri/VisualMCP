@@ -78,10 +78,10 @@ public sealed class MetacodeCodeStructureIndex : ICodeStructureIndex
     private static CodeFileStructure Build(string file)
     {
         var extension = Path.GetExtension(file).ToLowerInvariant();
-        if (extension is not (".cs" or ".vb" or ".cshtml" or ".razor"))
+        if (extension is not (".cs" or ".vb" or ".cshtml" or ".razor" or ".js" or ".mjs" or ".cjs"))
         {
             return new CodeFileStructure(
-                file, [], "No metacode frontend reads this extension (C#, Visual Basic and Razor do).");
+                file, [], "No metacode frontend reads this extension (C#, Visual Basic, JavaScript and Razor do).");
         }
 
         try

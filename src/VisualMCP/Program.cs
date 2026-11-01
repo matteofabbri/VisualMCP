@@ -54,18 +54,21 @@ static async Task RunServerAsync(string[] args)
         "- Locate a class/method/interface by name -> find_symbol (ranks exact > prefix > CamelHumps > contains, and " +
         "falls back to a fuzzy subsequence when nothing matches, so 'custord' still finds CustomerOrder).\n" +
         "- Read the SOURCE of a declaration (the body of a type/method/property) -> read_symbol. " +
-        "This replaces search_text + read_file when you want the code of a name you just saw.\n" +
+        "This replaces search_text + read_file when you want the code of a name you just saw; a declaration that only " +
+        "a source generator emits is read from its generated tree (marked 'generated').\n" +
         "- Find implementations of an interface or derived types -> find_implementations, find_derived_types.\n" +
         "- Inspect a type's members or a symbol's signature/docs -> get_type_members, get_symbol_info.\n" +
         "- Dead code, code smells, complexity, metrics, security, DI, duplicate/async issues -> the Analysis tools " +
         "(reliable detection needs the control-flow graph, which only Roslyn can build — do NOT infer these by reading source).\n" +
-        "- Why does a symbol look unused/dead? Three boundaries of a static call graph, each with a tool: reflective lookups by " +
-        "name with the names that resolve to the solution -> find_reflection_usage; the members a framework calls by convention " +
-        "(MVC actions, hub methods, hosted services, Blazor lifecycle, EF overrides, tests) -> framework_entry_points (and the " +
-        "frameworkInvoked list find_unused_symbols now reports instead of calling them unused); source generators and the trees " +
-        "they emit, which are in the compilation but not in project.Documents -> list_generated_sources. What a referenced " +
-        "assembly's surface is actually used for -> find_external_usages. Whether a change altered BEHAVIOUR (tests run on the " +
-        "working tree and on a git revision in a detached worktree, outcomes diffed per test) -> verify_change.\n" +
+        "- Why does a symbol look unused/dead? find_unused_symbols reports two separate lists before calling anything dead: " +
+        "frameworkInvoked (the members routing, DI, the test runner or the component renderer call by convention — the full " +
+        "classification is framework_entry_points) and reflectionInvoked (the symbols a reflective lookup names: a literal, " +
+        "nameof, typeof or a compile-time concatenation, resolved by find_reflection_usage). Source generators and the trees " +
+        "they emit, which are in the compilation but in no project.Documents -> list_generated_sources (find_symbol and " +
+        "read_symbol reach those declarations too). What a referenced assembly's surface is actually used for, with the " +
+        "assembly's version and path for decompile_type / assembly_workspace -> find_external_usages. Whether a change altered " +
+        "BEHAVIOUR (tests run on the working tree and on a git revision in a detached worktree, outcomes diffed per test) -> " +
+        "verify_change.\n" +
         "- Architecture and quality questions: are the layer rules respected (a dependency pointing back up, with file:line) -> " +
         "check_layer_violations; the dependency graph as a DOT/Mermaid diagram (projects, namespaces, TYPES) -> export_dependency_graph; is this class " +
         "really two classes (LCOM4) -> get_cohesion_metrics; test suite quality (no assert, empty, unreadable names, async void) -> " +
@@ -147,7 +150,8 @@ static async Task RunServerAsync(string[] args)
         "advance -> debug_continue, debug_step (over|into|out), debug_pause; " +
         "read -> debug_stack (file:line), debug_variables (Locals/Arguments/Autos, depth for members), " +
         "debug_evaluate (watch expression — pass newValue to WRITE it into the running process), debug_threads, " +
-        "debug_output; break on exceptions -> debug_exceptions (filters all|user-unhandled, narrowed to named types; " +
+        "debug_output; break on exceptions -> debug_exceptions (named types matched against the hierarchy — a base " +
+        "class catches its derived types, !Type excludes a branch — or filters all|user-unhandled as the when; " +
         "with no arguments it returns the stopped exception's type and stage); after editing and rebuilding the " +
         "source -> debug_restart rebuild=true (same program, same breakpoints, new session); " +
         "close -> debug_terminate; list live sessions -> debug_sessions. Sessions survive across calls, so a stop " +
@@ -201,12 +205,19 @@ static async Task RunServerAsync(string[] args)
         "- Decompile an assembly into CANONICAL PSEUDOCODE (ILSpy → C# → the metacode model: one type, or a paged set of types) -> decompile_to_metacode; to KEEP what you decompile, store every type as a metacode tree in the solution database -> metacoding action=decompile. That same action ROUTES a native binary (no CLR metadata) to Ghidra and stores the recovered functions both in the native_artifact / native_function / native_call tables (keyed on the file's SHA-256) and in the same metacode AST as everything else (native://<file>). Every stored node records the binary in source_path and is flagged decompiled; siblings=true (the default) also reads/decompiles the other files in that folder into the same AST.\n" +
         "- Recover a NATIVE binary's functions with Ghidra headless and print them as pseudocode (a real external run, tens of seconds; Ghidra is installed on demand into the per-user tools folder; the run is also persisted in native_artifact / native_function / native_call and in the metacode AST; re-read an existing snapshot with metacode_translate) -> analyze_native_binary.\n" +
         "- Explore a NuGet package directly by id+version (auto-locates its DLL): public API -> inspect_package; a type's C# source -> decompile_package_type; SEVERAL packages in one call -> inspect_packages.\n" +
-        "- Read code in the canonical pseudocode (C# source, a Razor page, a Ghidra snapshot or pseudocode itself; a " +
-        "construct with no node stays visible as RAW + a diagnostic) -> metacode_translate (no solution needed).\n" +
+        "- Read code in the canonical pseudocode (C# source, Visual Basic, Java, JavaScript, Rust, a Razor page, a Ghidra " +
+        "snapshot or pseudocode itself; a construct with no node stays visible as RAW + a diagnostic) -> metacode_translate (no " +
+        "solution needed).\n" +
         "- Check that two spellings of the same algorithm really are the same -> metacode_compare (translates both " +
-        "sides, then diffs the canonical text line by line; any mix of C#/Razor/Ghidra/pseudocode).\n" +
-        "- Read a PYTHON or C/C++ file in that same pseudocode (the dump is produced for you: CPython's ast via " +
-        "translate_python_file, clang -ast-dump=json via translate_cpp_file; pass dumpJson to translate a dump produced elsewhere).\n" +
+        "sides, then diffs the canonical text line by line; any mix of C#/VB/Java/JS/Rust/Razor/Ghidra/pseudocode).\n" +
+        "- Read a PYTHON or C/C++ file in that same pseudocode: metacode_translate / metacode_compare take a .py or " +
+        ".cpp/.h path, or language=python|cpp with source text, and run the dumper for you (CPython's ast, clang " +
+        "-ast-dump=json); pass the dump itself to skip that step. The dedicated translate_python_file / " +
+        "translate_cpp_file return the dump as a step of their own.\n" +
+        "- Read a RUST file in that same pseudocode -> metacode_translate / metacode_compare on a .rs path (or " +
+        "language=rust): the Rust reader parses the source itself, so no cargo, rustc or nightly toolchain is involved. " +
+        "An impl block prints as a CLASS named after the type it implements, and a macro or the ? operator stays RAW[rs] " +
+        "with a diagnostic.\n" +
         "- The SOLUTION'S metacode, persisted in .visualMCP/visualmcp.db and generated when the solution opens " +
         "(the background pass keeps it in step with saved files and a build refreshes it) -> metacode_index: " +
         "action=status|build|complexity|trees|ast|assemblies. Every source of the solution is stored twice there — its native text " +

@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
+using Snitch.Languages.CSharp.Analysis;
 using Snitch.Workspace;
 
 namespace Snitch.Languages.CSharp.Navigation;
@@ -37,9 +38,9 @@ public sealed class NavigationService : INavigationService
         if (string.IsNullOrWhiteSpace(symbolName))
             return new { error = "A symbol name is required." };
 
-        var collected = new Dictionary<string, (ISymbol Symbol, int Rank)>(StringComparer.Ordinal);
+        var collected = new Dictionary<string, (ISymbol Symbol, int Rank, bool Generated)>(StringComparer.Ordinal);
 
-        void Collect(IEnumerable<ISymbol> symbols, Func<string, int> rank)
+        void Collect(IEnumerable<ISymbol> symbols, Func<string, int> rank, bool generated = false)
         {
             foreach (var symbol in symbols)
             {
@@ -48,7 +49,7 @@ public sealed class NavigationService : INavigationService
                           (symbol.Locations.FirstOrDefault(location => location.IsInSource)?.GetLineSpan().StartLinePosition.Line ?? -1);
 
                 if (collected.TryGetValue(key, out var existing) && existing.Rank >= rank(symbol.Name)) continue;
-                collected[key] = (symbol, rank(symbol.Name));
+                collected[key] = (symbol, rank(symbol.Name), generated);
             }
         }
 
@@ -87,6 +88,17 @@ public sealed class NavigationService : INavigationService
             Collect(approximate, _ => 0);
         }
 
+        // Source generators: their trees are in the compilation but no document points at them, so the
+        // source-declaration search above cannot see them. This is the half of the model it misses.
+        var generated = await GeneratedSourcesService.FindDeclarationsAsync(
+            solution!.Projects, symbolName, maxResults: 50);
+        foreach (var declaration in generated)
+        {
+            // A contains match is what partialMatch asks for; without it the source search does not add one either.
+            if (declaration.Rank == GeneratedSourcesService.ContainsMatch && !partialMatch) continue;
+            Collect([declaration.Symbol], _ => declaration.Rank, generated: true);
+        }
+
         var matches = collected.Values
             .OrderByDescending(entry => entry.Rank)
             .ThenBy(entry => entry.Symbol.Name, StringComparer.OrdinalIgnoreCase)
@@ -103,6 +115,7 @@ public sealed class NavigationService : INavigationService
                     fullyQualifiedName = symbol.ToDisplayString(),
                     file = loc?.SourceTree?.FilePath,
                     line = loc?.GetLineSpan().StartLinePosition.Line + 1,
+                    generated = entry.Generated,
                     matchKind = entry.Rank switch
                     {
                         4 => "exact",

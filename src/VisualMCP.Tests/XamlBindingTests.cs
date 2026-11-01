@@ -322,6 +322,53 @@ public sealed class XamlBindingTests
     }
 
     [Fact]
+    public async Task ADatacontextWrittenAsAPropertyElementNamesTheTypeBindingsAreCheckedAgainst()
+    {
+        using var workspace = FakeWorkspace.Create(
+            ("ElementView.xaml.cs", """
+                namespace Probe;
+
+                public sealed class ElementView
+                {
+                }
+
+                public sealed class ElementViewModel
+                {
+                    public string Name { get; set; } = "";
+                }
+                """));
+
+        File.WriteAllText(workspace.PathOf("ElementView.xaml"), """
+            <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Probe"
+                    x:Class="Probe.ElementView">
+              <Window.DataContext>
+                <local:ElementViewModel />
+              </Window.DataContext>
+              <StackPanel>
+                <TextBlock Text="{Binding Name}" />
+                <TextBlock Text="{Binding Missing}" />
+              </StackPanel>
+            </Window>
+            """);
+
+        var bindings = new XamlBindingsService(workspace);
+        var result = ResultAssert.Json(
+            await bindings.ListAsync("Probe", workspace.PathOf("ElementView.xaml"), validate: true, maxBindings: 100));
+
+        var rows = result.GetProperty("bindings").EnumerateArray().ToList();
+
+        var name = rows.First(row => row.GetProperty("path").GetString() == "Name");
+        Assert.Equal("valid", name.GetProperty("status").GetString());
+        Assert.Equal("Probe.ElementViewModel", name.GetProperty("dataType").GetString());
+        Assert.Equal("DataContext property element", name.GetProperty("dataTypeSource").GetString());
+
+        var missing = rows.First(row => row.GetProperty("path").GetString() == "Missing");
+        Assert.Equal("missing-member", missing.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task XamlTree_ReturnsTheElementTreeAndItsLines()
     {
         var (workspace, _, _, _, tree) = NewXaml();

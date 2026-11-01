@@ -4,7 +4,8 @@ namespace Snitch.Metacode.Frontends;
 
 /// <summary>
 /// Reads a CPython <c>ast</c> dump as JSON. Every node is an object with <c>_type</c> (CPython's class
-/// name) plus its own fields, which is what the four-line dumper in <c>docs/metacode.md</c> produces.
+/// name) plus its own fields, which is what the four-line dumper in <c>docs/metacode.md</c> produces. It
+/// claims the Python language, never a <c>.py</c> source file: a source is what the dumper is run on.
 /// </summary>
 public sealed class PythonFrontend : ILanguageFrontend
 {
@@ -12,10 +13,7 @@ public sealed class PythonFrontend : ILanguageFrontend
 
     public MetacodeLanguage Language => MetacodeLanguage.Python;
 
-    public bool CanHandle(MetacodeSource source) =>
-        source.Language == MetacodeLanguage.Python
-        || (source.Language is null && source.Path is not null
-            && source.Path.EndsWith(".py", StringComparison.OrdinalIgnoreCase));
+    public bool CanHandle(MetacodeSource source) => source.Language == MetacodeLanguage.Python;
 
     public MetacodeDocument Translate(MetacodeSource source, MetacodeOptions options)
     {

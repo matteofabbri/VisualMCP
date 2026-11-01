@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Snitch.Languages.CSharp.Analysis;
 using Snitch.Workspace;
 using System.ComponentModel;
 using System.Text;
@@ -19,7 +20,8 @@ public static class ReadSymbolTool
         "Return the SOURCE of a declaration — the whole body of a type, method, property or field — resolved from the " +
         "compiler's semantic model (correct overloads, partial/nested types, no regex false positives). " +
         "Use this INSTEAD OF search_text + read_file when you want the code of a name you just saw: one call, and you get " +
-        "the declaration body with line numbers. Pass containingType to disambiguate. For who-calls-what, use find_callers.")]
+        "the declaration body with line numbers. Pass containingType to disambiguate. A declaration that only a source " +
+        "generator emits is read from its generated tree, marked (generated). For who-calls-what, use find_callers.")]
     public static async Task<CallToolResult> ReadSymbol(
         IRoslynWorkspace workspace,
         [Description("Symbol name to locate (a type or a member).")] string symbolName,
@@ -55,14 +57,31 @@ public static class ReadSymbolTool
             .OrderBy(symbol => symbol.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // A source generator's trees are in the compilation but no document points at them, so the search
+        // above cannot see them. The declarations they hold are read from their tree, which is source too.
+        var generatedOnly = false;
+        if (symbols.Count == 0)
+        {
+            var generated = await GeneratedSourcesService.FindDeclarationsAsync(
+                solution.Projects, symbolName, MaxSymbols * 5);
+            symbols = generated
+                .Where(declaration => partialMatch ||
+                                      declaration.Symbol.Name.Equals(symbolName, StringComparison.OrdinalIgnoreCase))
+                .Select(declaration => declaration.Symbol)
+                .ToList();
+            generatedOnly = symbols.Count > 0;
+        }
+
         if (symbols.Count == 0)
             return ToolText.Fail(containingType is null
-                ? $"No source declaration found for '{symbolName}'."
+                ? $"No source declaration found for '{symbolName}' (the project's own source and the trees its generators emit were both searched)."
                 : $"No source declaration found for '{symbolName}' in '{containingType}'.");
 
         var selected = symbols.Take(MaxSymbols).ToList();
         var builder = new StringBuilder();
         builder.Append($"{symbolName} — {selected.Count} symbol(s)");
+        if (generatedOnly)
+            builder.Append(" (found in a source generator's trees, not in a project document)");
         if (symbols.Count > selected.Count)
             builder.Append($" (showing the first {selected.Count} of {symbols.Count}; narrow with containingType or partialMatch)");
         builder.Append('\n');
@@ -84,8 +103,10 @@ public static class ReadSymbolTool
                        .Append(" — ").Append(symbol.Kind);
                 if (symbol.ContainingType is not null)
                     builder.Append(", in ").Append(symbol.ContainingType.Name);
-                builder.Append(" — ").Append(node.SyntaxTree.FilePath)
-                       .Append(':').Append(firstLine + 1)
+                builder.Append(" — ").Append(node.SyntaxTree.FilePath);
+                if (solution.GetDocument(node.SyntaxTree) is null)
+                    builder.Append(" (generated)");
+                builder.Append(':').Append(firstLine + 1)
                        .Append('-').Append(lastLine + 1)
                        .Append(" (").Append(declarationLines).Append(" lines");
                 if (truncated)

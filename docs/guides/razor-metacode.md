@@ -106,7 +106,9 @@ Safety:
 - `RZ1005` resolves the partials a form renders (`<partial name=…>`, `@Html.Partial("…")`, the
   `RenderPartial` family) and looks for the token inside them, nested includes included. The search is
   textual, so a token built by a helper the rule does not name can still be reported, and a partial it
-  cannot resolve counts as having no token. Duplicate ids are checked per file.
+  cannot resolve counts as having no token. Duplicate ids (`RZ2003`) are compared across the rendered
+  composition: the page, the layout it declares (`@layout` or `Layout = "…"`) and the partials either
+  renders. A layout selected in `_ViewStart` is not followed.
 - Dynamic values (`method="@Model.Method"`) are not guessed: rules that depend on them stay silent.
 - Files over 2 MB and unreadable folders are reported as `skipped`/`unreadable`, not analysed.
 
@@ -136,18 +138,33 @@ metacode_compare    leftPath=OrderService.cs rightPath=OrderService.kt.mc
 | Input | How |
 |---|---|
 | C# | `language=cs` or a `.cs` path — Roslyn syntax only, no compilation, no solution |
+| Visual Basic | `language=vb` or a `.vb` path |
+| Java | `language=java` or a `.java` path — also what JADX writes |
+| JavaScript | `language=js` or a `.js`/`.mjs`/`.cjs`/`.jsx` path — an ES module first, a classic script second |
 | Razor / Blazor | `language=razor` or a `.cshtml`/`.razor` path |
 | Ghidra snapshot | A `.json` with `imageBase` + `functions`, or `language=ghidra` |
 | Canonical pseudocode | `language=pseudo` or a `.mc` path |
 
+JavaScript is parsed by Acornima (the .NET port of acorn) and lowered here, so the language is read whole:
+modules and CommonJS, classes with private fields and accessors, arrow functions, template literals,
+destructuring, `async`/`await`, optional chaining. Two things are deliberately not read — **JSX** and
+**TypeScript annotations** are not ECMAScript, and a file containing either is reported as a syntax error at
+its own line instead of being half-read. A top-level `const` becomes a field of the module; the rest of what
+the file does at load time becomes the body of `__module__`, the same entry point Python's module-level code
+uses.
+
 A Razor page becomes a page class: `@model` and `@inject` are properties, `@code`/`@functions` members
-are lowered as C#, and the markup body is the body of a `Render` method. `@if`/`@else`/`@foreach`/`@for`/
-`@while`/`@lock`/`@using` are control flow; the HTML between them is `RAW[razor]`. A `@switch`, a
-`try`/`catch` or a brace-less body is kept as one `RAW` block with a diagnostic.
+are lowered as C#, an `@section Name { … }` becomes a `Section_Name` method, and the markup body is the body
+of a `Render` method. Every control construct is a node of the model — `@if`/`@else`, `@foreach`, `@for`,
+`@while`, `@do … while`, `@switch` with its `case`/`default` sections, `@try`/`catch`/`finally`, `@lock`,
+`@using (…)`, a `@{ … }` block — with a braced or a brace-less body; the HTML between them is `RAW[razor]`.
+A construct whose header or body cannot be read is one `RAW` block with a diagnostic.
 
 The model is also an **output**: any language can join by emitting canonical pseudocode. The library
-contains Python and C++ AST-JSON readers; `translate_python_file` and `translate_cpp_file` produce the
-dump (through CPython's `ast` module and `clang -ast-dump=json`) or take one you supply.
+contains Python and C++ AST-JSON readers, and they are part of the default pipeline: `metacode_translate`
+/ `metacode_compare` put a `.py`/`.cpp` path through the dumper themselves (CPython's `ast` module,
+`clang -ast-dump=json`), and `translate_python_file` / `translate_cpp_file` do the same when the dump is
+what you want back; all of them also take a dump you supply.
 
 ### Decompiling managed assemblies
 
@@ -204,6 +221,11 @@ object with the counts and the reasons anything was skipped.
 
 - Normalization is declarative, not an interpreter: constructs the C reader does not model (the comma
   operator, multi-level pointers, calling conventions) stay `RAW` with a diagnostic.
+- JavaScript is read as ECMAScript, so JSX and TypeScript annotations stop the parse (one `MC0001` naming
+  the line). Inside the language, `with`, `debugger`, a labeled `break`/`continue`, the comma operator, a
+  tagged template, a dynamic `import()` and an object literal with a spread or an accessor stay `RAW[js]`;
+  `for … in`, `>>>`, an optional call and a generator are lowered with a `LossyLowering` that says what was
+  lost. A re-export is printed as the import it mirrors.
 - Decompiled code is **text**. Rename, navigation and the semantic analysis tools operate on source
   documents, not on decompiled output.
 - ILSpy reconstructs C# from IL; the result is readable but not the original source, and names can be

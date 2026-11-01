@@ -8,10 +8,12 @@ namespace Snitch.Languages.CSharp.Analysis.DataFlow;
 /// A taint walk over the solution: it seeds a method with the values a caller controls, follows the
 /// assignments and calls that carry them, and reports the ones that arrive at a sink in
 /// <see cref="TaintCatalog"/>. It is a static analysis with a documented reach — locals, parameters and
-/// call arguments to a caller-set depth, plus a field written in one method and read in another, on any
-/// object — not a proof: a field is keyed by its declaration and not by the instance it hangs off, so
-/// writing one instance's field taints every instance's; a database or a queue is not followed, and
-/// <c>trace_data_flow</c> says so in every answer.
+/// call arguments to a caller-set depth, plus a field written in one method and read in another — not a
+/// proof. A field is keyed by its declaration <em>and</em> by the receiver it is reached through, so with
+/// two locals or two parameters <c>a.Value</c> and <c>b.Value</c> are different entries; the receivers
+/// that keep an identity across methods are <c>this</c>, another field, a property and a static, which is
+/// what a field read in another method is normally anchored to. A database or a queue is not followed,
+/// and <c>trace_data_flow</c> says so in every answer.
 /// </summary>
 public static class TaintAnalyzer
 {
@@ -30,18 +32,20 @@ public static class TaintAnalyzer
             context.Index[method.Definition] = method;
         }
 
-        // Pass one: the fields that hold tainted data. A field written by one method and read by
-        // another is the one store an intra-method walk cannot see.
+        // Pass one: the fields that hold tainted data. A receiver that is a local or a parameter is an
+        // identity only inside the method that owns it, so those keys are not seeded into another
+        // method; `this`, another field and a property keep the same identity across methods.
         foreach (var method in context.Models)
         {
             var state = ComputeTaint(method, seeds: null, fieldSeeds: null);
-            foreach (var (symbol, origin) in state)
-                if (symbol is IFieldSymbol field && !context.FieldOrigins.ContainsKey(field))
-                    context.FieldOrigins[field] = origin;
+            foreach (var (key, origin) in state.Fields)
+                if (key.Receiver is not (ILocalSymbol or IParameterSymbol) && key.Fallback is null &&
+                    !context.FieldOrigins.ContainsKey(key))
+                    context.FieldOrigins[key] = origin;
         }
 
-        // Pass two: the report, with those fields seeded in every method: a field carries its value
-        // across methods and across objects, so the read side is not restricted to the declaring type.
+        // Pass two: the report, with those fields seeded in every method: a field of this object carries
+        // its value across methods, and the walk stays receiver-sensitive for everything else.
         foreach (var method in context.Models)
         {
             var state = ComputeTaint(method, seeds: null, fieldSeeds: context.FieldOrigins);
@@ -67,24 +71,24 @@ public static class TaintAnalyzer
 
     // ── the walk of one method ─────────────────────────────────────────────────
 
-    private static Dictionary<ISymbol, Origin> ComputeTaint(
+    private static TaintState ComputeTaint(
         MethodDeclarationModel method,
         IReadOnlyDictionary<IParameterSymbol, Origin>? seeds,
-        IReadOnlyDictionary<IFieldSymbol, Origin>? fieldSeeds)
+        IReadOnlyDictionary<FieldKey, Origin>? fieldSeeds)
     {
-        var state = new Dictionary<ISymbol, Origin>(SymbolEqualityComparer.Default);
+        var state = new TaintState();
 
         foreach (var parameter in method.Symbol.Parameters)
             if (IsSourceParameter(parameter, method.IsAction))
-                state[parameter] = new Origin(SourceOf(parameter, method), []);
+                state.Symbols[parameter] = new Origin(SourceOf(parameter, method), []);
 
         if (seeds is not null)
             foreach (var (parameter, origin) in seeds)
-                state[parameter] = origin;
+                state.Symbols[parameter] = origin;
 
         if (fieldSeeds is not null)
-            foreach (var (field, origin) in fieldSeeds)
-                state[field] = origin;
+            foreach (var (key, origin) in fieldSeeds)
+                state.Fields[key] = origin;
 
         var model = method.Model;
 
@@ -100,30 +104,29 @@ public static class TaintAnalyzer
                 switch (node)
                 {
                     case VariableDeclaratorSyntax { Initializer.Value: { } value } declarator:
-                        if (model.GetDeclaredSymbol(declarator) is not ILocalSymbol local || state.ContainsKey(local)) break;
+                        if (model.GetDeclaredSymbol(declarator) is not ILocalSymbol local || state.Symbols.ContainsKey(local)) break;
                         if (!TryOrigin(value, model, state, out var declarationOrigin)) break;
-                        state[local] = WithStep(declarationOrigin, method, declarator, $"assigned to {local.Name}");
+                        state.Symbols[local] = WithStep(declarationOrigin, method, declarator, $"assigned to {local.Name}");
                         changed = true;
                         break;
 
                     case AssignmentExpressionSyntax assignment:
-                        if (TryField(assignment.Left, model) is { } written)
+                        if (FieldKeyOf(assignment.Left, model) is { } written)
                         {
-                            var (field, isOwn) = written;
                             var fieldValue = assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
                                 ? assignment.Right
                                 : assignment;
 
                             if (TryOrigin(fieldValue, model, state, out var fieldOrigin))
                             {
-                                state[field] = WithStep(fieldOrigin, method, assignment, $"stored in field {field.Name}");
+                                state.Fields[written] = WithStep(fieldOrigin, method, assignment,
+                                    $"stored in field {written.Field.Name}");
                                 changed = true;
                             }
-                            else if (isOwn && state.Remove(field))
+                            else if (state.Fields.Remove(written))
                             {
-                                // Last write wins for a field of this object: a clean assignment clears
-                                // what an earlier one stored. A field of another object is keyed by its
-                                // declaration, so a clean write to one instance cannot clear the others.
+                                // Last write wins for the field on the receiver the key names: a clean
+                                // assignment clears what an earlier one stored there, and only there.
                                 changed = true;
                             }
 
@@ -132,12 +135,12 @@ public static class TaintAnalyzer
 
                         if (assignment.Left is MemberAccessExpressionSyntax or ElementAccessExpressionSyntax) break;
                         if (model.GetSymbolInfo(assignment.Left).Symbol is not { } assigned ||
-                            assigned is not (ILocalSymbol or IParameterSymbol) || state.ContainsKey(assigned))
+                            assigned is not (ILocalSymbol or IParameterSymbol) || state.Symbols.ContainsKey(assigned))
                             break;
 
                         var carried = assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ? assignment.Right : assignment;
                         if (!TryOrigin(carried, model, state, out var assignedOrigin)) break;
-                        state[assigned] = WithStep(assignedOrigin, method, assignment, $"assigned to {assignment.Left}");
+                        state.Symbols[assigned] = WithStep(assignedOrigin, method, assignment, $"assigned to {assignment.Left}");
                         changed = true;
                         break;
                 }
@@ -149,7 +152,7 @@ public static class TaintAnalyzer
         return state;
     }
 
-    private static List<Hit> FindHits(MethodDeclarationModel method, Dictionary<ISymbol, Origin> state)
+    private static List<Hit> FindHits(MethodDeclarationModel method, TaintState state)
     {
         var hits = new List<Hit>();
         var model = method.Model;
@@ -215,7 +218,7 @@ public static class TaintAnalyzer
     // ── the call graph ─────────────────────────────────────────────────────────
 
     private static void TraceCalls(
-        MethodDeclarationModel method, Dictionary<ISymbol, Origin> state, Context context, int remainingDepth)
+        MethodDeclarationModel method, TaintState state, Context context, int remainingDepth)
     {
         if (remainingDepth <= 0) return;
 
@@ -273,7 +276,7 @@ public static class TaintAnalyzer
     // ── expression taint ───────────────────────────────────────────────────────
 
     private static bool TryOrigin(
-        ExpressionSyntax expression, SemanticModel model, Dictionary<ISymbol, Origin> state, out Origin origin)
+        ExpressionSyntax expression, SemanticModel model, TaintState state, out Origin origin)
     {
         origin = default!;
 
@@ -345,8 +348,7 @@ public static class TaintAnalyzer
                     return true;
                 }
 
-                if (model.GetSymbolInfo(access).Symbol is IFieldSymbol memberField &&
-                    state.TryGetValue(memberField, out var memberKnown))
+                if (FieldKeyOf(access, model) is { } accessKey && state.Fields.TryGetValue(accessKey, out var memberKnown))
                 {
                     origin = memberKnown;
                     return true;
@@ -356,9 +358,16 @@ public static class TaintAnalyzer
 
             case IdentifierNameSyntax or GenericNameSyntax:
                 if (model.GetSymbolInfo(expression).Symbol is not { } symbol) return false;
-                if (state.TryGetValue(symbol, out var known))
+                if (state.Symbols.TryGetValue(symbol, out var known))
                 {
                     origin = known;
+                    return true;
+                }
+
+                if (symbol is IFieldSymbol field &&
+                    state.Fields.TryGetValue(new FieldKey(field, null, null), out var fieldKnown))
+                {
+                    origin = fieldKnown;
                     return true;
                 }
 
@@ -377,24 +386,36 @@ public static class TaintAnalyzer
     }
 
     /// <summary>
-    /// The field an assignment writes, and whether it belongs to this object. A field of another object
-    /// is followed too — the value crosses methods and objects — but it is keyed by its declaration, so
-    /// the walk is instance-insensitive: writing one instance's field taints every instance's. A property
-    /// is not a field and is not tracked here.
+    /// The field an expression reads or writes, and the receiver it is reached through. A bare field or
+    /// <c>this.Field</c> is keyed by "this object", a static field by the field alone, and
+    /// <c>local.Field</c> / <c>parameter.Field</c> by that local or parameter, so <c>a.Value</c> and
+    /// <c>b.Value</c> are two entries. A receiver the walk cannot name (a call, a property chain) keys
+    /// the field by its text, which keeps two different expressions apart without inventing an identity.
+    /// A property is not a field and is not tracked here.
     /// </summary>
-    private static (IFieldSymbol Field, bool IsOwn)? TryField(ExpressionSyntax left, SemanticModel model)
+    private static FieldKey? FieldKeyOf(ExpressionSyntax expression, SemanticModel model)
     {
-        if (model.GetSymbolInfo(left).Symbol is not IFieldSymbol field) return null;
+        if (model.GetSymbolInfo(expression).Symbol is not IFieldSymbol field) return null;
 
-        var isOwn = left switch
+        switch (expression)
         {
-            IdentifierNameSyntax => true,
-            MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax } => true,
-            MemberAccessExpressionSyntax when field.IsStatic => true,
-            _ => false,
-        };
+            case IdentifierNameSyntax:
+            case MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax or BaseExpressionSyntax }:
+                return new FieldKey(field, null, null);
 
-        return (field, isOwn);
+            case MemberAccessExpressionSyntax access:
+                if (field.IsStatic) return new FieldKey(field, null, null);
+
+                var receiver = model.GetSymbolInfo(access.Expression).Symbol;
+                if (receiver is ILocalSymbol or IParameterSymbol or IFieldSymbol or IPropertySymbol)
+                    return new FieldKey(field, receiver, null);
+
+                var text = access.Expression.ToString().Trim();
+                return text.Length == 0 ? null : new FieldKey(field, null, text);
+
+            default:
+                return new FieldKey(field, null, null);
+        }
     }
 
     private static bool IsSanitizer(InvocationExpressionSyntax invocation, SemanticModel model)
@@ -561,6 +582,40 @@ public static class TaintAnalyzer
 
     private sealed record Hit(FlowSink Sink, Origin Origin);
 
+    /// <summary>A field plus the receiver it was reached through: null receiver means "this object".</summary>
+    private sealed class FieldKey(IFieldSymbol field, ISymbol? receiver, string? fallback) : IEquatable<FieldKey>
+    {
+        public IFieldSymbol Field { get; } = field;
+        public ISymbol? Receiver { get; } = receiver;
+
+        /// <summary>The receiver's own text, when it is not a symbol (a call, a property chain).</summary>
+        public string? Fallback { get; } = fallback;
+
+        public bool Equals(FieldKey? other) =>
+            other is not null &&
+            SymbolEqualityComparer.Default.Equals(Field, other.Field) &&
+            SymbolEqualityComparer.Default.Equals(Receiver, other.Receiver) &&
+            string.Equals(Fallback, other.Fallback, StringComparison.Ordinal);
+
+        public override bool Equals(object? obj) => Equals(obj as FieldKey);
+
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+            hash.Add(SymbolEqualityComparer.Default.GetHashCode(Field));
+            if (Receiver is not null) hash.Add(SymbolEqualityComparer.Default.GetHashCode(Receiver));
+            if (Fallback is not null) hash.Add(Fallback, StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
+    }
+
+    /// <summary>The values a method's walk knows are tainted: locals/parameters and fields per receiver.</summary>
+    private sealed class TaintState
+    {
+        public Dictionary<ISymbol, Origin> Symbols { get; } = new(SymbolEqualityComparer.Default);
+        public Dictionary<FieldKey, Origin> Fields { get; } = [];
+    }
+
     private sealed class Context(int maxFlows)
     {
         public int MaxFlows { get; } = maxFlows;
@@ -570,7 +625,7 @@ public static class TaintAnalyzer
         public Dictionary<IMethodSymbol, MethodDeclarationModel> Index { get; } = new(SymbolEqualityComparer.Default);
 
         /// <summary>The fields that hold tainted data, collected in pass one and seeded in pass two.</summary>
-        public Dictionary<IFieldSymbol, Origin> FieldOrigins { get; } = new(SymbolEqualityComparer.Default);
+        public Dictionary<FieldKey, Origin> FieldOrigins { get; } = [];
 
         public HashSet<string> Visited { get; } = new(StringComparer.Ordinal);
 

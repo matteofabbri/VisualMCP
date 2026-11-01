@@ -66,20 +66,36 @@ public sealed class MetacodeSource
     /// A CPython <c>ast</c> dump as JSON: every node is an object with <c>_type</c> (or <c>type</c>)
     /// plus its own fields. See <c>docs/metacode.md</c> for the four-line dumper.
     /// </summary>
-    /// <remarks>
-    /// No default pipeline reads this: <see cref="Frontends.PythonFrontend"/> is opt-in, because nothing
-    /// in this product produces such a dump.
-    /// </remarks>
     public static MetacodeSource FromPythonAst(string json, string? path = null) =>
         new(json, path, MetacodeLanguage.Python, null);
 
-    /// <summary>
-    /// A Clang <c>-ast-dump=json</c> document. Opt-in for the same reason as
-    /// <see cref="FromPythonAst"/>: <see cref="Frontends.CppFrontend"/> is not in
-    /// <see cref="MetacodeTranslator.Default"/>.
-    /// </summary>
+    /// <summary>A Clang <c>-ast-dump=json</c> document, which is what <see cref="Frontends.CppFrontend"/> reads.</summary>
     public static MetacodeSource FromCppAst(string json, string? path = null) =>
         new(json, path, MetacodeLanguage.Cpp, null);
+
+    /// <summary>
+    /// Whether the text is a clang JSON AST dump. It looks at the head of the document instead of parsing
+    /// it (the dump of one translation unit is megabytes): clang's root node is the only
+    /// <c>TranslationUnitDecl</c> a document declares that way.
+    /// </summary>
+    public static bool LooksLikeCppAst(string text) =>
+        LooksLikeJson(text) && Head(text).Contains("\"TranslationUnitDecl\"", StringComparison.Ordinal);
+
+    /// <summary>Whether the text is a CPython <c>ast</c> dump: its root node is the module.</summary>
+    public static bool LooksLikePythonAst(string text) =>
+        LooksLikeJson(text) && Head(text).Contains("\"_type\": \"Module\"", StringComparison.Ordinal);
+
+    /// <summary>Whether the text is the JSON AST dump of <paramref name="language"/>.</summary>
+    public static bool LooksLikeDump(MetacodeLanguage language, string text) => language switch
+    {
+        MetacodeLanguage.Cpp => LooksLikeCppAst(text),
+        MetacodeLanguage.Python => LooksLikePythonAst(text),
+        _ => false,
+    };
+
+    private static bool LooksLikeJson(string text) => text.TrimStart().StartsWith('{');
+
+    private static string Head(string text) => text[..Math.Min(text.Length, 4096)];
 
     /// <summary>
     /// A Ghidra headless snapshot (the JSON <c>ExportNativeGraph.java</c> writes). It has no language
@@ -104,15 +120,33 @@ public sealed class MetacodeSource
     public static MetacodeSource FromJava(string text, string? path = null) =>
         new(text, path, MetacodeLanguage.Java, null);
 
+    /// <summary>
+    /// JavaScript source text: an ES module, a classic script or a CommonJS file. The frontend parses it
+    /// with Acornima and lowers the result, so no tree travels here — the same arrangement C# has with
+    /// Roslyn, minus the in-memory tree.
+    /// </summary>
+    public static MetacodeSource FromJavaScript(string text, string? path = null) =>
+        new(text, path, MetacodeLanguage.JavaScript, null);
+
+    /// <summary>
+    /// Rust source text. Unlike Python and C++, the Rust reader parses the source itself — there is no AST
+    /// dump this product could produce without a toolchain — so <see cref="Frontends.RustFrontend"/> is in
+    /// <see cref="MetacodeTranslator.Default"/> and this is how a .rs file enters it.
+    /// </summary>
+    public static MetacodeSource FromRust(string text, string? path = null) =>
+        new(text, path, MetacodeLanguage.Rust, null);
+
     public static MetacodeSource FromText(string text, MetacodeLanguage language, string? path = null) =>
         new(text, path, language, null);
 
     /// <summary>
     /// Reads a file and infers the source language from the extension: <c>.cs</c>, <c>.vb</c>,
-    /// <c>.java</c>, <c>.cshtml</c>/<c>.razor</c> and the canonical-pseudocode extensions. A <c>.json</c>
-    /// file is sniffed for a Ghidra snapshot (an image base plus a function list) and nothing else. A
-    /// Python or clang AST dump has no extension to infer it from — pass <see cref="FromPythonAst"/> or
-    /// <see cref="FromCppAst"/> — and whoever wants to read one builds a translator with the matching reader.
+    /// <c>.java</c>, <c>.rs</c>, the JavaScript extensions (<c>.js</c>, <c>.mjs</c>, <c>.cjs</c>, <c>.jsx</c>),
+    /// <c>.cshtml</c>/<c>.razor</c> and the canonical-pseudocode extensions. A <c>.json</c>
+    /// file is sniffed for the three dumps this library reads — a Ghidra snapshot (an image base plus a
+    /// function list), a clang AST dump and a CPython <c>ast</c> dump. A <c>.py</c> or <c>.cpp</c>
+    /// <em>source</em> has no reader: those frontends read the dump, and the dumper is run by the host
+    /// (<c>translate_python_file</c> / <c>translate_cpp_file</c>, <c>metacode_translate</c> on that path).
     /// </summary>
     public static MetacodeSource FromFile(string path)
     {
@@ -126,6 +160,10 @@ public sealed class MetacodeSource
                 return FromVisualBasic(text, path);
             case ".java":
                 return FromJava(text, path);
+            case ".js" or ".mjs" or ".cjs" or ".jsx":
+                return FromJavaScript(text, path);
+            case ".rs":
+                return FromRust(text, path);
             case ".mc" or ".pseudo" or ".metacode":
                 return FromPseudocode(text, path);
             case ".cshtml" or ".razor":
@@ -133,6 +171,10 @@ public sealed class MetacodeSource
             case ".json":
                 if (Snitch.Metacode.Decompilation.GhidraSnapshot.LooksLikeSnapshot(text))
                     return FromGhidra(text, path);
+                if (LooksLikeCppAst(text))
+                    return FromCppAst(text, path);
+                if (LooksLikePythonAst(text))
+                    return FromPythonAst(text, path);
                 return new MetacodeSource(text, path, null, null);
             default:
                 return new MetacodeSource(text, path, null, null);

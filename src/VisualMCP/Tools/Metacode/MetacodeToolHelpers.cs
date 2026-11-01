@@ -1,6 +1,7 @@
 using System.Text;
 using Snitch.Metacode;
 using Snitch.Metacode.Rendering;
+using VisualMCP.Translation;
 
 namespace VisualMCP.Tools.Metacode;
 
@@ -12,12 +13,26 @@ internal static class MetacodeToolHelpers
 {
     /// <summary>
     /// Reads one side of a call. A path alone is inferred by extension (<see cref="MetacodeSource.FromFile"/>,
-    /// which also sniffs a <c>.json</c> dump for a Ghidra snapshot's <c>imageBase</c>+<c>functions</c>); an
-    /// explicit language wins over the extension, and is required for text, because there is no extension
-    /// to go by.
+    /// which also sniffs a <c>.json</c> for a Ghidra snapshot or a Python/clang AST dump); an explicit
+    /// language wins over the extension, and is required for text, because there is no extension to go by.
+    ///
+    /// A <c>.py</c> or a <c>.cpp</c> path — or the name of that language — is not a dump but the source a
+    /// dump is made from, so the dumper runs (<c>python -m ast</c>, <c>clang -ast-dump=json</c>) and the
+    /// result goes through the same readers and options as every other language. Text that already is a
+    /// dump is recognised as one and skips the external process.
     /// </summary>
-    public static (MetacodeSource? Source, string? Error) Load(string? path, string? text, string? language, string side)
+    public static async Task<(MetacodeSource? Source, string? Error)> LoadAsync(
+        string? path,
+        string? text,
+        string? language,
+        string side,
+        ISourceDumpTranslationService dumps,
+        int timeoutSeconds)
     {
+        var tag = Normalize(language) ?? InferDumpTag(path);
+        if (tag is "cpp" or "python")
+            return await LoadDumpAsync(path, text, tag, side, dumps, timeoutSeconds);
+
         if (!string.IsNullOrWhiteSpace(path))
         {
             if (!File.Exists(path))
@@ -25,22 +40,86 @@ internal static class MetacodeToolHelpers
 
             // An unknown extension has no frontend (MC0007), and that diagnostic tells the caller to pass a
             // language — which is exactly what this branch lets them do.
-            return Normalize(language) is { } tag
-                ? FromText(File.ReadAllText(path), tag, path, side)
+            return tag is { } explicitTag
+                ? FromText(File.ReadAllText(path), explicitTag, path, side)
                 : (MetacodeSource.FromFile(path), null);
         }
 
         if (string.IsNullOrWhiteSpace(text))
             return (null, $"{side}: pass either path or text.");
 
-        return Normalize(language) is { } textTag
+        return tag is { } textTag
             ? FromText(text, textTag, null, side)
-            : (null, $"{side}: text needs language='cs', 'vb', 'java', 'razor', 'ghidra' or 'pseudo' — there is no path to infer it from.");
+            : (null, $"{side}: text needs language='cs', 'vb', 'java', 'js', 'cpp', 'python', 'rust', 'razor', 'ghidra' or 'pseudo' — there is no path to infer it from.");
     }
 
-    // The product's source languages are C#, Visual Basic, Java and Razor; pseudocode and a Ghidra
-    // snapshot are this library's own formats. Python and C++ are not offered: their readers need an AST
-    // dump that nothing here produces (see MetacodeTranslator.Default).
+    /// <summary>
+    /// One side in a language whose reader takes an AST dump. A dump the caller already has is read
+    /// directly; otherwise the dumper produces one from the path, or from the text written to a temporary
+    /// file — a C++ translation unit that includes a header next to the caller's text cannot resolve it
+    /// from a temporary folder, so pass the path in that case.
+    /// </summary>
+    private static async Task<(MetacodeSource? Source, string? Error)> LoadDumpAsync(
+        string? path, string? text, string tag, string side,
+        ISourceDumpTranslationService dumps, int timeoutSeconds)
+    {
+        if (!string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith('{'))
+        {
+            var dumpedLanguage = tag == "cpp" ? MetacodeLanguage.Cpp : MetacodeLanguage.Python;
+            if (!MetacodeSource.LooksLikeDump(dumpedLanguage, text))
+            {
+                return (null, $"{side}: the text is JSON but not a {tag} AST dump (expected {ExpectedDump(tag)}). " +
+                              "Pass the dump the dumper produces, a source path to have one produced, or language='pseudo' for canonical text.");
+            }
+
+            return FromText(text, tag, path, side);
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return (null, $"{side}: pass either path or text.");
+            if (!File.Exists(path))
+                return (null, $"{side}: file not found: {path}");
+        }
+
+        var dump = await dumps.ProduceDumpAsync(
+            tag,
+            string.IsNullOrWhiteSpace(text) ? path : null,
+            string.IsNullOrWhiteSpace(text) ? null : text,
+            timeoutSeconds);
+
+        if (dump.Error is not null)
+        {
+            var hint = string.IsNullOrWhiteSpace(dump.Hint) ? string.Empty : " " + dump.Hint;
+            return (null, $"{side}: {dump.Error}{hint}");
+        }
+
+        return FromText(dump.Json!, tag, path, side);
+    }
+
+    /// <summary>The root marker that tells one dump from another, for the error that names it.</summary>
+    private static string ExpectedDump(string tag) => tag == "cpp"
+        ? "'\"kind\": \"TranslationUnitDecl\"' from clang -Xclang -ast-dump=json"
+        : "'\"_type\": \"Module\"' from CPython's ast module";
+
+    /// <summary>The language of a source file that needs a dump, from its extension.</summary>
+    private static string? InferDumpTag(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".cpp" or ".cc" or ".cxx" or ".c++" or ".c" or ".hpp" or ".hh" or ".hxx" or ".h" or ".ipp" or ".inl" => "cpp",
+            ".py" or ".pyw" => "python",
+            _ => null,
+        };
+    }
+
+    // The product's source languages are C#, Visual Basic, Java, JavaScript, Rust and Razor; pseudocode and
+    // a Ghidra snapshot are this library's own formats. Python and C++ are read from the AST dump the caller
+    // passes here (LoadDumpAsync produces it, or accepts one already made).
     private static (MetacodeSource? Source, string? Error) FromText(
         string text, string tag, string? path, string side) => tag switch
     {
@@ -48,11 +127,17 @@ internal static class MetacodeToolHelpers
         "vb" => (MetacodeSource.FromVisualBasic(text, path), null),
         // Java source: what JADX writes, and what a Java project's own .java file contains.
         "java" => (MetacodeSource.FromJava(text, path), null),
+        // JavaScript source, read by the ECMAScript parser and lowered by the JavaScript frontend.
+        "js" => (MetacodeSource.FromJavaScript(text, path), null),
         "pseudo" => (MetacodeSource.FromPseudocode(text, path), null),
         "razor" => (MetacodeSource.FromRazor(text, path), null),
+        // Rust source, read by this library's own recursive-descent reader (no toolchain needed).
+        "rust" => (MetacodeSource.FromRust(text, path), null),
         // The snapshot analyze_native_binary leaves behind, and any older one: no Ghidra needed to read it.
         "ghidra" => (MetacodeSource.FromGhidra(text, path), null),
-        _ => (null, $"{side}: unknown language '{tag}'; use 'cs', 'vb', 'java', 'razor', 'ghidra' or 'pseudo'."),
+        "cpp" => (MetacodeSource.FromCppAst(text, path), null),
+        "python" => (MetacodeSource.FromPythonAst(text, path), null),
+        _ => (null, $"{side}: unknown language '{tag}'; use 'cs', 'vb', 'java', 'js', 'cpp', 'python', 'rust', 'razor', 'ghidra' or 'pseudo'."),
     };
 
     /// <summary>
@@ -117,7 +202,11 @@ internal static class MetacodeToolHelpers
         "razor" or "cshtml" or "blazor" => "razor",
         "ghidra" or "ghidra-snapshot" or "native" => "ghidra",
         "java" or "jadx" or "jar" => "java",
+        "js" or "javascript" or "mjs" or "cjs" or "jsx" or "ecmascript" => "js",
         "vb" or "vbnet" or "visualbasic" or "visual-basic" => "vb",
+        "cpp" or "c++" or "cxx" or "c" => "cpp",
+        "python" or "py" => "python",
+        "rust" or "rs" => "rust",
         _ => language,
     };
 }
