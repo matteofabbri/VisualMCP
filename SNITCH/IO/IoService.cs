@@ -24,6 +24,20 @@ public sealed class IoService : IIoService
             return new LoadSolutionResult { Error = $"File not found: {path}" };
         }
 
+        // One process serves one workspace. Switching to a solution in another repository would
+        // move the active solution, the store, the board and the edit history with it, silently:
+        // that repository needs its own server, which is what the client already starts per session.
+        var root = _workspace.WorkspaceRoot;
+        if (!WorkspacePath.IsWithin(root, path))
+        {
+            return new LoadSolutionResult
+            {
+                Error = $"'{path}' is outside this server's workspace '{root}'. One VisualMCP process serves one " +
+                        $"workspace; start a server with --root \"{Path.GetDirectoryName(path)}\" (or set " +
+                        "VISUALMCP_ROOT) for that solution. list_solutions shows what this server already covers.",
+            };
+        }
+
         var result = await _workspace.LoadSolutionAsync(path, cancellationToken);
         var solution = result.Solution;
 
@@ -103,7 +117,7 @@ public sealed class IoService : IIoService
             return new CheckSolutionResult
             {
                 IsLoaded = false,
-                Message = "No .NET solution is currently loaded. Load one first, or stop here if the current workspace is not a .NET C# or Visual Basic project — there is nothing useful to offer outside of a .NET solution.",
+                Message = "No .NET solution is currently loaded. Load one inside this workspace (a .sln/.slnx under the workspace root), or start the server in the folder that contains it — or pass --root. If the workspace is not a .NET C# or Visual Basic project, there is nothing useful to offer outside of a .NET solution.",
             };
         }
 
@@ -155,7 +169,7 @@ public sealed class IoService : IIoService
         {
             return new ProjectInfoResult
             {
-                Error = "No C# solution could be auto-located from the working directory. Provide an explicit path to the .sln/.slnx.",
+                Error = "No C# solution could be auto-located from the working directory. Provide an explicit path to a .sln/.slnx inside this workspace, or start the server with --root pointing at its folder.",
             };
         }
 

@@ -47,7 +47,7 @@ public sealed class SolutionAuditService : ISolutionAuditService
 
         var solution = await _workspace.EnsureSolutionLoadedAsync(cancellationToken);
         if (solution is null)
-            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution first." };
+            return new { error = "No C# solution could be auto-located from the working directory. Call load_solution with a .sln/.slnx inside this workspace, or start the server with --root." };
 
         var projects = solution.Projects
             .Where(candidate => candidate.Language == LanguageNames.CSharp)

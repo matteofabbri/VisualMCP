@@ -139,6 +139,9 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     private const string CSharp = "cs";
     private const string VisualBasic = "vb";
 
+    /// <summary>The cross-process lease that keeps one watcher per workspace, not one per session.</summary>
+    private const string WatcherLease = "metacode-watch";
+
     private static readonly HashSet<string> TypeKinds = new(StringComparer.Ordinal)
     {
         "class", "struct", "interface", "enum", "record", "union", "trait",
@@ -189,6 +192,13 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         }
 
         var period = interval ?? TimeSpan.FromSeconds(2);
+
+        // Every client session starts its own server, and two on the same workspace share one
+        // database: without the lease both would refresh the same files every couple of seconds.
+        // The owner renews on each tick; 30 seconds tolerate a slow pass before another server
+        // decides the owner is gone and takes over.
+        var leaseTtl = TimeSpan.FromSeconds(30);
+
         _ = Task.Run(async () =>
         {
             using var timer = new PeriodicTimer(period);
@@ -198,6 +208,8 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
                 {
                     try
                     {
+                        if (!_store.TryAcquireBackgroundLease(WatcherLease, leaseTtl)) continue;
+
                         await RefreshAsync(created.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
@@ -213,6 +225,11 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
             catch (OperationCanceledException)
             {
                 // The host is shutting down, or the service was disposed.
+            }
+            finally
+            {
+                try { _store.ReleaseBackgroundLease(WatcherLease); }
+                catch { /* the host is going away */ }
             }
         }, CancellationToken.None);
     }

@@ -5,7 +5,7 @@
 What the product needs, and what a result proves. The boundaries — where a read stops and what a scanner
 cannot prove — are written where they can be checked against the inventory rather than repeated here: the
 per-language map is [gaps.md §1](../gaps.md#1-language-and-platform-scope), the properties of the analysis
-are [gaps.md §11](../gaps.md#11-boundaries-that-are-not-gaps), and the ✅ half is
+are the [cross-cutting table](../resharper-codemaid-coverage.md#cross-cutting-boundaries), and the ✅ half is
 [resharper-codemaid-coverage.md](../resharper-codemaid-coverage.md).
 
 ## Requirements

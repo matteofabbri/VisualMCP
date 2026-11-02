@@ -681,6 +681,7 @@ public sealed class RazorTests
     {
         public Solution? CurrentSolution => null;
         public string? LoadedSolutionPath => null;
+        public string WorkspaceRoot => Directory.GetCurrentDirectory();
 
         public Task<Solution?> EnsureSolutionLoadedAsync(CancellationToken ct = default) =>
             Task.FromResult<Solution?>(null);

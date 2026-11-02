@@ -19,7 +19,7 @@ public static class EditHistoryTool
         [Description("Only this file's edits (absolute path).")] string? file = null)
     {
         if (store.DatabasePath is null && store.EnsureDatabase() is null)
-            return new { error = "No solution is loaded, so there is no edit history. Call load_solution first." };
+            return new { error = "No solution is loaded, so there is no edit history. Start the server in a folder that contains a .sln/.slnx (or pass --root); load_solution only accepts a solution inside that workspace." };
 
         if (limit < 1) limit = 1;
         if (limit > 5000) limit = 5000;

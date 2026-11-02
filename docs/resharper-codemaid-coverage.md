@@ -3,7 +3,7 @@
 Comparison of VisualMCP tools against ReSharper, Rider and CodeMaid.
 Legend: ✅ implemented · ⚠️ partial · ❌ missing
 
-Last updated: 2026-11-01 — **420 tools** in the running build; `capability_report` prints the live count.
+Last updated: 2026-11-01 — **429 tools** in the running build; `capability_report` prints the live count.
 This is the ✅ side of the comparison: each row names a capability that exists, the tool that provides it,
 and the guarantee — what that tool proves and where it stops. The ❌/⚠️ side is
 [What is missing — the gap inventory](gaps.md); a row that reads "scanned", "masked" or "candidate" is
@@ -15,7 +15,7 @@ an exception explained below it.
 
 ## Contents
 
-[ReSharper](#resharper) · [CodeMaid](#codemaid) · [Other languages and file kinds](#other-languages-and-file-kinds) · [Revision log](#revision-log)
+[ReSharper](#resharper) · [CodeMaid](#codemaid) · [Other languages and file kinds](#other-languages-and-file-kinds) · [Cross-cutting boundaries](#cross-cutting-boundaries) · [Revision log](#revision-log)
 
 ---
 
@@ -77,7 +77,7 @@ whose VB spelling is its own operation (`extract_interface`, `extract_method`, `
 stays C#-only is only what VB cannot express — a record, a primary constructor, a nullable reference type.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
 `simplify_code` (97 IDE ids) and `simplify_vb_code` (41 VB ids), the fixes come from `apply_code_fix`,
-and 41 context-action ids are applied directly by `context_action` — the guards, the wrap actions, the
+and 54 context-action ids are applied directly by `context_action` — the guards, the wrap actions, the
 statement and declaration shapes, the string conversions, LINQ in both directions, StringBuilder,
 pattern merging and the extension block, named in its table below.
 
@@ -87,7 +87,7 @@ pattern merging and the extension block, named in its table below.
 |---|---|---|
 | Implement missing interface/abstract members | `implement_members` | ✅ compiler-gated |
 | Create class/member from usage | `create_from_usage` | ✅ the six declaration shapes the compiler can ask for — CS1061 member, CS0117 static member, CS1501/CS7036 overload, CS1729 constructor, CS0246 type, CS0103 method — each built from the call site and compiler-gated |
-| Context actions outside the style/refactoring families | `context_action` | ⚠️ 41 of the 307 actions in the census: import, eight argument guards, five wrap actions, the statement/declaration family, nullable migration, the string re-encodings, LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block. **Visual Basic** implements the 33 ids that have a VB spelling and refuses the C#-syntax ones with the reason. What remains is the proprietary tail — actions whose condition is a type-system fact rather than a shape — and the IDE-only ones; see [the census](resharper-context-actions.md) |
+| Context actions outside the style/refactoring families | `context_action` | ⚠️ 54 of the 307 actions in the census: import, eight argument guards, five wrap actions, the statement/declaration family, nullable migration, the string re-encodings, LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block. **Visual Basic** implements the 33 ids that have a VB spelling and refuses the C#-syntax ones with the reason. What remains is the proprietary tail — actions whose condition is a type-system fact rather than a shape — and the IDE-only ones; see [the census](resharper-context-actions.md) |
 | Generate XML documentation | `generate_docs` | ✅ summary/param/typeparam/returns |
 | Generate constructor / Equals / GetHashCode / ToString | `generate_members` | ✅ |
 | Implement INotifyPropertyChanged | `implement_inpc` | ✅ |
@@ -248,16 +248,46 @@ and, in the last column, exactly where it stops.
 | SQL | `sql_files`, `analyze_sql` | statements, verbs and tables; the lexical, safety, security and performance rules SQL0001–SQL0012, and the DDL the scanned files carry (`CREATE TABLE`, `ALTER TABLE … ADD`) read into a schema model that checks a statement's table and column names (SQL0011/SQL0012, `schema=off` to disable) | not a dialect parser and never a live database: the schema is the one the scan reads, so a table created elsewhere is reported as undeclared, not as invalid; no execution, no query plan, no formatting, and SQL inside a C# string is a `trace_data_flow` sink rather than parsed text |
 | Kubernetes and Helm | `k8s_status`, `k8s_context`, `k8s_get`, `k8s_describe`, `k8s_logs`, `k8s_kustomize`, `k8s_validate`, `k8s_port_forward`, `k8s_exec`, `k8s_apply`, `k8s_delete`, `k8s_rollout`, `k8s_helm` | the cluster as data — client/server versions and the context, resources reduced to name/ready/restarts, `describe`, logs, an offline kustomize render, a manifest validated against the built-in kinds (K8S001–K8S023), a port-forward session that starts, is inspected and stops, one confirmed command inside a pod, and apply/delete/rollout with `confirm=true` (apply defaults to a server-side dry run); helm releases, a chart rendered offline and `helm lint` | the wrapper, not the cluster: `k8s_validate server=true` asks the cluster with `kubectl apply --dry-run=server` (the authority for a CRD's OpenAPI schema and a webhook when a cluster answers), a port-forward lives in the server process and ends with it, and every write needs `confirm=true` |
 
+## Cross-cutting boundaries
+
+These are not a feature of any one language or tool: they are properties every result shares, plus the
+safety facts of a process-level server, and the residual boundary of the families that used to have a
+section of their own on the gap inventory. Each is stated so a green run is read for what it proves; the
+debugger adapter's own surface is [gaps.md §2](gaps.md#2-debugger).
+
+| Boundary | What it means |
+|---|---|
+| What a rewrite gate proves | The compiler gate proves that a change compiles, never that it is correct. Behaviour is measured by `verify_change`, which compares two runs test by test; code the suite does not cover comes back `unverified` instead of being called safe |
+| What a scanner proves | `analyze_complexity`, the Razor rules and security scanning report patterns with their confidence: a green run means "no pattern matched", and `inspection_baseline` is what turns that into a statement about a change rather than about a moment |
+| Source-generated code | A generator's tree belongs to the compilation, not to a project document. `list_generated_sources` names the generators and the trees (and with `symbol=` the declarations inside them), and `find_symbol`/`read_symbol` read those trees. Every document-based tool works on documents, so the editors and refactorings, `reference_index`, `inspect_code` and `text_index` do not see them; `search_text`/`search_code` reach an emitted `.g.cs` file on disk when the glob covers it — the file, not its symbols |
+| Reflection and framework conventions | `find_unused_symbols` reports `frameworkInvoked` (classified by `framework_entry_points`) and `reflectionInvoked` (the symbols a reflective lookup names — a literal, `nameof`, `typeof` or a compile-time concatenation, resolved by simple or metadata name, the full list in `find_reflection_usage`) apart from `unused`. A name that is not a compile-time constant, such as `Type.GetType(assembledName)`, is not guessed |
+| Referenced assemblies | `find_external_usages` reports the surface the solution uses, with call sites and the assembly's version and path; `decompile_type` and `assembly_workspace` read its internals from that path. What the used surface does not state is what the assembly does internally, and no call graph crosses that boundary |
+| Razor and Blazor | A heuristic markup scanner (28 rules): markup inside `@{ … }`/`@code { … }` is C# and is not descended. The anti-forgery rule resolves the partials a form renders and searches their text, so a token built by a helper it does not name is a false positive to review and an unresolved partial counts as having no token. Duplicate ids are compared across the rendered composition — the page, the layout it declares or the one the nearest `_ViewStart.cshtml` selects, and the partials either renders. A rule whose answer depends on a runtime value stays silent, files over 2 MB and unreadable folders are reported as skipped, and `.cshtml`/`.razor` are not Roslyn documents: `razor_*` reads them from disk |
+| Metacode readers | The pseudocode model is a syntax model, not a language service: no type checking, no symbol navigation, no editing. Python and C++ are read from AST dumps — `translate_python_file`/`translate_cpp_file` produce one when CPython's `ast` or `clang` is on the machine, and a dump you supply is taken as it is; Java and Rust have a source frontend, and Go has a label in the model only. A construct the model has no node for stays `RAW[lang] … // reason` with a diagnostic, so a translation can be incomplete and says where. Ghidra and JADX are external tools with a real runtime cost: downloaded on first use, a JDK, a timeout |
+| Profiling | The target must expose a diagnostics IPC endpoint. Sampling is statistical, so short captures are noisy and the verdict tools refuse windows they cannot judge. Allocation sites need stack walks (`profile=gc`/`diagnose`). `file:line` needs PDBs (`profile_symbols` fetches them). ClrMD cannot attach to the server's own process. Inlining and async state machines hide user frames. `profile_async` and `profile_database` need their EventSource presets, and `profile_root_cause` needs PDBs plus a source file. Instrumentation writes a rewritten copy that must run beside the probe DLL. `profile_file_io` uses the Windows kernel ETW provider, so it is Windows-only and privileged. The native monitor answers bounded requests on loopback and is unauthenticated: do not expose its port |
+| Automation and safety | `run_command` is not sandboxed and runs with the server's privileges; `run_plan` can call any tool and any shell command, and its validation prevents broken plans, not dangerous ones; `confirm=true` is a guardrail, not authorization. The edit history records what this server wrote, per workspace and per file, not what an IDE or a script wrote. The store is a cache: indexes are snapshots keyed on content hashes, so after large external changes rebuild them or reload the solution |
+
+The families that used to have a residual-boundary section on the gap inventory are stated here, next to
+the tools they qualify:
+
+| Family | What is still outside |
+|---|---|
+| Taint analysis (`trace_data_flow`) | A receiver that is a property or a call is still an over-approximation (the same path is assumed to be the same object); a database and a queue are not followed; the sanitizer list is explicit, so a sanitizer it does not name is a false positive to review; the answer is candidates with their path, not proofs |
+| Mutation testing (`run_mutation_tests`) | The runner is an external tool the user installs (Stryker.NET); the product drives it, it does not replace it |
+| Database profiling, async/event-source viewers, instrumentation profiling | Process-level only: no request tracing and no distributed trace across services; `profile_root_cause` needs the PDB and the source on disk |
+| Churn × complexity (`git_churn_hotspots`) | Static (model + history), not a runtime measurement |
+
 ---
 
 ## Revision log
 
 The batches that changed this page or the count it quotes, newest first. A count is the live inventory at
 the end of the batch (`capability_report` prints the current one); the product-wide numbered log, with
-every batch and the rows it closed, is [gaps.md §13](gaps.md#13-revision-log).
+every batch and the rows it closed, is [gaps.md §10](gaps.md#10-revision-log).
 
 | Date | What changed | Tools |
 |---|---|---|
+| 2026-11-01 | **A Cross-cutting boundaries section**: the properties every result shares (the gate, scanners, generated code, reflection, referenced assemblies, Razor, metacode readers, profiling, automation/safety) and the residual boundary of taint, mutation, database profiling and churn now live here, next to the features they qualify, instead of on the gap inventory | 420 (unchanged) |
 | 2026-11-01 | **The VB refactoring catalogue is complete except the three constructs VB does not have**: `generify`, `global_usings` (a project-level `Import`) and `transform_parameters`' wrap/replace-with-property now run on a `.vb` document | 420 (unchanged) |
 | 2026-11-01 | **CSS0010**: the CSS cascade is resolved for the dead-declaration case — every rule carries its declarations, specificity and source order, matched against each page's element index; a declaration overridden on every element it matches is reported | 420 (unchanged) |
 | 2026-11-01 | **A lexical rename for the two scanned languages and a server-side manifest check**: `js_symbols action=rename` and `fsharp_symbols action=rename` rename one declaration and every reference the table resolved (for JavaScript the uses in the importing modules and the import binding itself; for F#, the uses before it in its file and in a file that opens the declaring module), previewed by default, with no compiler gate; `k8s_validate server=true` adds `kubectl apply --dry-run=server`, so a CRD's schema and an admission webhook are the cluster's answer rather than the built-in table's | 420 (unchanged) |

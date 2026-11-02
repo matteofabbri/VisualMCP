@@ -15,7 +15,7 @@ registrations and dashboard.
 | Claude Code configuration | `%USERPROFILE%\.claude.json`, or `.mcp.json` in the project |
 | Client routing rules | `%USERPROFILE%\.zcode\AGENTS.md`, and `CLAUDE.md`/`AGENTS.md` in a project |
 | Log | `%USERPROFILE%\.claude\mcp-servers\VisualMCP\debug.log` |
-| Solution store | `<solution>\.visualMCP\visualmcp.db` |
+| Solution store | `<workspace>\.visualMCP\visualmcp.db` — next to the workspace's primary solution, resolved once per process |
 | Disk policy | `<solution>\.visualMCP\disk-policy.json` (written by `disk_usage action=guard`; read at startup) |
 | Profiling artifacts | `<solution>\.visualMCP\profiling\` (traces, dumps, reports, symbols) |
 | Project memory | `%USERPROFILE%\.claude\projects\<slug>\memory\` |
@@ -24,10 +24,25 @@ registrations and dashboard.
 The log is shared by every client: the server logs each request (`REQ`) and each tool call (`TOOL`) to
 the same file, including calls that were cancelled.
 
+## The workspace
+
+One server process serves one workspace. The client starts it per session with the project as its
+working directory; `--root <dir>` (or `VISUALMCP_ROOT`) pins a different one, which is what a host
+without a project directory — Claude Desktop, an IDE plugin — needs. The root is fixed for the life of
+the process: `load_solution` accepts only solutions under it, and a second repository is a second
+server. The solution store and the dashboard belong to the workspace, not to whichever `.sln` happens
+to be active, so a nested `Snitch.sln` does not fork a second database and a second board.
+
+The store is `<primary solution>\.visualMCP\visualmcp.db`, resolved once; `check_solution` reports the
+root, that path and the process id. The startup log names the same three values. The full model —
+startup order, multiple sessions on one workspace, the background lease, the per-instance ports and
+the failure modes — is [The workspace, the store and multiple sessions](../workspace-and-store.md).
+
 ## Environment variables
 
 | Variable | Effect |
 |---|---|
+| `VISUALMCP_ROOT` | The workspace root, when the host cannot pass `--root` (or as its environment equivalent). Default: the working directory the client launched the server in |
 | `VISUALMCP_DASHBOARD` | `off`, `0`, `false` or `no` disables the dashboard |
 | `VISUALMCP_DASHBOARD_PORT` | Preferred first port (default 4677); still falls back |
 | `VISUALMCP_DASHBOARD_HOST` | Bind another interface (default `127.0.0.1`); exposing it on a LAN is a deliberate choice |
@@ -42,7 +57,7 @@ its own: `<workspace>\.visualMCP\disk-policy.json`, written by `disk_usage actio
 root and the variables it sets (`TEMP`, `TMP`, `NUGET_PACKAGES`, `NUGET_HTTP_CACHE_PATH`,
 `DOTNET_CLI_HOME`, `DOTNET_BUNDLE_EXTRACT_BASE_DIR`), which are applied to the process and inherited by
 every child process. Delete the file, or set `enabled=false`, to stop redirecting. Everything else the
-server keeps is the solution store.
+server keeps is the workspace store.
 
 ## Client registration
 
@@ -85,6 +100,12 @@ script writes it that way; hand-editing it is where most "server not found" prob
 For a portable, team-shared setup prefer the DLL form above over the installed `.exe`: the executable
 path is machine-specific.
 
+Neither entry sets a working directory: the child inherits the client's, which in a project is the
+project folder — and that folder is the workspace. Add `"--root", "<path>"` to `args` only for a host
+that has no project directory (Claude Desktop, an IDE plugin); in a normal project registration it
+would pin every session to the same folder. The boundary and its errors are in
+[The workspace, the store and multiple sessions](../workspace-and-store.md).
+
 ### Client instructions
 
 MCP servers can send `instructions` with the handshake. Clients that surface them (Claude Code does)
@@ -99,12 +120,14 @@ Runs inside the MCP process, loopback only, read-only.
 ### Port policy
 
 1. **4677** (`VISUALMCP_DASHBOARD_PORT` changes the first choice).
-2. The port it last bound, stored as `dashboard.port` in the store's `context` table.
+2. The ports remembered by instances that are **no longer running**. Each process owns a
+   `dashboard.port.<pid>` row in the store's `context` table, so two live servers on one workspace do
+   not overwrite each other's port.
 3. An OS-assigned port.
 
-Whatever it binds is written back, so the next start reuses it. A second instance on the same solution
-therefore gets its own stable port instead of colliding. If every candidate fails, the dashboard logs a
-warning and the MCP session continues.
+Each process writes its own row when it binds, so a dead instance's port is reusable by the next start
+while a live sibling keeps its own. If every candidate fails, the dashboard logs a warning and the MCP
+session continues.
 
 ### Pages
 
@@ -134,19 +157,23 @@ immediately. FTS5 shadow tables are hidden.
 |---|---|
 | `GET /api/health` | `ok`, pid, port, url, status, started-at, uptime, database path |
 | `GET /api/overview` | Process facts, dashboard state, database path and size, per-table row counts |
+| `GET /api/board` | Every board column with its cards |
 | `GET /api/tables` | Every table: name, kind, rows, columns, title, area, description |
 | `GET /api/tables/{table}` | One page of rows plus the column list |
+| `POST /api/board/move` · `update` · `comment` · `add` · `delete` | The board's writes from the page; JSON body plus `X-VisualMCP: 1`, same origin |
 
-Blobs are summarised (`<blob N bytes>`), never served.
+Blobs are summarised (`<blob N bytes>`), never served. The read endpoints are `GET`; the five board
+endpoints are the only writes, and they are refused without the header and content type (see
+[dashboard.md](../dashboard.md)).
 
 ## The solution store
 
-`<solution>/.visualMCP/visualmcp.db` — SQLite, scoped to one solution. Only derived, reconstructible data
-with a freshness key goes in it; the source on disk stays the only truth.
+`<workspace>/.visualMCP/visualmcp.db` — SQLite, scoped to one workspace (keyed on its primary solution).
+Only derived, reconstructible data with a freshness key goes in it; the source on disk stays the only truth.
 
 | Area | Tables | Contents |
 |---|---|---|
-| Activity | `command_log`, `applied_edit`, `context` | Tool-call log; file writes with the previous text; cached inspection reports and settings such as `dashboard.port` |
+| Activity | `command_log`, `applied_edit`, `context` | Tool-call log; file writes with the previous text; cached inspection reports, background leases and per-instance settings such as `dashboard.port.<pid>` |
 | Board | `board_item`, `board_comment`, `board_history` | Kanban cards, comments, change history |
 | Symbol index | `si_document`, `si_symbol`, `si_usage`, `si_metacode` | Documents with content hashes, declarations, typed usages, one metacode tree per declaration |
 | Metacode index | `mc_document`, `mc_tree`, `mc_node`, `source_document` | Pseudocode trees with their complexity, the complete AST of each declaration as one row per node, and each file as its own language writes it. Every AST row records `source_path` (the file, or the binary for decompiled code) and whether it was decompiled; a text file with no frontend is one `File` node |

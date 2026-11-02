@@ -262,24 +262,47 @@ public sealed class DashboardDatabase
         return new DashboardCommandTrail(Count(connection, table.Name), commands);
     }
 
-    /// <summary>The context row the dashboard remembers its port in, or null.</summary>
-    public int? StoredPort()
+    /// <summary>
+    /// The ports remembered by dashboard instances on this workspace, newest first. Each instance
+    /// owns one <c>dashboard.port.&lt;pid&gt;</c> row, so two live servers no longer overwrite each
+    /// other; the caller reuses only the entries whose process is gone.
+    /// </summary>
+    public IReadOnlyList<DashboardPort> StoredPorts()
     {
+        var path = DatabasePath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return [];
+
         try
         {
-            return int.TryParse(_store.Get(DashboardOptions.PortKey)?.Value, out var port)
-                   && port is > 0 and <= 65535
-                ? port
-                : null;
+            using var connection = Open();
+            if (connection is null) return [];
+
+            var ports = new List<DashboardPort>();
+            using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT \"value\" FROM context WHERE \"key\" LIKE @prefix ORDER BY \"updated_at\" DESC;";
+            command.Parameters.AddWithValue("@prefix", DashboardOptions.PortKeyPrefix + "%");
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (DashboardPort.Parse(reader.GetString(0)) is { } entry) ports.Add(entry);
+            }
+
+            return ports;
         }
-        catch
+        catch (SqliteException)
         {
-            return null;
+            return [];
         }
     }
 
-    /// <summary>Remembers the port this dashboard is reachable on, so the next start reuses it.</summary>
-    public void RememberPort(int port) => _store.Set(DashboardOptions.PortKey, port.ToString(CultureInfo.InvariantCulture));
+    /// <summary>Remembers this instance's port, so a later start of a dashboard can reuse it.</summary>
+    public void RememberPort(int port)
+    {
+        var key = DashboardOptions.PortKeyPrefix + Environment.ProcessId.ToString(CultureInfo.InvariantCulture);
+        _store.Set(key, DashboardPort.Mine(port).Serialize());
+    }
 
     // ── SQLite plumbing ──────────────────────────────────────────────────────
 

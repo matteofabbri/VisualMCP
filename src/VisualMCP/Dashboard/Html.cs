@@ -139,6 +139,7 @@ internal static class Html
     private static readonly (string Key, string Label, string Href)[] Navigation =
     [
         ("overview", "Overview", "/"),
+        ("board", "Board", "/board"),
         ("tables", "Tables", "/tables"),
         ("tools", "Tools", "/tools"),
         ("log", "Live log", "/log"),
@@ -167,7 +168,7 @@ internal static class Html
         <main>
         {body}
         </main>
-        <div class="foot">Read-only view of the running server · <span class="mono">.visualMCP/visualmcp.db</span></div>
+        <div class="foot">View of the running server · only the board edits, through the board tools' own service · <span class="mono">.visualMCP/visualmcp.db</span></div>
         </body>
         </html>
         """;
@@ -327,6 +328,50 @@ internal static class Html
                  padding:1px 7px;color:var(--dim);background:var(--bg2)}
         .tool li b{color:var(--text);font-weight:600}
         .foot{max-width:1500px;margin:0 auto;padding:18px 22px 40px;color:var(--dim2);font-size:11px;text-align:center}
+        .board{display:grid;grid-template-columns:repeat(5,minmax(190px,1fr));gap:12px;align-items:start;margin:0 0 16px}
+        .boardcol{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);min-height:120px}
+        .boardcol>h2{display:flex;justify-content:space-between;align-items:baseline;margin:0;padding:9px 12px;
+            font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+            border-bottom:1px solid var(--line);background:var(--bg2);border-radius:var(--r) var(--r) 0 0}
+        .boardcol>h2 .count{color:var(--dim2);font-variant-numeric:tabular-nums;letter-spacing:0}
+        .boardcol.over{outline:2px dashed var(--accent);outline-offset:-2px}
+        .bcards{display:flex;flex-direction:column;gap:8px;padding:9px;min-height:76px}
+        .bcard{display:block;background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+            padding:8px 10px;color:var(--text);cursor:grab}
+        .bcard:hover{border-color:var(--accent);text-decoration:none}
+        .bcard.dragging{opacity:.45}
+        .bcard b{display:block;font-size:13px;font-weight:600;line-height:1.35}
+        .bmeta{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+        .bwhen{display:block;margin-top:6px;color:var(--dim2);font-size:11px}
+        .bdrop{margin:0;padding:10px;border:1px dashed var(--line2);border-radius:8px;color:var(--dim2);
+            font-size:12px;text-align:center}
+        .chip.pri-highest{color:var(--bad);border-color:var(--bad)}
+        .chip.pri-high{color:var(--warn);border-color:var(--warn)}
+        .chip.pri-medium{color:var(--accent);border-color:var(--accent)}
+        .chip.pri-low,.chip.pri-lowest{color:var(--dim2)}
+        .bform{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:0 0 12px}
+        .bform label{display:flex;flex-direction:column;gap:4px;color:var(--dim);font-size:12px}
+        .bform label.wide{grid-column:1/-1}
+        .bform input[type=text],.bform textarea,.bform select{width:100%;background:var(--bg2);
+            border:1px solid var(--line2);color:var(--text);border-radius:8px;padding:6px 9px;font:13px var(--sans)}
+        .bform textarea{resize:vertical;min-height:56px;font-family:var(--mono);font-size:12px}
+        .bform .row{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+        .btn.danger{color:var(--bad);border-color:var(--bad)}
+        .bhead{margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--line);
+            font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--dim)}
+        .bcomment{padding:7px 0;border-bottom:1px solid var(--line)}
+        .bcomment:last-child{border-bottom:0}
+        .bcomment p{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+        .bcomment .who{color:var(--dim2);font-size:11px;font-family:var(--mono)}
+        .section>summary.detailhead{cursor:pointer;display:flex;align-items:center;gap:8px;padding:10px 15px;
+            font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+            background:var(--bg2);border-bottom:1px solid var(--line);list-style:none}
+        .section>summary.detailhead::marker{content:""}
+        .section>summary.detailhead::-webkit-details-marker{display:none}
+        .section>summary.detailhead:after{margin-left:auto;content:"+";color:var(--accent);font-weight:600}
+        .section[open]>summary.detailhead:after{content:"−"}
+        @media (max-width:1200px){.board{grid-template-columns:repeat(3,minmax(170px,1fr))}}
+        @media (max-width:900px){.board{grid-template-columns:1fr}}
         @media (max-width:900px){
           body{padding-left:0}
           aside.side{position:static;width:auto;border-right:0;border-bottom:1px solid var(--line)}

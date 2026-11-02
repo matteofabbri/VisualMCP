@@ -278,7 +278,7 @@ what the agent actually did, not what the tool descriptions intend.
 - One row per measured chain, not per idea. An item without a number in
   [The chains, measured](#the-chains-measured) does not belong on this page.
 - When an item ships, move its row to ✅, add the tool to
-  [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), and delete the corresponding workaround row in
-  [gaps.md § 10](gaps.md#10-what-to-do-today) if it exists.
+  [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), and close the matching [board](../gaps.md) card — the work to
+  do lives on the board, not in a workaround table.
 - Re-measure with a fresh snapshot when a batch closes; the counts drift with the way we work, and
   a stale number is worse than no number.
