@@ -120,7 +120,9 @@ public sealed class InspectCodeService : IInspectCodeService
         }
 
         var library = InspectionPackCatalog.Library;
-        var selected = SelectPacks(library, packs, out var unknownPacks);        if (selected.Count == 0)
+        var autoPcn = await PcnDetection.LooksLikePcnAsync(solution);
+        var selected = SelectPacks(library, packs, autoPcn, out var unknownPacks);
+        if (selected.Count == 0)
         {
             var known = string.Join(", ", InspectionPackCatalog.Definitions.Select(p => p.Id));
             return Failed(solution.FilePath ?? "", stopwatch, null,
@@ -326,33 +328,50 @@ public sealed class InspectCodeService : IInspectCodeService
     }
 
     private static List<LoadedInspectionPack> SelectPacks(
-        InspectionPackLibrary library, string? spec, out List<string> unknown)
+        InspectionPackLibrary library, string? spec, bool autoPcn, out List<string> unknown)
     {
         unknown = new List<string>();
+        List<LoadedInspectionPack> selected;
 
         if (string.IsNullOrWhiteSpace(spec))
         {
             var defaults = InspectionPackCatalog.DefaultPacks
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-            return library.Packs
+            selected = library.Packs
                 .Where(p => defaults.Contains(p.Pack.Id, StringComparer.OrdinalIgnoreCase))
                 .ToList();
         }
-
-        if (spec.Trim().Equals("all", StringComparison.OrdinalIgnoreCase))
-            return library.Packs.ToList();
-
-        var wanted = spec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var selected = new List<LoadedInspectionPack>();
-
-        foreach (var id in wanted)
+        else if (spec.Trim().Equals("all", StringComparison.OrdinalIgnoreCase))
         {
-            var match = library.Packs.FirstOrDefault(p =>
-                p.Pack.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            selected = library.Packs.ToList();
+        }
+        else
+        {
+            var wanted = spec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            selected = new List<LoadedInspectionPack>();
 
-            if (match is null) unknown.Add(id);
-            else if (!selected.Contains(match)) selected.Add(match);
+            foreach (var id in wanted)
+            {
+                var match = library.Packs.FirstOrDefault(p =>
+                    p.Pack.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+
+                if (match is null) unknown.Add(id);
+                else if (!selected.Any(p => p.Pack.Id.Equals(match.Pack.Id, StringComparison.OrdinalIgnoreCase)))
+                    selected.Add(match);
+            }
+        }
+
+        // A predictive-coding solution gets its invariants checked without being told, even when the
+        // caller named the packs explicitly (background_analysis, solution_audit and the CLI all pass
+        // a list). packs=pcn still works for a solution that is named differently.
+        if (autoPcn && selected.Count > 0 &&
+            !selected.Any(p => p.Pack.Id.Equals("pcn", StringComparison.OrdinalIgnoreCase)))
+        {
+            var pcn = library.Packs.FirstOrDefault(p =>
+                p.Pack.Id.Equals("pcn", StringComparison.OrdinalIgnoreCase));
+
+            if (pcn is not null) selected.Add(pcn);
         }
 
         return selected;

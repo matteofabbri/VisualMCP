@@ -142,8 +142,8 @@ What exists:
   and name the same way it orders a C# type).
 - **Inspections**: `inspect_code` and `inspection_baseline` run each pack's analyzers for the project's
   language. The .NET analyzers ship a `vb` set and the house rule VMC0001 has a VB implementation;
-  Roslynator, StyleCop, AsyncFixer, Meziantou and the ReSharper-shaped pack are C# analyzers and say so
-  as a warning instead of returning a silent zero.
+  Roslynator, StyleCop, AsyncFixer, Meziantou, the predictive-coding pack and the ReSharper-shaped pack
+  are C# analyzers and say so as a warning instead of returning a silent zero.
 - **Code fixes for VB** (closed 2026-10-31): `apply_code_fix` selects the analyzers **and the fixers** by
   the document's language. The .NET analyzers package ships 100+ Visual Basic `CodeFixProvider`s in its
   `vb` assembly (`Basic…Fixer`); the service offers those to a `.vb` document instead of the C# twins and

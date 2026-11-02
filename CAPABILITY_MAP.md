@@ -336,7 +336,7 @@ instead of ignoring the id: they are layout, team choices or semantic changes, n
 | **Computational and spatial complexity (Big-O)** | ✅ | `analyze_complexity` — per-method estimate of time and memory: loop nesting and bounds, LINQ chains, sorting, linear lookups inside loops, recursion shape, allocation sites and methods called within the solution; evidence, confidence and optimization suggestions |
 | Code metrics (LOC, maintainability index, etc.) | ✅ | `get_metrics` |
 | Run Roslyn analyzers (StyleCop, Roslynator, etc.) | ✅ | `run_code_analysis` |
-| ReSharper-style inspections with Rider ids/severities | ✅ | `inspect_code` (packs: roslynator, netanalyzers, asyncfixer, meziantou, stylecop) |
+| ReSharper-style inspections with Rider ids/severities | ✅ | `inspect_code` (packs: roslynator, netanalyzers, asyncfixer, meziantou, stylecop, and `pcn` for predictive-coding invariants PCN0001–PCN0004) |
 | **Whole-solution audit in one call** | ✅ | `solution_audit` — inspections grouped by id, compiler errors/warnings, most complex methods, largest files, project graph + cycles, first moves |
 | **Apply an inspection's fix** | ✅ | `apply_code_fix` — runs the pack's CodeFixProvider (dry run by default), selected for the document's language: a `.vb` document gets the .NET analyzers' Visual Basic fixers |
 | Namespace coupling analysis | ✅ | `analyze_namespace_coupling` |

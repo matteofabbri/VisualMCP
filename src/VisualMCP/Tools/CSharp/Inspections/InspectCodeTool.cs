@@ -15,7 +15,8 @@ public static class InspectCodeTool
         "over every project and return findings with severity, inspection id, file, line and message. " +
         "Covers redundant code, unused members, simplifications, async pitfalls, CA design/reliability rules, " +
         "correctness and security smells, plus the VisualMCP house rules (pack 'house', VMC0001: one type " +
-        "per file). Each pack contributes the analyzers that read a project's language: the .NET analyzers " +
+        "per file) and the predictive-coding invariants (pack 'pcn', PCN0001-PCN0004, auto-selected for a " +
+        "PCN solution). Each pack contributes the analyzers that read a project's language: the .NET analyzers " +
         "ship a Visual Basic set and VMC0001 has a VB implementation, while the C#-only packs report that " +
         "they do not cover a VB project instead of returning a silent zero. Works on ANY solution " +
         "without referencing any analyzer package. " +
@@ -27,8 +28,9 @@ public static class InspectCodeTool
         [Description("Optional: restrict to a single project by name.")] string? projectName = null,
         [Description("Optional: restrict to a single file (absolute or relative path).")] string? filePath = null,
         [Description("Inspection packs: 'house' (VisualMCP rules, VMC0001 one-type-per-file), 'rider' (ReSharper-shaped " +
-                     "inspections under ReSharper's own ids, opt-in), 'roslynator', 'netanalyzers', 'asyncfixer', " +
-                     "'meziantou', 'stylecop', a comma-separated list, or 'all'. Default: house,roslynator,netanalyzers,asyncfixer.")]
+                     "inspections under ReSharper's own ids, opt-in), 'pcn' (predictive-coding invariants PCN0001-PCN0004; " +
+                     "auto-selected when the solution or a project is named like a PCN), 'roslynator', 'netanalyzers', " +
+                     "'asyncfixer', 'meziantou', 'stylecop', a comma-separated list, or 'all'. Default: house,roslynator,netanalyzers,asyncfixer.")]
         string packs = "",
         [Description("Minimum severity: error, warning, info or hidden. Default: info, which is the " +
                      "Rider-like view (suggestions arrive as WEAK_WARNING); pass 'warning' for action items only.")]
