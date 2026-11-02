@@ -3,7 +3,7 @@
 **Compiler-grade code intelligence for your AI client — running on your own machine.**
 
 VisualMCP is a local [Model Context Protocol](https://modelcontextprotocol.io) server for .NET. It gives
-an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **420 tools** that read a solution the
+an AI coding client — Claude Code, ZCode, or any MCP-capable tool — **429 tools** that read a solution the
 way an IDE does: through Roslyn's semantic model and the real project graph, not through regular
 expressions over text files.
 
@@ -75,8 +75,8 @@ walkthrough: [Getting started](getting-started.md).
 | Page | What it answers |
 |---|---|
 | [Getting started](getting-started.md) | Requirements, install scopes, verification, first session, upgrade and uninstall |
-| [How it works](how-it-works.md) | The process model, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
-| [Tool catalogue](tools.md) | All 420 tools, grouped by area, with a one-line description of each |
+| [How it works](how-it-works.md) | The process model, **the workspace boundary**, Roslyn loading, the solution store, the dashboard, the safety model, privacy |
+| [Tool catalogue](tools.md) | All 429 tools, grouped by area, with a one-line description of each |
 | [Tool arguments](reference/tool-arguments.md) | The arguments and behaviour that are not obvious from a one-line catalogue entry |
 | [Reading and analysing code](guides/code.md) | Navigation, diagnostics, audits, complexity, security, dead code, dependency analysis |
 | [Refactoring and style](guides/refactoring.md) | The refactoring catalogue, `simplify_code`, inspections and code fixes, and what "safe" means here |
@@ -96,12 +96,13 @@ to name internal types; the pages above are not.
 
 | Page | What it answers |
 |---|---|
+| [workspace-and-store.md](workspace-and-store.md) | one process per workspace: the startup order, the boundary and its error, the store's location and lifetime, the background lease, per-instance dashboard ports, invariants and failure modes |
 | [engine-state.md](engine-state.md) | which IDE rules are rewritten, which are not and why, the structural limits of the rewrite engine, the state of the solution store |
-| [gaps.md](gaps.md) | **everything the product does not do**: language and platform gaps, test debugging, mutation testing, template and inspection-administration gaps |
+| [gaps.md](gaps.md) | **the open capability rows**: the scanner boundaries per language, the proprietary context-action tail, installer authoring, `.http` authoring, IIS/Azure deployment, a standalone CLI and feature-level campaigns |
 | [metacode.md](metacode.md) | the canonical pseudocode model: grammar, frontends, decompilation, indexing, generation, limits |
 | [profiling.md](profiling.md) | every `profile_*` tool, what it reads, the artifacts, the known limits and the comparison with Visual Studio |
 | [razor.md](razor.md) | the Razor/Blazor analysis layer and its 28 rules |
-| [dashboard.md](dashboard.md) | the web dashboard: pages, query parameters, JSON API, safety rules |
+| [dashboard.md](dashboard.md) | the web interface (the dashboard): lifecycle, pages (including the interactive board), the store's tables one by one, query parameters, JSON API, write guard, limits |
 | [modernization.md](modernization.md) | `aspire`, `update_framework`, `update_solution` |
 | [adding-a-language.md](adding-a-language.md) | how a new language joins the style engine or the metacode model |
 | [agent-ergonomics.md](agent-ergonomics.md) | how many calls an agent needs to answer one question, measured on the session store, with the chains that are still mechanical |
@@ -113,7 +114,7 @@ The rule-by-rule table for the style engine is [`../CAPABILITY_MAP.md`](../CAPAB
 
 ### House rules
 
-- **Counts are live facts.** A tool count, "87 rule ids", "28 Razor rules" — all of them age badly:
+- **Counts are live facts.** A tool count, "97 rule ids", "28 Razor rules" — all of them age badly:
   take the number from `capability_report` when you write it, and say where it came from.
 - **`gaps.md` is the honest inventory.** A feature is not documented as present until it is in the
   tool catalogue and the engine applies it; anything else belongs in `gaps.md`.

@@ -26,6 +26,13 @@ if (VisualMCP.Install.InstallCommandLine.TryRun(args, out var installExitCode))
 // the JSON protocol before our FileLoggerProvider takes over.
 Console.SetOut(TextWriter.Null);
 
+// The workspace this process serves: --root, VISUALMCP_ROOT, or the directory the client started us
+// in. Everything after this — discovery, the store, the dashboard, the board — is pinned to it, so
+// a tool call can no longer move the process to another repository.
+var workspaceRoot = WorkspaceRootOption.Resolve(args);
+if (workspaceRoot is not null)
+    Directory.SetCurrentDirectory(workspaceRoot);
+
 // The workspace may have pinned where temp and the package caches go (disk_usage action=guard writes
 // .visualMCP/disk-policy.json). Read it before anything spawns a build: the variables are inherited by
 // every child process, and Path.GetTempPath() resolves the redirected TEMP from here on.
@@ -43,11 +50,11 @@ if (VisualMCP.Cli.CliCommandLine.TryRun(args, out var cliExitCode))
     return;
 }
 
-await RunServerAsync(args);
+await RunServerAsync(args, workspaceRoot);
 
 // Separate method so the JIT doesn't compile Roslyn types before RegisterDefaults().
 [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-static async Task RunServerAsync(string[] args)
+static async Task RunServerAsync(string[] args, string? workspaceRoot)
 {
     var logPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -387,9 +394,10 @@ static async Task RunServerAsync(string[] args)
         "build_project's automatic analyzer pass) to catch analyzer/code-style issues before moving on.\n" +
         "- When you change performance-sensitive code, measure it with quick_benchmark (ad-hoc, no [Benchmark] " +
         "attribute needed) or run_benchmarks for existing BenchmarkDotNet projects.\n\n" +
-        "SETUP: The solution in the working directory is auto-discovered and loaded on demand, so you can " +
-        "call any tool directly. Only call load_solution if a tool reports that no solution could be located, " +
-        "or to target a specific .sln/.slnx by path. Use list_analysis_tools for the full catalogue.";
+        "SETUP: One server process serves one workspace — the directory it was started in (or --root/VISUALMCP_ROOT). " +
+        "That solution is auto-discovered and loaded on demand, so you can call any tool directly. Only call " +
+        "load_solution to target a specific .sln/.slnx INSIDE the workspace; a path outside it is refused, because " +
+        "another repository is another server with its own database and board. Use list_analysis_tools for the full catalogue.";
 
     // stdin wrapper: the eager load below uses it to tell a real client (initialize)
     // from the discovery probe ZCode spawns per session (server/discover + tools/list,
@@ -582,10 +590,12 @@ static async Task RunServerAsync(string[] args)
             services.AddSingleton<VisualMCP.Execution.IPlanToolInvoker, VisualMCP.Execution.McpToolInvoker>();
             services.AddSingleton<VisualMCP.Execution.IPlanExecutionService, VisualMCP.Execution.PlanExecutionService>();
 
-            // The web dashboard (Dashboard/): a read-only window on this process and the solution
-            // store, on http://127.0.0.1:4677 — or the port it last used, or a free one.
+            // The web dashboard (Dashboard/): a window on this process and the solution store, on
+            // http://127.0.0.1:4677 — or the port it last used, or a free one. Its pages read; the board
+            // page writes cards through the same board service the board_* tools call.
             services.AddSingleton(VisualMCP.Dashboard.DashboardOptions.FromEnvironment(logPath));
             services.AddSingleton<VisualMCP.Dashboard.DashboardDatabase>();
+            services.AddSingleton<VisualMCP.Dashboard.DashboardBoard>();
             services.AddSingleton<VisualMCP.Dashboard.DashboardServer>();
 
             services.AddMcpServer(options =>
@@ -601,6 +611,17 @@ static async Task RunServerAsync(string[] args)
 
     var logger = host.Services.GetRequiredService<ILoggerFactory>()
         .CreateLogger("VisualMCP.Startup");
+
+    // Pin the root before anything loads or stores. The client already starts one process per
+    // session with the project as the working directory; making that explicit is what turns
+    // "whichever solution is active" into "this workspace, for the life of the process".
+    var environment = host.Services.GetRequiredService<SnitchContext>();
+    environment.PinWorkspace(workspaceRoot ?? Directory.GetCurrentDirectory());
+
+    logger.LogInformation(
+        "Workspace root: {Root}, pid {ProcessId}.",
+        environment.WorkspaceRoot,
+        Environment.ProcessId);
 
     var diskPolicy = DiskPolicy.Current;
     if (diskPolicy.Enabled)
@@ -642,6 +663,16 @@ static async Task RunServerAsync(string[] args)
                 return;
             }
 
+            // The store belongs to the workspace and is resolved once: open it here (not for a
+            // discovery probe, which returns above) so the dashboard can read its remembered ports
+            // and the first tool call finds the board and the indexes already there.
+            var store = host.Services.GetRequiredService<Snitch.Storage.IVisualMcpStore>();
+            logger.LogInformation(
+                "Workspace {Root}: store {Database}, pid {ProcessId}.",
+                environment.WorkspaceRoot,
+                store.EnsureDatabase() ?? "(no solution in this workspace)",
+                Environment.ProcessId);
+
             // The dashboard binds before the load (it is independent of it) and never blocks the
             // MCP transport: a port that cannot be bound is logged and nothing else changes.
             await dashboard.StartAsync();
@@ -663,20 +694,19 @@ static async Task RunServerAsync(string[] args)
                 logger.LogWarning(ex, "The memory import failed; the environment load continues.");
             }
 
-            var context = host.Services.GetRequiredService<SnitchContext>();
-            var solutions = await context.OpenEnvironmentAsync();
+            var solutions = await environment.OpenEnvironmentAsync();
             if (solutions.Count == 0)
             {
                 logger.LogInformation(
-                    "No solution auto-discovered from working directory '{Cwd}'. " +
-                    "Tools will prompt for load_solution.", Directory.GetCurrentDirectory());
+                    "No solution auto-discovered under '{Root}'. Tools will prompt for load_solution.",
+                    environment.WorkspaceRoot);
                 return;
             }
 
             var loaded = solutions.Count(s => s.IsLoaded);
             logger.LogInformation(
-                "Opened environment: {Loaded}/{Total} solution(s) loaded. Active: {Active}.",
-                loaded, solutions.Count, context.ActiveSolution?.Name ?? "(none)");
+                "Opened environment: {Loaded}/{Total} solution(s) loaded under {Root}. Active: {Active}.",
+                loaded, solutions.Count, environment.WorkspaceRoot, environment.ActiveSolution?.Name ?? "(none)");
 
             // Inspecting the solution means recording it twice, per source: the file as its own language
             // writes it, and the metacode Snitch's model makes of it. The metacode pass is incremental

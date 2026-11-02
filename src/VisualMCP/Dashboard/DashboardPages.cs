@@ -911,6 +911,359 @@ internal sealed class DashboardPages
         }
     }
 
+    // ── the board ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The interactive board: five columns, one draggable card per item, and the detail panel of the
+    /// card named by <c>?card=</c>. Interaction is a small script (drag and drop, and one fetch per
+    /// form) over the JSON endpoints; without it the page still reads and every card still opens.
+    /// </summary>
+    public string BoardPage(DashboardInfo info, IReadOnlyList<BoardColumnView> columns,
+        BoardDetailView? selected, bool hasStore, int? requestedCard = null)
+    {
+        var total = columns.Sum(column => column.Count);
+        var done = columns.FirstOrDefault(column => column.Status == "done")?.Count ?? 0;
+        var open = total - done;
+
+        var body = new StringBuilder();
+        body.Append("<h1>Board</h1>");
+        body.Append("<p class=\"sub\">The project's plan, one column per stage. Drag a card onto another column " +
+                    "to move it, or open a card to edit its fields, move, comment or delete it. Every write goes " +
+                    "through the same service the board tools call, so the card's history records it identically.</p>");
+
+        if (!hasStore)
+            body.Append(Html.Notice(
+                "<b>No solution store yet.</b> The board appears as soon as a solution is discovered under " +
+                $"<span class=\"mono\">{Html.E(Environment.CurrentDirectory)}</span>."));
+        else if (requestedCard is not null && selected is null)
+            body.Append(Html.Notice($"<b>No card #{requestedCard.Value}.</b> It may have been deleted; the board below is current."));
+
+        body.Append("<div class=\"cards\">");
+        body.Append(Html.Kpi(Html.Number(total), "Cards"));
+        body.Append(Html.Kpi(Html.Number(open), "Open"));
+        body.Append(Html.Kpi(Html.Number(done), "Done"));
+        body.Append(Html.Kpi(total == 0 ? "—" : Math.Round(100.0 * done / total, 1) + "%", "Done share"));
+        body.Append("</div>");
+        body.Append("<div id=\"boardnotice\" class=\"notice\" hidden></div>");
+
+        body.Append(NewCardPanel());
+        if (selected is not null) body.Append(DetailPanel(selected));
+
+        body.Append("<div class=\"board\">");
+        foreach (var column in columns) body.Append(BoardColumn(column));
+        body.Append("</div>");
+        body.Append(BoardScript());
+
+        return Page("Board", "board", info, body.ToString());
+    }
+
+    private static string NewCardPanel()
+    {
+        var columns = Options(DashboardBoard.Columns, "todo", StatusLabel);
+        var priorities = Options(DashboardBoard.Priorities.Reverse(), "medium", Capitalize);
+
+        return $"""
+            <details class="section">
+            <summary class="detailhead">New card</summary>
+            <div class="body">
+            <form id="newform" class="bform" autocomplete="off">
+            <label>Title <input type="text" name="title" required maxlength="200" placeholder="Short, imperative"></label>
+            <label>Column <select name="status">{columns}</select></label>
+            <label>Priority <select name="priority">{priorities}</select></label>
+            <label>Assignee <input type="text" name="assignee" placeholder="agent or person"></label>
+            <label class="wide">Labels <input type="text" name="labels" placeholder="comma, separated"></label>
+            <label class="wide">Description <textarea name="description" rows="3" placeholder="Context, acceptance criteria, links"></textarea></label>
+            <div class="row"><button class="btn" type="submit">Create card</button></div>
+            </form>
+            </div>
+            </details>
+            """;
+    }
+
+    private static string DetailPanel(BoardDetailView detail)
+    {
+        var card = detail.Card;
+        var body = new StringBuilder();
+
+        body.Append("<section class=\"section\" id=\"card\">");
+        body.Append("<h2><span>Card #").Append(card.Id).Append("</span>");
+        body.Append("<span class=\"push\"><a class=\"btn\" href=\"/board\">close</a></span></h2>");
+        body.Append("<div class=\"body\">");
+
+        body.Append($"<form id=\"editform\" class=\"bform\" autocomplete=\"off\" data-card=\"{card.Id}\">");
+        body.Append($"<label class=\"wide\">Title <input type=\"text\" name=\"title\" value=\"{Html.A(card.Title)}\" required maxlength=\"200\"></label>");
+        body.Append($"<label>Priority <select name=\"priority\">{Options(DashboardBoard.Priorities.Reverse(), card.Priority, Capitalize)}</select></label>");
+        body.Append($"<label>Assignee <input type=\"text\" name=\"assignee\" value=\"{Html.A(card.Assignee ?? "")}\"></label>");
+        body.Append($"<label>Labels <input type=\"text\" name=\"labels\" value=\"{Html.A(string.Join(", ", card.Labels))}\"></label>");
+        body.Append($"<label class=\"wide\">Description <textarea name=\"description\" rows=\"7\">{Html.E(card.Description ?? string.Empty)}</textarea></label>");
+        body.Append("<div class=\"row\"><button class=\"btn\" type=\"submit\">Save changes</button>");
+        body.Append($"<span class=\"dim\">created {When(card.CreatedAt)} · updated {When(card.UpdatedAt)}</span>");
+        body.Append("</div></form>");
+
+        body.Append($"<form id=\"moveform\" class=\"bform\" data-card=\"{card.Id}\">");
+        body.Append($"<label>Move to <select name=\"status\">{Options(DashboardBoard.Columns, card.Status, StatusLabel)}</select></label>");
+        body.Append("<div class=\"row\"><button class=\"btn\" type=\"submit\">Move card</button>");
+        body.Append("<span class=\"dim\">or drag it on the board below</span></div></form>");
+
+        body.Append("<div class=\"row\">");
+        body.Append($"<button class=\"btn danger\" id=\"deletecard\" type=\"button\" data-card=\"{card.Id}\">Delete card</button>");
+        body.Append("<span class=\"dim\">irreversible: the card, its comments and its history go</span></div>");
+
+        body.Append($"<h3 class=\"bhead\">Comments <span class=\"dim\">{Html.Number(detail.Comments.Count)}</span></h3>");
+        if (detail.Comments.Count == 0)
+        {
+            body.Append("<p class=\"dim\">No comment yet.</p>");
+        }
+        else
+        {
+            body.Append("<div class=\"bcomments\">");
+            foreach (var comment in detail.Comments)
+            {
+                body.Append("<div class=\"bcomment\">");
+                body.Append($"<span class=\"who\">{Html.E(comment.Author ?? "anonymous")} · {When(comment.CreatedAt)}</span>");
+                body.Append($"<p>{Html.E(comment.Body)}</p>");
+                body.Append("</div>");
+            }
+
+            body.Append("</div>");
+        }
+
+        body.Append($"<form id=\"commentform\" class=\"bform\" data-card=\"{card.Id}\">");
+        body.Append("<label>Author <input type=\"text\" name=\"author\" placeholder=\"you (optional)\"></label>");
+        body.Append("<label class=\"wide\">Comment <textarea name=\"body\" rows=\"2\" required placeholder=\"A progress note, a blocker, the reason for a decision\"></textarea></label>");
+        body.Append("<div class=\"row\"><button class=\"btn\" type=\"submit\">Add comment</button></div></form>");
+
+        body.Append("<h3 class=\"bhead\">History <span class=\"dim\">the card's own audit trail</span></h3>");
+        if (detail.History.Count == 0)
+        {
+            body.Append("<p class=\"dim\">No change recorded yet.</p>");
+        }
+        else
+        {
+            body.Append("<table class=\"plain\"><thead><tr><th>When</th><th>Field</th><th>From</th><th>To</th></tr></thead><tbody>");
+            foreach (var entry in detail.History)
+            {
+                body.Append("<tr><td>").Append(When(entry.At)).Append("</td><td>").Append(Html.E(entry.Field))
+                    .Append("</td><td>").Append(Html.E(entry.From ?? "—")).Append("</td><td>")
+                    .Append(Html.E(entry.To ?? "—")).Append("</td></tr>");
+            }
+
+            body.Append("</tbody></table>");
+        }
+
+        body.Append("</div></section>");
+        return body.ToString();
+    }
+
+    private static string BoardColumn(BoardColumnView column)
+    {
+        var builder = new StringBuilder();
+        builder.Append($"<section class=\"boardcol\" data-status=\"{Html.A(column.Status)}\">");
+        builder.Append($"<h2><span>{Html.E(StatusLabel(column.Status))}</span>");
+        builder.Append($"<span class=\"count\">{Html.Number(column.Count)}</span></h2>");
+        builder.Append("<div class=\"bcards\">");
+
+        foreach (var card in column.Cards) builder.Append(BoardCard(card));
+        if (column.Cards.Count == 0) builder.Append("<p class=\"bdrop\">Drop a card here</p>");
+
+        builder.Append("</div></section>");
+        return builder.ToString();
+    }
+
+    private static string BoardCard(BoardCardView card)
+    {
+        var chips = new StringBuilder();
+        chips.Append(Html.Chip(Capitalize(card.Priority), "pri-" + card.Priority));
+        foreach (var label in card.Labels) chips.Append(Html.Chip(label));
+        if (!string.IsNullOrWhiteSpace(card.Assignee)) chips.Append(Html.Chip("@" + card.Assignee, "acc"));
+        if (card.CommentCount > 0) chips.Append(Html.Chip(Html.Number(card.CommentCount) + " comments"));
+
+        return $"""
+            <a class="bcard" draggable="true" data-id="{card.Id}" data-status="{Html.A(card.Status)}"
+               href="/board?card={card.Id}#card" title="Open card #{card.Id}">
+            <b>{Html.E(card.Title)}</b>
+            <span class="bmeta">{chips}</span>
+            <span class="bwhen">updated {Html.E(Age(card.UpdatedAt))}</span>
+            </a>
+            """;
+    }
+
+    /// <summary>
+    /// The board's interaction layer. It is progressive: every form works only through these fetches,
+    /// and a failure is shown in the notice box instead of being swallowed. The write endpoints demand
+    /// this page's own origin, a JSON body and the header below, which is what keeps another site from
+    /// posting to a loopback port.
+    /// </summary>
+    private static string BoardScript() => """
+        <script>
+        (() => {
+          const post = async (url, body) => {
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-VisualMCP': '1' },
+              body: JSON.stringify(body)
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) throw new Error(data.error || ('HTTP ' + response.status));
+            return data;
+          };
+
+          const notice = message => {
+            const box = document.getElementById('boardnotice');
+            if (!box) { alert(message); return; }
+            box.textContent = message;
+            box.hidden = false;
+            box.scrollIntoView({ block: 'center' });
+          };
+
+          const labels = value => (value || '').split(',').map(text => text.trim()).filter(Boolean);
+          const field = (form, name) => (form.elements[name]?.value ?? '');
+
+          let dragging = null;
+          document.querySelectorAll('.bcard').forEach(card => {
+            card.addEventListener('dragstart', event => {
+              dragging = card;
+              card.classList.add('dragging');
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', card.dataset.id);
+            });
+            card.addEventListener('dragend', () => {
+              card.classList.remove('dragging');
+              dragging = null;
+              document.querySelectorAll('.boardcol').forEach(column => column.classList.remove('over'));
+            });
+          });
+
+          document.querySelectorAll('.boardcol').forEach(column => {
+            column.addEventListener('dragover', event => {
+              event.preventDefault();
+              column.classList.add('over');
+            });
+            column.addEventListener('dragleave', () => column.classList.remove('over'));
+            column.addEventListener('drop', async event => {
+              event.preventDefault();
+              column.classList.remove('over');
+              const id = Number(event.dataTransfer.getData('text/plain') || (dragging && dragging.dataset.id));
+              if (!id) return;
+
+              const cards = [...column.querySelectorAll('.bcard')];
+              const mid = element => {
+                const box = element.getBoundingClientRect();
+                return box.top + box.height / 2;
+              };
+              let index = cards.findIndex(card => event.clientY < mid(card));
+              if (index < 0) index = cards.length;
+
+              try {
+                await post('/api/board/move', { id, status: column.dataset.status, position: index });
+                location.reload();
+              } catch (error) { notice(error.message); }
+            });
+          });
+
+          document.getElementById('newform')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.target;
+            try {
+              const data = await post('/api/board/add', {
+                title: field(form, 'title'),
+                description: field(form, 'description'),
+                status: field(form, 'status'),
+                priority: field(form, 'priority'),
+                assignee: field(form, 'assignee'),
+                labels: labels(field(form, 'labels'))
+              });
+              location.href = '/board?card=' + data.id + '#card';
+            } catch (error) { notice(error.message); }
+          });
+
+          document.getElementById('editform')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.target;
+            try {
+              await post('/api/board/update', {
+                id: Number(form.dataset.card),
+                title: field(form, 'title'),
+                description: field(form, 'description'),
+                priority: field(form, 'priority'),
+                assignee: field(form, 'assignee'),
+                labels: labels(field(form, 'labels'))
+              });
+              location.reload();
+            } catch (error) { notice(error.message); }
+          });
+
+          document.getElementById('moveform')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.target;
+            try {
+              await post('/api/board/move', {
+                id: Number(form.dataset.card),
+                status: field(form, 'status')
+              });
+              location.reload();
+            } catch (error) { notice(error.message); }
+          });
+
+          document.getElementById('commentform')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.target;
+            try {
+              await post('/api/board/comment', {
+                id: Number(form.dataset.card),
+                author: field(form, 'author'),
+                body: field(form, 'body')
+              });
+              location.reload();
+            } catch (error) { notice(error.message); }
+          });
+
+          document.getElementById('deletecard')?.addEventListener('click', async event => {
+            const button = event.currentTarget;
+            if (!confirm('Delete card #' + button.dataset.card + ' with its comments and history?')) return;
+            try {
+              await post('/api/board/delete', { id: Number(button.dataset.card) });
+              location.href = '/board';
+            } catch (error) { notice(error.message); }
+          });
+        })();
+        </script>
+        """;
+
+    private static string Options(IEnumerable<string> values, string? selected, Func<string, string> label) =>
+        string.Join("", values.Select(value =>
+            $"<option value=\"{Html.A(value)}\"{(string.Equals(value, selected, StringComparison.OrdinalIgnoreCase) ? " selected" : "")}>" +
+            $"{Html.E(label(value))}</option>"));
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "backlog" => "Backlog",
+        "todo" => "To do",
+        "in_progress" => "In progress",
+        "review" => "Review",
+        "done" => "Done",
+        _ => Capitalize(status.Replace('_', ' ')),
+    };
+
+    private static string Capitalize(string? value) =>
+        string.IsNullOrEmpty(value) ? "" : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private static string When(string? iso) =>
+        string.IsNullOrWhiteSpace(iso) ? "<span class=\"dim\">—</span>" : Html.Timestamp(iso);
+
+    /// <summary>A stored timestamp as a short "3m" / "5h" / "2d" age, for the card face.</summary>
+    private static string Age(string? iso)
+    {
+        if (!DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var at))
+            return "—";
+
+        var age = DateTimeOffset.UtcNow - at;
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours < 1) return (int)age.TotalMinutes + "m ago";
+        if (age.TotalDays < 1) return (int)age.TotalHours + "h ago";
+        return (int)age.TotalDays + "d ago";
+    }
+
     // ── cells ────────────────────────────────────────────────────────────────
 
     private static string Cell(object?[] row, int index, IReadOnlyList<DashboardColumn> columns) =>

@@ -104,6 +104,18 @@ public sealed record CheckSolutionResult : IoResult
     [JsonPropertyName("visualBasicProjectCount")]
     public int? VisualBasicProjectCount { get; init; }
 
+    /// <summary>
+    /// The directory this server serves. One process is one workspace: discovery, the store and the
+    /// board belong to it, and a solution outside it is refused.
+    /// </summary>
+    public string? WorkspaceRoot { get; init; }
+
+    /// <summary>Absolute path of the workspace's SQLite store, or null when it has none yet.</summary>
+    public string? DatabasePath { get; init; }
+
+    /// <summary>The server process that answered, so two sessions on one workspace can be told apart.</summary>
+    public int? ProcessId { get; init; }
+
     /// <summary>A sentence the model can act on.</summary>
     public string? Message { get; init; }
 }

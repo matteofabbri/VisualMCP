@@ -79,28 +79,30 @@ the first execution is the gate's.
 
 ## Web dashboard (2026-10-29)
 
-The server hosts a **read-only** web view of itself and of the solution store, inside the same MCP process (no
-process to start), on **http://127.0.0.1:4677**. The tool is NOT an MCP tool: it is a second, minimal ASP.NET
+The server hosts a web view of itself and of the solution store, inside the same MCP process (no
+process to start), on **http://127.0.0.1:4677**. The store pages are read-only; the board page edits
+cards through the board service. The tool is NOT an MCP tool: it is a second, minimal ASP.NET
 Core instance next to the stdio transport, with the log providers zeroed because stdout belongs to the
 protocol.
 
 | Aspect | State | Notes |
 |---|:---:|---|
-| Port | ✅ | 4677, otherwise the one remembered in `context` (`dashboard.port`), otherwise one assigned by the system; the chosen one is saved back, so two clients on the same solution do not collide |
+| Port | ✅ | 4677, otherwise a port kept by an instance that is no longer running (one `dashboard.port.<pid>` `context` row per process), otherwise one assigned by the system; each process writes only its own row, so two live servers on the same workspace do not overwrite each other |
 | A page per table | ✅ | Tables are read from `sqlite_master`, not from a fixed list: `command_log`, `applied_edit`, `context`, `board_*`, `si_*`, `ti_*`, `package_*`, `decompiled_artifact` and any future table; the FTS5 shadow tables are hidden |
 | Filter, sort, pages | ✅ | Substring on every non-blob column, sortable headers, page size 25–1000, `CSV`/`JSON` |
 | Overview | ✅ | Process (pid, uptime, memory, runtime, transport), loaded solutions with projects/documents, counts, latest calls and latest changes |
+| Board | ✅ | Interactive kanban: five columns, drag and drop between them, a card panel (fields, move, comments, history, delete), a new-card form; every write goes through `IBoardService` and needs a same-origin JSON POST carrying `X-VisualMCP: 1` |
 | Tool catalogue | ✅ | The tools the process advertises, with description and arguments (type, required, description) and a filter |
 | Live log | ✅ | Tail of `debug.log` from the most recent, refresh every 2.5 s, text filter and filter by type (tool/requests/errors/warnings) |
 | Schema | ✅ | Columns of every table as SQLite reports them (type, not null, pk) |
-| JSON API | ✅ | `/api/health`, `/api/overview`, `/api/tables`, `/api/tables/{table}` |
-| Security | ✅ | Loopback only, all GET, restricted CSP, values always encoded, table names validated against `sqlite_master` |
+| JSON API | ✅ | `/api/health`, `/api/overview`, `/api/board`, `/api/tables`, `/api/tables/{table}`, and the five guarded `/api/board/*` writes |
+| Security | ✅ | Loopback only, every route a GET except the guarded board POSTs, restricted CSP, values always encoded, table names validated against `sqlite_master` |
 | A discovery probe does not start it | ✅ | Same decision as the eager load: a probe does not pay for opening the store |
 | Port busy | ✅ | Warning in the log, the MCP session is unaffected |
 
-Documentation: [docs/dashboard.md](docs/dashboard.md). Tests: `src/VisualMCP.Tests/DashboardTests.cs` (7 cases:
-table discovery, filter/paging, injection refusal, blob exclusion, port policy, remembered port, and a real
-listener serving every page).
+Documentation: [docs/dashboard.md](docs/dashboard.md). Tests: `src/VisualMCP.Tests/DashboardTests.cs` (11 cases:
+table discovery, filter/paging, injection refusal, blob exclusion, port policy, remembered port, a real
+listener serving every page, and the board page, its write guard and a move/add/comment/edit/delete round trip).
 
 ---
 
@@ -885,7 +887,7 @@ What remains, in order of impact:
 | Inspection administration (per-scope severity, suppressions, `.DotSettings`, daemon with warm compilation) | 🟡 Medium | ✅ closed: `configure_inspection`, `suppress_finding`, `read_dot_settings`, `custom_inspections`, `naming_rules`, `find_spelling_issues`, `background_analysis`/`analysis_findings`; only ReSharper's proprietary catalogue remains outside |
 | Local history, three-way merge assistance, GitLab/Azure DevOps | 🟢 Low | ✅ closed on 2026-10-31: `local_history`, `git_conflicts` (conflict model), `git_rebase action=plan`, `git_patch`, `git_host` (GitLab/Azure DevOps/Bitbucket), inline review and `code_review` |
 | Minor refactorings: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Low | ✅ closed on 2026-10-31 (`extract_members_to_partial`, `inline_field`, `transform_parameters`, `extension_to_static`, `invert_boolean`, `make_non_static`, `move_type_to_nested_scope`, `generify`) |
-| Taint analysis and quality trend between commits | 🟡 Medium | ❌ not closable with an isolated tool: it needs a data-flow engine, and respectively the findings saved per revision (see §10 of gaps.md) |
+| Taint analysis and quality trend between commits | 🟢 Low | ✅ closed: `trace_data_flow` (a data-flow engine over locals, parameters, call arguments and fields, with sources, sinks, sanitizers and the path) and `get_quality_trend` (two revisions measured with one syntactic rule set) |
 
 The complete inventory — language by language and area by area, with what exists today, what exactly is
 missing and where the boundary ends — is in **[docs/gaps.md](docs/gaps.md)**. The ✅ picture category by

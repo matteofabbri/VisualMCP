@@ -16,7 +16,7 @@ list_solutions
   maxDepth   – recursion depth (default: 3)
 
 load_solution
-  path       – absolute path to the .sln or .slnx file
+  path       – absolute path to the .sln or .slnx file, inside the workspace root
 
 get_project_info
   nameOrPath – project name (as returned by load_solution) or absolute .csproj path
@@ -24,7 +24,9 @@ get_project_info
 
 `load_solution` is **usually unnecessary**: the first tool call discovers and loads the
 working-directory solution. Call it to target a specific `.sln`/`.slnx` by path, or when a tool
-reports that none could be located. It returns the project list and the workspace diagnostics.
+reports that none could be located. The path must be **inside the server's workspace**: one process
+serves one workspace, so a solution in another repository is refused with the root to pass to
+`--root`. It returns the project list and the workspace diagnostics.
 `get_project_info` returns assembly name, language, output type, source files, project and
 assembly references, and NuGet packages.
 

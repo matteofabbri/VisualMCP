@@ -23,10 +23,25 @@ tools, the client that launched the old process still has the old list.
 
 ### "No solution could be located"
 
-- The server auto-discovers solutions under the **working directory** the client launched it in. If that
-  is not the repository root, discovery can fail.
-- Call `list_solutions` to see what is visible, then `load_solution` with an absolute `.sln`/`.slnx` path.
-- `check_solution` reports what is loaded right now.
+- The server auto-discovers solutions under the **workspace root** — the directory the client launched
+  it in, or the one given with `--root` / `VISUALMCP_ROOT`. If that is not the repository root,
+  discovery can fail; start the server from the repo, or point it at the repo with `--root`.
+- Call `list_solutions` to see what is visible, then `load_solution` with an absolute `.sln`/`.slnx` path
+  **inside the workspace**. A path outside it is refused: start a second server for that repository.
+- `check_solution` reports what is loaded right now, the workspace root, the store in use and the pid.
+
+### `load_solution` says the path is outside this server's workspace
+
+The server serves the folder it was started in. A solution in another repository needs its own server:
+restart it with `--root "<that repo>"` (or set `VISUALMCP_ROOT`), or start the client in that folder.
+`list_solutions` still scans whatever directory you give it, so you can confirm the path before
+restarting.
+
+### The board says there is no board database
+
+The workspace has no `.sln`/`.slnx` (or its folder is not writable), so there is no store for the cards
+to live in. Start the server in the folder that holds the solution, or pass `--root`. Every tool that
+does not need the store still works.
 
 ### The first call is slow
 
@@ -121,8 +136,18 @@ To remove the guard entirely: `scripts\install-hooks.ps1 -Uninstall`.
 ### The dashboard is unreachable
 
 The URL is in the log (`Web dashboard on http://127.0.0.1:<port>`) and in `GET /api/health`. If 4677 is
-taken, the server falls back to the last port it used, then to an OS-assigned one. Set
-`VISUALMCP_DASHBOARD_PORT` to prefer another port, or `VISUALMCP_DASHBOARD=off` to disable it.
+taken, the server reuses the port of a dashboard instance that is no longer running, then falls back to
+an OS-assigned one — each instance keeps its own `dashboard.port.<pid>` row, so two live servers do not
+overwrite each other. Set `VISUALMCP_DASHBOARD_PORT` to prefer another port, or `VISUALMCP_DASHBOARD=off`
+to disable it.
+
+### Two sessions on the same workspace
+
+That is two server processes sharing one store: the board, the command log and the history are shared;
+each dashboard has its own port (find it in `debug.log` or `GET /api/health`); and only one process runs
+the metacode watcher at a time — it holds a lease in the store, and the other takes over within 30
+seconds if it stops. Expect a second, incremental warm-up at startup. Details:
+[The workspace, the store and multiple sessions](workspace-and-store.md).
 
 ### Coverage is empty
 

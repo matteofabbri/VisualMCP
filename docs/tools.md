@@ -2,7 +2,7 @@
 
 # Tool catalogue
 
-VisualMCP exposes **420 tools**. This page lists every one of them, grouped by what you are trying to
+VisualMCP exposes **429 tools**. This page lists every one of them, grouped by what you are trying to
 do. It is a map, not the full schema: each tool's exact arguments, defaults and required fields are in
 the client (and live at `http://127.0.0.1:4677/tools` while the server runs).
 
@@ -10,7 +10,7 @@ Conventions:
 
 - Names are snake_case. In a client they are prefixed, e.g. `mcp__VisualMCP__find_symbol`.
 - "Solution tools" auto-discover and load the solution in the working directory. `load_solution` is only
-  needed to target a different `.sln`/`.slnx`.
+  needed to target a different `.sln`/`.slnx` inside the workspace; a path outside it is refused.
 - A **✎** marks a tool that writes or changes state; **✎ preview** means it defaults to a dry run. Tables
   made of actions (refactoring, Git, Docker, Kubernetes, Node) are mostly writes; the read-only exceptions
   are named in the section.
@@ -34,11 +34,12 @@ Conventions:
 | Tool | What it does |
 |---|---|
 | `list_solutions` | Scan a directory tree for `.sln`/`.slnx` files |
-| `load_solution` | Load a specific solution by path, or reload the current one |
-| `check_solution` | Report whether a solution is loaded, its path, project count and language |
+| `load_solution` | Load a specific solution by path inside the workspace, or reload the current one |
+| `check_solution` | Report whether a solution is loaded, its path, project count and language, plus the workspace root, the store path and the pid |
 | `get_project_info` | Source files, project/assembly references, NuGet packages and diagnostics for one project |
 | `add_projects_to_solution` | ✎ Add one or more `.csproj` files to a `.sln`/`.slnx` and reload the workspace |
 | `remove_projects_from_solution` | ✎ Detach projects from the solution without deleting their files |
+| `project_template` | ✎ preview Create a project from a `dotnet new` template (`action=list` the templates this SDK has, or `action=create` one and report the files it created); add it with `add_projects_to_solution` |
 
 ## Files and text
 
@@ -128,6 +129,7 @@ Conventions:
 | `find_throw_sites` | Which methods throw this exception: direct throwers of a type (or of everything deriving from it), the callers that reach one with the shortest call path, and the methods that catch it as a boundary |
 | `find_async_anti_patterns` | `.Result`/`.Wait()`, `async void`, await in loops, `Task.Run` over sync code, missing `ConfigureAwait` |
 | `find_performance_anti_patterns` | Allocation shapes read out of the code with the type model: `string +=` in a loop, a LINQ materialiser inside a loop, a collection or constant-size array allocated per iteration |
+| `find_regex_issues` | Every constant pattern handed to `Regex`, a `Regex` static method or a `[RegularExpression]` attribute, compiled by the real .NET parser: a pattern a running program would reject is reported with file:line, the pattern and the parser's message |
 | `analyze_dependencies` | Project reference graph, cycles and root projects |
 | `check_layer_violations` | Layer rules over real type usage: every dependency that points back up, with file and line |
 | `export_dependency_graph` | The project, namespace or type dependency graph as Graphviz DOT or Mermaid (the type graph is cut at 300 nodes, most connected first) |
@@ -198,6 +200,8 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `generate_members` | ✎ Generate constructor, `Equals`/`GetHashCode` and `ToString` from fields/properties |
 | `generate_builder` | ✎ Generate a fluent builder for a type: one `With<Property>` per public settable property and a `Build()`; compiler-gated |
 | `generate_dto_from_json` | ✎ Generate a C# DTO from a JSON sample (types inferred from the data, init-only properties, nested objects as nested records); compiler-gated |
+| `generate_dto_from_xml` | ✎ Generate a C# DTO from an XML sample — attributes and child elements as properties, a repeating element as `List<T>`, a leaf typed from its text; compiler-gated |
+| `generate_comparer` | ✎ Generate an `IComparer<T>` over the type's comparable properties in declaration order, with a `Default` singleton and null handling; compiler-gated |
 | `implement_members` | ✎ Generate stubs for the interface and abstract members a type still owes; refused unless the compiler errors disappear |
 | `create_from_usage` | ✎ Create what a compiler error already assumes: the method or property on the receiver's type (CS1061), the static member on its type (CS0117), the overload whose signature is the call site (CS1501/CS7036), the type (CS0246) or a method on the enclosing type (CS0103) |
 | `generate_docs` | ✎ Write the missing XML `<summary>`/`<param>`/`<typeparam>`/`<returns>` entries from the declaration name |
@@ -214,10 +218,11 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `remove_regions` | ✎ Strip `#region`/`#endregion` and keep the code |
 | `safe_delete` | ✎ Delete a symbol only when Roslyn finds zero references |
 | `invert_if` | ✎ Swap an if/else's branches and negate the condition |
-| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators (add and remove), remove an argument name, merge or split an `if` chain, join a null check with its use, `use_var` / `use_explicit_type`, split a declaration, remove braces, `#nullable enable` migration, `ConfigureAwait(false)`, LINQ in both directions, StringBuilder and string literals between regular, verbatim and raw — 41 action ids, compiler-gated. A `.vb` document routes to the Visual Basic engine: 33 ids with a VB spelling are implemented (the same families plus Imports, `Select Case`, `&=`, `AndAlso` nesting and `Await … .ConfigureAwait(False)`), and the C#-only ids are refused with the reason |
+| `context_action` | ✎ preview The ReSharper context actions that are neither style rewrites nor refactorings: import a type's using, argument guards (null, all parameters, string not null or empty, collection not empty, dictionary key, enum defined, index range, variable), surround-with (try/catch, try/finally, if, using, #region), braces, loop conversions (`foreach`↔`for`, invert), `if`→`switch`, concatenation↔interpolation, digit separators (add and remove), remove an argument name, merge or split an `if` chain, join a null check with its use, `use_var` / `use_explicit_type`, split a declaration, remove braces, `#nullable enable` migration, `ConfigureAwait(false)`, LINQ in both directions, StringBuilder, the string literal converters (regular, verbatim, raw, split and join, `''`↔`string.Empty`), static member import/qualify/unqualify, `insert_file_header`, `auto_property_to_explicit`, `wrap_in_quotes`, `check_span_index`, block↔expression body — 54 action ids, compiler-gated. A `.vb` document routes to the Visual Basic engine: 33 ids with a VB spelling are implemented (the same families plus Imports, `Select Case`, `&=`, `AndAlso` nesting and `Await … .ConfigureAwait(False)`), and the C#-only ids are refused with the reason |
 | `templates` | ✎ preview ReSharper's templates as data: `list` the 18 live, 10 postfix (`.if`, `.null`, `.var`, `.await`, `.foreach`, …) and 8 file templates plus the team's own in `.visualMCP/templates.json`; `expand` a live shortcut or a postfix expression at a line; `create` a new file (class, interface, record, struct, enum, static class, abstract class, xUnit test); `save`/`delete` the custom ones — compiler-gated |
 | `fix_complexity` | ✎ preview Make the codebase simpler in one call: rank every method, lower the worst with the same moves as `reduce_complexity`, report before/after — whole solution, project or file |
 | `reduce_complexity` | ✎ Lower cyclomatic and cognitive complexity by extracting blocks, naming booleans and adding guard clauses, re-measuring until a target |
+| `migration_campaign` | ✎ preview Apply one named rewrite across the whole solution or a project — `nullable` headers, file-scoped namespaces, braces, primary constructors — gated as a whole and, on failure, per file, with a short diff per file |
 | `remove_params` | ✎ preview Remove the `params` modifier from a method's last array parameter; refused when a call site passes the elements individually |
 | `inline_field` | ✎ preview Inline a field at every use and remove it; refused when it is written outside its declaration or used from another file |
 | `extension_to_static` | ✎ preview Turn an extension method into a static one and rewrite every `x.M(a)` to `Type.M(x, a)` |
@@ -230,7 +235,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 
 | Tool | What it does |
 |---|---|
-| `simplify_code` | ✎ preview Apply the IDE's mechanical style suggestions to C#: 87 rule ids, at document, project or solution scope, compiler-gated, preview by default; IDE0005/IDE0032/IDE0290 are delegated to their own tools |
+| `simplify_code` | ✎ preview Apply the IDE's mechanical style suggestions to C#: 97 rule ids, at document, project or solution scope, compiler-gated, preview by default; IDE0005/IDE0032/IDE0290 are delegated to their own tools |
 | `simplify_vb_code` | ✎ preview The same engine for Visual Basic: 41 rule ids, compiler-gated, preview by default; the 8 ids it does not rewrite are returned with a reason each |
 | `code_cleanup` | ✎ preview Run the cleanup steps in order (style → usings → regions → reorder → format) over a document, project or solution; `steps` or a named `profile` — the built-in `full`/`reformat`/`style`/`usings`/`regions`/`reorder`/`safe` or a team one from `.visualMCP/cleanup-profiles.json`, which `saveProfileAs` writes |
 | `layout_code` | ✎ preview CodeMaid's Format Document rules Roslyn's formatter does not implement: reflow full-line `//` comments to a width, join a line range (refused when the token stream would change), collapse runs of blank lines and trim them at the braces |
@@ -252,6 +257,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `run_test` | Run one test or one class without hand-building `--filter`; structured TRX result (passed/failed, failure messages) and the failures are recorded |
 | `rerun_failed` | ✎ Re-run exactly the tests that failed in the last `run_test` or `run_tests`, from `.visualMCP/last-test-run.json` — per project, cleared by a green run |
 | `tests_covering_symbol` | Which test methods reference this symbol (semantic, `[Fact]`/`[Theory]`/`[Test]`/…), with file:line |
+| `run_covering_tests` | ✎ Run exactly the tests that reference a symbol: the covering tests resolved through Roslyn become a `dotnet test` filter, and the TRX result comes back |
 | `generate_tests` | ✎ preview Scaffold an xUnit test class with one `[Fact]` per public method; compiler-gated, written into the test project |
 | `test_impact_analysis` | Which tests a change can affect: git diff → the symbols the changed files declare → the test methods that reference them, with a ready filter |
 | `run_affected_tests` | The same analysis, then runs exactly those tests with the composed filter (or answers `no-affected-tests`) |
@@ -262,6 +268,8 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `run_mutation_tests` | ✎ Run Stryker.NET over a test project: mutation score, killed/survived/timed-out/no-coverage counts, the worst files and the surviving mutants with file and line |
 | `dotnet_publish` | Publish a project (RID, self-contained, single-file, output folder) with a structured result |
 | `publish_profile` | ✎ preview `Properties/PublishProfiles/*.pubxml` as data: list, create/update or delete a profile by the MSBuild properties `dotnet publish -p:PublishProfile` reads (`PublishDir`, `RuntimeIdentifier`, `SelfContained`, `PublishSingleFile`, …) |
+| `installer_project` | ✎ preview Write and verify an installer: `kind=wix` scaffolds a WiX project (an MSI over the publish folder, MajorUpgrade, a stable UpgradeCode), `kind=clickonce` writes the ClickOnce profile; `action=verify` builds what was scaffolded and returns its exit code and output |
+| `deploy_target` | ✎ Deploy a built project to IIS (`dotnet publish -p:PublishProfile=…` with the Web SDK's MSDeploy target) or Azure (`az webapp deploy` / `az staticwebapp deploy`); refused without `confirm=true` |
 | `add_project_reference` | ✎ Add a `<ProjectReference>` (`dotnet add reference`) and reload the workspace |
 | `remove_project_reference` | ✎ Remove a `<ProjectReference>` |
 | `nuget_pack` | ✎ Pack a project into a .nupkg, with an optional version and output folder |
@@ -653,6 +661,7 @@ read-only unless `board_audit` is called with `close=true`; the other board tool
 | `run_plan` | Execute a dependency graph of tool calls and shell commands in one round trip, with validation, parallelism, path-based conflict avoidance and per-step timeouts |
 | `http_invoke` | Call any HTTP endpoint with method, headers and body; accepts self-signed localhost certificates |
 | `run_http_file` | Execute a REST-client `.http`/`.rest` file (variables, `###` separators, headers, bodies) and report each response |
+| `http_file` | ✎ preview Read and edit a REST-client request file as data: `inspect` parses it and reports the variables, the requests and the rules it breaks (HTTP0001–HTTP0007); `append` adds a request, `set-variable` upserts one |
 | `signal_r_connect` | Connect to a SignalR hub and return a session id |
 | `signal_r_subscribe` | Buffer messages for one hub method |
 | `signal_r_events` | Drain buffered events, optionally waiting |

@@ -162,6 +162,8 @@ internal sealed class FakeWorkspace : IRoslynWorkspace
 
     public string? LoadedSolutionPath => null;
 
+    public string WorkspaceRoot => _directory;
+
     public Task<Solution?> EnsureSolutionLoadedAsync(CancellationToken ct = default) => Task.FromResult<Solution?>(_solution);
 
     public Task<SolutionLoadResult> LoadSolutionAsync(string solutionPath, CancellationToken ct = default) =>

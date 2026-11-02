@@ -62,6 +62,17 @@ public interface IVisualMcpStore
     bool Remove(string key);
 
     /// <summary>
+    /// Takes (or renews) a named cross-process lease for background work in this workspace. The
+    /// database is shared by every server a client starts on the same workspace, and two of them
+    /// rebuilding the same index is pure waste: the owner keeps the lease alive with its heartbeat,
+    /// and a dead owner's lease is stolen once it is older than <paramref name="ttl"/>.
+    /// </summary>
+    bool TryAcquireBackgroundLease(string name, TimeSpan ttl);
+
+    /// <summary>Drops a lease this process owns; another live process's lease is left alone.</summary>
+    void ReleaseBackgroundLease(string name);
+
+    /// <summary>
     /// Appends one received tool call (date, time, tool, arguments) to the command log. Silently does
     /// nothing when no database is available: logging must never fail a tool call.
     /// </summary>
@@ -116,15 +127,16 @@ public interface IVisualMcpStore
 }
 
 /// <summary>
-/// Lazily opens one database per solution directory. Every operation degrades to a no-op when no
-/// solution is loaded or SQLite cannot be used: the store is an optimisation, never a dependency.
+/// Lazily opens the one database of the workspace, keyed on its primary (shallowest) solution.
+/// Every operation degrades to a no-op when no solution is loaded or SQLite cannot be used: the
+/// store is an optimisation, never a dependency.
 /// </summary>
 public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 {
     private readonly IRoslynWorkspace _workspace;
     private readonly object _gate = new();
     private SqliteConnection? _connection;
-    private string? _connectedDirectory;
+    private string? _storeDirectory;
     private bool _unavailable;
 
     public VisualMcpStore(IRoslynWorkspace workspace) => _workspace = workspace;
@@ -531,25 +543,19 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         lock (_gate)
         {
             if (_unavailable) return null;
+            if (_connection is not null) return _connection;
 
-            var solutionPath = _workspace.LoadedSolutionPath ?? _workspace.DiscoverSolutionPath();
-            if (string.IsNullOrWhiteSpace(solutionPath)) return null;
-
-            var solutionDirectory = Path.GetDirectoryName(solutionPath);
-            if (string.IsNullOrWhiteSpace(solutionDirectory)) return null;
-
-            // The host can switch the active solution; reopen when the directory changes.
-            if (_connection is not null && string.Equals(_connectedDirectory, solutionDirectory, StringComparison.OrdinalIgnoreCase))
-                return _connection;
+            // Resolved once and never again: the store belongs to the workspace, not to whichever
+            // solution happens to be active. Keying it on LoadedSolutionPath is what forked a second
+            // database (and a second board) when a nested .sln was activated.
+            var storeDirectory = _storeDirectory ??= ResolveStoreDirectory();
+            if (string.IsNullOrWhiteSpace(storeDirectory)) return null;
 
             try
             {
-                _connection?.Dispose();
-                _connection = null;
-
-                var storeDirectory = Path.Combine(solutionDirectory, ".visualMCP");
-                Directory.CreateDirectory(storeDirectory);
-                var databasePath = Path.Combine(storeDirectory, "visualmcp.db");
+                var visualMcpDirectory = Path.Combine(storeDirectory, ".visualMCP");
+                Directory.CreateDirectory(visualMcpDirectory);
+                var databasePath = Path.Combine(visualMcpDirectory, "visualmcp.db");
 
                 var connection = new SqliteConnection($"Data Source={databasePath}");
                 connection.Open();
@@ -566,7 +572,6 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
                 EnsureColumn(connection, "applied_edit", "before_text", "BLOB");
 
                 _connection = connection;
-                _connectedDirectory = solutionDirectory;
                 DatabasePath = databasePath;
                 return connection;
             }
@@ -577,6 +582,17 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
                 return null;
             }
         }
+    }
+
+    /// <summary>
+    /// Directory the workspace's database lives in: the directory of its primary solution, which is
+    /// the shallowest <c>.sln</c>/<c>.slnx</c> discovery finds under the pinned root — the same one
+    /// the environment picks as its default active solution. Null when the workspace has no solution.
+    /// </summary>
+    private string? ResolveStoreDirectory()
+    {
+        var solutionPath = _workspace.DiscoverSolutionPath();
+        return string.IsNullOrWhiteSpace(solutionPath) ? null : Path.GetDirectoryName(solutionPath);
     }
 
     public void Dispose()
