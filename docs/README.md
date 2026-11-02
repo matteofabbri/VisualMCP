@@ -98,7 +98,7 @@ to name internal types; the pages above are not.
 |---|---|
 | [workspace-and-store.md](workspace-and-store.md) | one process per workspace: the startup order, the boundary and its error, the store's location and lifetime, the background lease, per-instance dashboard ports, invariants and failure modes |
 | [engine-state.md](engine-state.md) | which IDE rules are rewritten, which are not and why, the structural limits of the rewrite engine, the state of the solution store |
-| [gaps.md](gaps.md) | **the open capability rows**: the scanner boundaries per language, the proprietary context-action tail, installer authoring, `.http` authoring, IIS/Azure deployment, a standalone CLI and feature-level campaigns |
+| [gaps.md](gaps.md) | the retired gap inventory: no open row, and the index of where each boundary is stated |
 | [metacode.md](metacode.md) | the canonical pseudocode model: grammar, frontends, decompilation, indexing, generation, limits |
 | [profiling.md](profiling.md) | every `profile_*` tool, what it reads, the artifacts, the known limits and the comparison with Visual Studio |
 | [razor.md](razor.md) | the Razor/Blazor analysis layer and its 28 rules |
@@ -116,8 +116,9 @@ The rule-by-rule table for the style engine is [`../CAPABILITY_MAP.md`](../CAPAB
 
 - **Counts are live facts.** A tool count, "97 rule ids", "28 Razor rules" — all of them age badly:
   take the number from `capability_report` when you write it, and say where it came from.
-- **`gaps.md` is the honest inventory.** A feature is not documented as present until it is in the
-  tool catalogue and the engine applies it; anything else belongs in `gaps.md`.
+- **The coverage page states the boundary.** A feature is not documented as present until it is in the
+  tool catalogue and the engine applies it; what the feature cannot prove is stated in its own row of
+  [ReSharper & CodeMaid — Feature Coverage](resharper-codemaid-coverage.md), not in a second backlog.
 - **User-facing pages do not name internal types.** If a sentence needs `SnitchContext` or
   `CompilationCache` to make sense, it belongs in the engineering notes.
 - **Links are relative and checked.** The documentation is read on GitHub, so a renamed page must be
@@ -150,10 +151,10 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   tree, navigation and verified edits) with the code-behind resolved through Roslyn. EF Core migrations
   run through `ef_migrations`; SQL
   (`sql_files`, `analyze_sql`, SQL0001–SQL0012), JavaScript/TypeScript (`js_files`, `analyze_js`,
-  JS0001–JS0017, with every specifier resolved through a relative path, `tsconfig.json` `baseUrl`/`paths`
-  or `node_modules`, and **`js_symbols`** — a lexical symbol table: outline,
+  JS0001–JS0018, with every specifier resolved through a relative path, `tsconfig.json` `baseUrl`/`paths`
+  or `node_modules`, an import cycle reported as JS0018, and **`js_symbols`** — a lexical symbol table: outline,
   find, refs, unused, rename), HTML/CSS (`markup_files`, `analyze_markup`), YAML
-  (`yaml_files`, `analyze_yaml`, YAML0001–YAML0012) and F#
+  (`yaml_files`, `analyze_yaml`, YAML0001–YAML0015) and F#
   (`fsharp_files`, `analyze_fsharp`, and **`fsharp_symbols`** — the same questions plus a lexical rename)
   each have a scanned layer of their own; the JavaScript/TypeScript
   toolchain also runs through the project's own npm/pnpm/yarn (`node_*`, with `tsc`/`eslint` interpreted),
@@ -169,7 +170,7 @@ stays local. Read [How it works](how-it-works.md#privacy) for the full picture.
   is checked by `k8s_validate` against the built-in kinds unless `server=true` asks the cluster for its
   OpenAPI and admission answer), and F# has no semantic
   layer (its compiler's diagnostics come through `build_project`). See
-  [the language map](gaps.md#1-language-and-platform-scope).
+  [other languages and file kinds](resharper-codemaid-coverage.md#other-languages-and-file-kinds).
 - **Scope:** everything is static analysis or process instrumentation. No tool proves that a change
   preserves behaviour in general — the style rules that claim equivalence are checked operation by
   operation — and no tool replaces your test suite. See

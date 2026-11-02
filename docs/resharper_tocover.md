@@ -6,7 +6,7 @@ answers it, or `—` when there is none. This is the full inventory behind `resh
 the `—` rows are the rules that would have to be reimplemented over Roslyn, the `✅` rows are the part
 the curated map already answers.
 The ✅ side of the same comparison is [ReSharper & CodeMaid — Feature Coverage](resharper-codemaid-coverage.md);
-the gaps that are not catalogue ids are in [What is missing](gaps.md).
+the boundaries that are not catalogue ids are in [Cross-cutting boundaries](resharper-codemaid-coverage.md#cross-cutting-boundaries).
 
 | | |
 |---|---|

@@ -1,8 +1,8 @@
 # Agent ergonomics — the round-trip backlog
 
 This page is the work list for one question: **how many calls does it take to answer a question?**
-[gaps.md](gaps.md) is about what the product does not do; this page is about how much navigation
-the product forces on the agent that uses it.
+[The coverage page's boundaries](resharper-codemaid-coverage.md#cross-cutting-boundaries) are about what
+each layer does not do; this page is about how much navigation the product forces on the agent that uses it.
 
 Every item here was found in the session store, not invented: the numbers come from
 `~/.zcode/cli/db/db.sqlite` (the ZCode sessions of this project, read-only) and from
@@ -192,8 +192,8 @@ analysis, and `find_implementations`/`reference_index` use rises above zero.
 | Language | Area | State | Proof | Documented in |
 |---|---|---|---|---|
 | C# | style | 97 ids, 29 explained by category | `StyleRewriteCatalog` | guides/refactoring.md |
-| Visual Basic | style | 41 of the 49 ids, 8 refused by id with a reason | `VbStyleRewriteCatalog` | gaps.md §1.2 |
-| Visual Basic | the rest of the language | symbol index, structural search, format/usings/cleanup, VB-capable inspection packs and their fixers, dead code / smells / async / performance / complexity / metrics / clones / Big-O, rename + encapsulate_field + ParamArray, the 33 context actions with a VB spelling | `VisualBasicSymbolIndexFrontend`, `*.VisualBasic.cs`, `VbContextActionService` | gaps.md §1.2 |
+| Visual Basic | style | 41 of the 49 ids, 8 refused by id with a reason | `VbStyleRewriteCatalog` | CAPABILITY_MAP.md §25 |
+| Visual Basic | the rest of the language | symbol index, structural search, format/usings/cleanup, VB-capable inspection packs and their fixers, dead code / smells / async / performance / complexity / metrics / clones / Big-O, rename + encapsulate_field + ParamArray, the 33 context actions with a VB spelling | `VisualBasicSymbolIndexFrontend`, `*.VisualBasic.cs`, `VbContextActionService` | CAPABILITY_MAP.md §23/§25/§26 |
 | Razor | markup analysis | 28 rules | `RazorRuleCatalog` | razor.md |
 | … | … | … | … | … |
 
@@ -216,8 +216,7 @@ carries the symbol that proves each row.
 
 ### W8 — Coverage numbers in the docs generated from W7
 
-**Change.** The counts in [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md),
-[gaps.md](gaps.md) and
+**Change.** The counts in [resharper-codemaid-coverage.md](resharper-codemaid-coverage.md) and
 [CAPABILITY_MAP.md](../CAPABILITY_MAP.md) are generated from W7 instead of typed. The corrections
 already made to those pages were made by hand, one line at a time, and nothing keeps them in step
 with the catalogues: the next rule added to `StyleRewriteCatalog` re-opens the same drift.
@@ -278,7 +277,7 @@ what the agent actually did, not what the tool descriptions intend.
 - One row per measured chain, not per idea. An item without a number in
   [The chains, measured](#the-chains-measured) does not belong on this page.
 - When an item ships, move its row to ✅, add the tool to
-  [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), and close the matching [board](../gaps.md) card — the work to
+  [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), and close the matching board card — the work to
   do lives on the board, not in a workaround table.
 - Re-measure with a fresh snapshot when a batch closes; the counts drift with the way we work, and
   a stale number is worse than no number.

@@ -88,4 +88,4 @@ relational model cannot express and stays raw SQL in `VisualMcpSchema`.
 
 Rule coverage, the IDE rule table and what the engine cannot do are documented in
 [`docs/engine-state.md`](../docs/engine-state.md), [`CAPABILITY_MAP.md`](../CAPABILITY_MAP.md)
-and [`docs/gaps.md`](../docs/gaps.md).
+and [the coverage page](../docs/resharper-codemaid-coverage.md).

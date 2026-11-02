@@ -32,7 +32,8 @@ public static class MarkupAnalyzer
     };
 
     private static readonly Regex TagPattern = new(@"<(/?)([A-Za-z][\w:-]*)((?:[^>""']|""[^""]*""|'[^']*')*)>", Options);
-    private static readonly Regex AttributePattern = new(@"(?<name>[A-Za-z_:][-\w:.]*)\s*=\s*(?<value>""[^""]*""|'[^']*'|[^\s>]+)", Options);
+    private static readonly Regex AttributeTokenPattern = new(
+        @"(?<name>[A-Za-z_:][-\w:.]*)\b(?:\s*=\s*(?<value>""[^""]*""|'[^']*'|[^\s>]+))?", Options);
     private static readonly Regex IdPattern = new(@"\bid\s*=\s*(?<quote>[""'])(?<value>[^""']+)\k<quote>", Options);
     private static readonly Regex InlineHandler = new(@"\son[a-z]+\s*=", Options);
     private static readonly Regex HttpSubresource = new(
@@ -69,6 +70,7 @@ public static class MarkupAnalyzer
         ["HTML0013"] = "Subresource loaded over http://",
         ["HTML0014"] = "Unclosed or mismatched tag",
         ["HTML0015"] = "Class used in markup and defined in no scanned stylesheet",
+        ["HTML0016"] = "The same attribute is written twice on one element",
         ["CSS0001"] = "!important",
         ["CSS0002"] = "ID selector in a stylesheet",
         ["CSS0003"] = "Empty rule",
@@ -155,6 +157,12 @@ public static class MarkupAnalyzer
 
             var attributes = ReadAttributes(masked, tag);
 
+            foreach (var repeated in RepeatedAttributes(tag))
+                Add("HTML0016", "warning", "Correctness",
+                    $"The attribute '{repeated.Name}' is written twice on one element; the browser keeps the first value.",
+                    repeated.Offset,
+                    "Keep one attribute: the later value is ignored, so the markup does not mean what it reads.");
+
             var (nodeLine, nodeColumn) = Position(lineStarts, tag.Offset);
             nodes.Add(new MarkupNode(
                 name,
@@ -181,7 +189,7 @@ public static class MarkupAnalyzer
                     "The image has no alt text.", tag.Offset,
                     "Add alt=\"…\"; use alt=\"\" only when the image is decorative.");
 
-            if (name == "html" && !attributes.ContainsKey("lang"))
+            if (name == "html" && (!attributes.TryGetValue("lang", out var lang) || string.IsNullOrWhiteSpace(lang)))
                 Add("HTML0002", "warning", "Accessibility",
                     "The document does not declare its language.", tag.Offset,
                     "Add lang=\"…\" to <html>: screen readers choose the pronunciation from it.");
@@ -195,26 +203,31 @@ public static class MarkupAnalyzer
 
                 if (attributes.TryGetValue("target", out var target) &&
                     string.Equals(target, "_blank", StringComparison.OrdinalIgnoreCase) &&
-                    !attributes.ContainsKey("rel"))
+                    (!attributes.TryGetValue("rel", out var rel) ||
+                     !(rel.Contains("noopener", StringComparison.OrdinalIgnoreCase) ||
+                       rel.Contains("noreferrer", StringComparison.OrdinalIgnoreCase))))
                     Add("HTML0009", "warning", "Security",
                         "target=\"_blank\" without rel lets the opened page replace this one (tabnabbing).", tag.Offset,
                         "Add rel=\"noopener noreferrer\".");
             }
 
-            if (name == "button" && !attributes.ContainsKey("type"))
+            if (name == "button" &&
+                (!attributes.TryGetValue("type", out var buttonType) || string.IsNullOrWhiteSpace(buttonType)))
                 Add("HTML0011", "info", "Correctness",
                     "A <button> defaults to type=\"submit\", which submits the surrounding form.", tag.Offset,
                     "Add type=\"button\" unless submitting is the intent.");
 
             if (name is "input" or "select" or "textarea" &&
-                !attributes.ContainsKey("name") &&
+                (!attributes.TryGetValue("name", out var controlName) || string.IsNullOrWhiteSpace(controlName)) &&
                 !attributes.ContainsKey("disabled") &&
                 !(attributes.TryGetValue("type", out var type) && type is "button" or "submit" or "reset" or "image"))
                 Add("HTML0012", "info", "Correctness",
                     $"The <{name}> has no name, so its value is not submitted.", tag.Offset,
                     "Give it a name, or disable it when it carries no data.");
 
-            if (name == "label" && !attributes.ContainsKey("for") && !HasNestedControl(masked, tag))
+            if (name == "label" &&
+                (!attributes.TryGetValue("for", out var labelFor) || string.IsNullOrWhiteSpace(labelFor)) &&
+                !HasNestedControl(masked, tag))
                 Add("HTML0005", "warning", "Accessibility",
                     "The label is attached to no control.", tag.Offset,
                     "Add for=\"id\" matching the control, or nest the control inside the label.");
@@ -514,7 +527,7 @@ public static class MarkupAnalyzer
     /// <summary>
     /// Every selector of the stylesheet, simple or complex. A complex one keeps its compound parts and the
     /// combinators between them, so CSS0009 can ask whether the whole chain exists in the page index; a part
-    /// only a browser can decide (a dynamic pseudo-class, :nth-child, :has) makes the selector "not
+    /// only a browser can decide (a dynamic pseudo-class, :has) makes the selector "not
     /// checkable", and it is then indexed for its classes but never reported as unmatched.
     /// </summary>
     private static IEnumerable<CssSimpleSelector> SimpleSelectors(string masked, int[] lineStarts)
@@ -646,7 +659,8 @@ public static class MarkupAnalyzer
         void Count(CssSelectorPart part)
         {
             if (part.Id is not null) ids++;
-            classes += (part.Classes?.Count ?? 0) + (part.Attributes?.Count ?? 0) + (part.PseudoClasses?.Count ?? 0);
+            classes += (part.Classes?.Count ?? 0) + (part.Attributes?.Count ?? 0) + (part.PseudoClasses?.Count ?? 0) +
+                       (part.Nth?.Count ?? 0);
             if (part.Tag is not null) tags++;
             if (part.PseudoElement) tags++;
             foreach (var inner in part.Not ?? Array.Empty<CssSelectorPart>()) Count(inner);
@@ -759,6 +773,7 @@ public static class MarkupAnalyzer
         var pseudoClasses = new List<string>();
         var negations = new List<CssSelectorPart>();
         var alternatives = new List<CssSelectorPart>();
+        var nthConditions = new List<CssNthCondition>();
         var checkable = true;
         var pseudoElement = false;
 
@@ -815,7 +830,16 @@ public static class MarkupAnalyzer
                     var inner = ReadParenthesized(text, ref index);
                     if (inner is null) return false;
 
-                    if (name is "not" or "is" or "where")
+                    if (name is "nth-child" or "nth-last-child" or "nth-of-type" or "nth-last-of-type")
+                    {
+                        // The formula is decidable against the page index: the element's position among
+                        // its siblings (or among the siblings of its own tag) is known.
+                        if (TryParseNth(inner, out var step, out var offset))
+                            nthConditions.Add(new CssNthCondition(name, step, offset));
+                        else
+                            checkable = false;
+                    }
+                    else if (name is "not" or "is" or "where")
                     {
                         var list = new List<CssSelectorPart>();
                         var parsed = true;
@@ -846,7 +870,7 @@ public static class MarkupAnalyzer
                     }
                     else
                     {
-                        // :nth-child(), :has(), :lang() … need more of the page than this index holds.
+                        // :has(), :lang() … need more of the page than this index holds.
                         checkable = false;
                     }
 
@@ -867,8 +891,44 @@ public static class MarkupAnalyzer
         if (index == start) return false;
 
         part = new CssSelectorPart(tag, classes, id, attributes, pseudoClasses, negations, alternatives,
-            checkable, pseudoElement);
+            checkable, pseudoElement, Nth: nthConditions);
         return true;
+    }
+
+    /// <summary>
+    /// The <c>An+B</c> argument of an <c>:nth-*</c> pseudo-class: <c>odd</c>, <c>even</c>, <c>3</c>,
+    /// <c>2n+1</c>, <c>-n+3</c>. The selectors-4 <c>of S</c> form is not parsed, because it needs a nested
+    /// selector list the page index does not evaluate here.
+    /// </summary>
+    private static bool TryParseNth(string text, out int step, out int offset)
+    {
+        step = 0;
+        offset = 0;
+
+        var formula = new string(text.Where(character => !char.IsWhiteSpace(character)).ToArray()).ToLowerInvariant();
+        if (formula.Length == 0 || formula.Contains("of", StringComparison.Ordinal)) return false;
+
+        if (formula == "odd") { step = 2; offset = 1; return true; }
+        if (formula == "even") { step = 2; offset = 0; return true; }
+
+        var n = formula.IndexOf('n');
+        if (n < 0) return int.TryParse(formula, System.Globalization.NumberStyles.AllowLeadingSign,
+            System.Globalization.CultureInfo.InvariantCulture, out offset);
+
+        var stepText = formula[..n];
+        step = stepText switch
+        {
+            "" or "+" => 1,
+            "-" => -1,
+            _ => int.TryParse(stepText, System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : int.MinValue,
+        };
+        if (step == int.MinValue) return false;
+
+        var offsetText = formula[(n + 1)..];
+        return offsetText.Length == 0 ||
+               int.TryParse(offsetText, System.Globalization.NumberStyles.AllowLeadingSign,
+                   System.Globalization.CultureInfo.InvariantCulture, out offset);
     }
 
     private static string ReadName(string text, ref int index)
@@ -1050,6 +1110,10 @@ public static class MarkupAnalyzer
             pseudoClasses.Any(pseudo => !PseudoMatches(nodes, node, pseudo)))
             return false;
 
+        if (part.Nth is { Count: > 0 } nthConditions &&
+            nthConditions.Any(condition => !NthMatches(nodes, node, condition)))
+            return false;
+
         if (part.Not is { Count: > 0 } negations &&
             negations.Any(negation => PartMatches(nodes, node, negation)))
             return false;
@@ -1075,6 +1139,32 @@ public static class MarkupAnalyzer
             "empty" => !nodes.Any(candidate => candidate.Parent == node.Order),
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// An <c>:nth-*</c> condition against the element's 1-based position among its siblings — all of them
+    /// for <c>-child</c>, only those with the same tag for <c>-of-type</c>, counted from the end for the
+    /// <c>nth-last-*</c> forms.
+    /// </summary>
+    private static bool NthMatches(IReadOnlyList<MarkupNode> nodes, MarkupNode node, CssNthCondition condition)
+    {
+        var sameType = condition.Name.EndsWith("-of-type", StringComparison.Ordinal);
+        var fromEnd = condition.Name.StartsWith("nth-last", StringComparison.Ordinal);
+
+        var siblings = nodes
+            .Where(candidate => candidate.Parent == node.Parent &&
+                                (!sameType || string.Equals(candidate.Tag, node.Tag, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(candidate => candidate.Order)
+            .ToList();
+
+        var index = siblings.FindIndex(candidate => candidate.Order == node.Order);
+        if (index < 0) return false;
+
+        var position = fromEnd ? siblings.Count - index : index + 1;
+        if (condition.Step == 0) return position == condition.Offset;
+
+        var difference = position - condition.Offset;
+        return difference % condition.Step == 0 && difference / condition.Step >= 0;
     }
 
     private static bool AttributeMatches(MarkupNode node, CssAttributeCondition condition)
@@ -1334,7 +1424,8 @@ public static class MarkupAnalyzer
 
     // ── tags ───────────────────────────────────────────────────────────────────
 
-    private sealed record HtmlTag(string Name, int Offset, int End, bool Closing, bool SelfClosing, string Text);
+    private sealed record HtmlTag(
+        string Name, int Offset, int End, bool Closing, bool SelfClosing, string Text, string Rest, int RestOffset);
 
     private static List<HtmlTag> ScanTags(string masked)
     {
@@ -1351,19 +1442,36 @@ public static class MarkupAnalyzer
 
             tags.Add(new HtmlTag(
                 name, match.Index, match.Index + match.Length - 1, closing,
-                rest.TrimEnd().EndsWith('/'), match.Value));
+                rest.TrimEnd().EndsWith('/'), match.Value, rest, match.Groups[3].Index));
         }
 
         return tags;
     }
 
+    /// <summary>
+    /// The attributes written more than once on one tag, each at the occurrence the browser ignores: a
+    /// duplicate is a parse error, and the first value is the one the document actually has.
+    /// </summary>
+    private static IEnumerable<(string Name, int Offset)> RepeatedAttributes(HtmlTag tag)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in AttributeTokenPattern.Matches(tag.Rest))
+        {
+            var name = match.Groups["name"].Value;
+            if (!seen.Add(name))
+                yield return (name, tag.RestOffset + match.Index);
+        }
+    }
+
     private static Dictionary<string, string> ReadAttributes(string masked, HtmlTag tag)
     {
         var attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match match in AttributePattern.Matches(tag.Text))
+        foreach (Match match in AttributeTokenPattern.Matches(tag.Rest))
         {
             var name = match.Groups["name"].Value;
-            var value = match.Groups["value"].Value.Trim('"', '\'');
+            var value = match.Groups["value"].Success
+                ? match.Groups["value"].Value.Trim('"', '\'')
+                : string.Empty; // a boolean attribute: <input disabled>
             attributes.TryAdd(name, value);
         }
 
@@ -1437,9 +1545,13 @@ public enum CssCombinator
 /// <summary>An attribute condition: <c>[name]</c>, <c>[name=value]</c>, <c>[name^=value i]</c>.</summary>
 public sealed record CssAttributeCondition(string Name, string? Operator, string? Value, bool IgnoreCase);
 
+/// <summary>An <c>:nth-*</c> argument: the <c>An+B</c> step and offset, with the pseudo-class it came from.</summary>
+public sealed record CssNthCondition(string Name, int Step, int Offset);
+
 /// <summary>One compound selector: a tag, classes, an id, attribute conditions and pseudo-classes.</summary>
-/// <param name="Checkable">False when only a browser could decide it (<c>:hover</c>, <c>:nth-child()</c>).</param>
+/// <param name="Checkable">False when only a browser could decide it (<c>:hover</c>, <c>:has()</c>).</param>
 /// <param name="Combinator">How this part joins the part on its left (None for the first).</param>
+/// <param name="Nth">The <c>:nth-child()</c> / <c>:nth-of-type()</c> conditions, resolved against the page index.</param>
 public sealed record CssSelectorPart(
     string? Tag = null,
     IReadOnlyList<string>? Classes = null,
@@ -1450,7 +1562,8 @@ public sealed record CssSelectorPart(
     IReadOnlyList<CssSelectorPart>? IsAny = null,
     bool Checkable = true,
     bool PseudoElement = false,
-    CssCombinator Combinator = CssCombinator.None);
+    CssCombinator Combinator = CssCombinator.None,
+    IReadOnlyList<CssNthCondition>? Nth = null);
 
 /// <summary>A selector as written: its compound parts, with the combinators between them.</summary>
 public sealed record CssComplexSelector(string Text, IReadOnlyList<CssSelectorPart> Parts, bool Checkable);

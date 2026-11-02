@@ -645,7 +645,7 @@ instead of letting ILSpy fail inside the metadata.
 
 ## 17. Non-.NET toolchain: Kubernetes, Node and SQL (2026-10-31)
 
-Closes the workaround table of [docs/gaps.md](docs/gaps.md): the "workaround" rows became tools, or a written boundary
+Closes the workaround table that used to live in `docs/gaps.md`: the "workaround" rows became tools, or a written boundary
 with the reason. 355 → **373 tools**.
 
 | Feature | Implemented | Notes |
@@ -662,7 +662,7 @@ with the reason. 355 → **373 tools**.
 | JS dependency health | ✅ | `node_outdated` and `node_audit` normalise the npm, pnpm and yarn 1 shapes (severity, vulnerable range, available fix) |
 | SQL inventory | ✅ | `sql_files` — lines, statements, verbs, tables, findings per file; `bin`/`obj`/`node_modules`/VCS excluded |
 | SQL diagnostics | ✅ | `analyze_sql` — SQL0001–SQL0012 (lexical, correctness, security, performance) with `file:line:column`, source line and fix; comments and literals masked before matching; the DDL the scanned files carry is read into a schema model that checks table and column names (SQL0011/SQL0012, `schema=off` to disable) |
-| Dialectal SQL parser / live schema | ❌ | There is no dialect parser and no live database: the schema is the one the scan reads (`CREATE TABLE`/`ALTER TABLE`), so a table created elsewhere is reported as undeclared, not as invalid (§1.6 of gaps.md) |
+| Dialectal SQL parser / live schema | ❌ | There is no dialect parser and no live database: the schema is the one the scan reads (`CREATE TABLE`/`ALTER TABLE`), so a table created elsewhere is reported as undeclared, not as invalid (the SQL row of the coverage page) |
 
 ---
 
@@ -694,9 +694,9 @@ tail, data flow and the ⚠️ security query. **387 → 397 tools.**
 | Context action: LINQ in both directions | ✅ | `context_action linq_query_to_method` / `linq_method_to_query` — from/where/orderby/select over one source; `join`, `let`, `group` and a second `from` are refused with the reason, because a wrong translation would be worse than none |
 | Context action: StringBuilder, patterns, extension block | ✅ | `concat_to_stringbuilder` (declaration, appends and reads rewritten together), `merge_patterns` (`x is A \|\| x is B` → `x is A or B`, and the `&&`/`and` form), `convert_to_extension_block` (a static class of `this` methods becomes a C# 14 `extension(T receiver)` block) |
 | Create from usage: the constructor | ✅ | `create_from_usage` — CS1729 adds the missing constructor with the argument types of the `new` expression |
-| JavaScript / TypeScript source | ✅ | `js_files` (imports, exports, functions, classes, JSX, every specifier resolved — a relative path, the nearest `tsconfig.json` `baseUrl`/`paths` or a `node_modules` package — into a module graph with its cycles) and `analyze_js` (JS0001–JS0017) over masked source |
-| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates, distinct classes, selectors) and `analyze_markup` (HTML0001–HTML0015, CSS0001–CSS0010) with a quote-aware tag scanner; a selector resolves against the page index — compound parts with tag, classes, id, attribute conditions and structural pseudo-classes, joined by descendant/child/sibling combinators (CSS0009, HTML0015). A selector with a dynamic pseudo-class is indexed but never reported; CSS0010 resolves specificity and source order for a declaration overridden on every element it matches (equal specificity across two files is unknown) |
-| YAML | ✅ | `yaml_files` (documents, top-level keys, `kind`/`apiVersion`/`metadata.name`) and `analyze_yaml` (YAML0001–YAML0012, including the manifest identity and container checks) |
+| JavaScript / TypeScript source | ✅ | `js_files` (imports, exports, functions, classes, JSX, every specifier resolved — a relative path, the nearest `tsconfig.json` `baseUrl`/`paths` or a `node_modules` package — into a module graph with its cycles) and `analyze_js` (JS0001–JS0018; JS0018 reports each import cycle — the strongly connected groups `js_files` found — as a finding at the import that reaches into it) over masked source |
+| HTML / CSS | ✅ | `markup_files` (elements, ids, duplicates, distinct classes, selectors) and `analyze_markup` (HTML0001–HTML0016, CSS0001–CSS0010) with a quote-aware tag scanner; a selector resolves against the page index — compound parts with tag, classes, id, attribute conditions, structural pseudo-classes including the `:nth-child()`/`:nth-last-child()`/`:nth-of-type()`/`:nth-last-of-type()` formulas, joined by descendant/child/sibling combinators (CSS0009, HTML0015). A selector with a dynamic pseudo-class is indexed but never reported; CSS0010 resolves specificity and source order for a declaration overridden on every element it matches (equal specificity across two files is unknown) |
+| YAML | ✅ | `yaml_files` (documents, top-level keys, `kind`/`apiVersion`/`metadata.name`) and `analyze_yaml` (YAML0001–YAML0015, including the manifest identity, the container checks and the workflow/compose structure) |
 | F# | ✅ | `fsharp_files` (modules, types, functions, opens) and `analyze_fsharp` (FS0001–FS0010); no semantic model — the scanner resolves nothing |
 
 What stays a boundary rather than a row: a scanner proves the shape of a line, never a binding, a type
@@ -824,6 +824,25 @@ use list is pruned once the declarations are known.
 
 ---
 
+## 27. The scanned layers: cycles, nth selectors, duplicate attributes and CI/compose (2026-11-02)
+
+No new tool — five rules and a selector family close part of what the language map still calls
+"scanned, not compiled". **429 tools (unchanged).**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| Import cycles as findings | ✅ | `analyze_js` reuses the module graph `js_files` builds (a relative path, a `tsconfig.json` alias, a package in `node_modules`) and reports each strongly connected group as **JS0018**, at the first import (in path and line order) that reaches into it; the message names every module of the cycle and the fix says how to break it. A cycle through a module outside the scan is not seen |
+| `:nth-*` selectors | ✅ | `MarkupAnalyzer` parses the `An+B` formula (`odd`, `even`, `3`, `2n+1`, `-n+3`) of `:nth-child()`, `:nth-last-child()`, `:nth-of-type()` and `:nth-last-of-type()` and evaluates it against the element's 1-based position among its siblings (or among the siblings of its own tag, from either end). CSS0009 and CSS0010 now resolve selectors that used to be "not checkable"; an invalid formula and `:has()` stay uncheckable |
+| Duplicate attributes | ✅ | **HTML0016** reports an attribute written twice on one element, at the occurrence the browser ignores: a duplicate is a parse error and the first value is the one the document has. The attribute tokenizer reads bare attributes too, so `<input disabled>` is recognised |
+| CI and compose structure | ✅ | `analyze_yaml` gains **YAML0013** (a GitHub Actions job with neither `runs-on` nor `uses`), **YAML0014** (a compose service with neither `image` nor `build`) and **YAML0015** (a workflow with jobs but no `on` trigger). The same indentation-aware walk resolves the top-level blocks and the keys one level inside them; a compose service with `extends` or a reusable workflow's `uses` is accepted, and a non-workflow `jobs`/`services` block is left alone unless it looks like one |
+
+Eight tests across the three suites: a cycle reported and an acyclic graph not, the selector parser and
+the sibling-position matcher, the duplicate attribute with a clean control, bare attributes
+(`<input disabled>`, `rel` must really contain `noopener`/`noreferrer`), and the workflow/compose
+checks with their clean controls.
+
+---
+
 ## Summary by Category
 
 
@@ -889,9 +908,11 @@ What remains, in order of impact:
 | Minor refactorings: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Low | ✅ closed on 2026-10-31 (`extract_members_to_partial`, `inline_field`, `transform_parameters`, `extension_to_static`, `invert_boolean`, `make_non_static`, `move_type_to_nested_scope`, `generify`) |
 | Taint analysis and quality trend between commits | 🟢 Low | ✅ closed: `trace_data_flow` (a data-flow engine over locals, parameters, call arguments and fields, with sources, sinks, sanitizers and the path) and `get_quality_trend` (two revisions measured with one syntactic rule set) |
 
-The complete inventory — language by language and area by area, with what exists today, what exactly is
-missing and where the boundary ends — is in **[docs/gaps.md](docs/gaps.md)**. The ✅ picture category by
-category remains in [docs/resharper-codemaid-coverage.md](docs/resharper-codemaid-coverage.md).
+The per-language and per-area boundaries are stated with the feature they qualify — [other languages and
+file kinds](docs/resharper-codemaid-coverage.md#other-languages-and-file-kinds) and the
+[cross-cutting boundaries](docs/resharper-codemaid-coverage.md#cross-cutting-boundaries) — and what is left
+to do is on the board. The ✅ picture category by category is
+[docs/resharper-codemaid-coverage.md](docs/resharper-codemaid-coverage.md).
 
 ## Priority gaps vs SonarQube/CodeScene
 

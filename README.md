@@ -230,7 +230,7 @@ The mechanical CS diagnostics no analyzer ships a fix for:
 
 **429 tools**, grouped by what you are trying to do. Every name is a tool; `docs/tools.md` gives the
 one-line description of each, and `docs/reference/tool-arguments.md` its arguments. Scanners: 28 Razor
-rules, 15 XAML, 17 JS/TS, 15 HTML + 9 CSS, 12 YAML, 12 SQL, 10 F#, 23 Kubernetes manifest checks.
+rules, 15 XAML, 18 JS/TS, 16 HTML + 10 CSS, 15 YAML, 12 SQL, 10 F#, 23 Kubernetes manifest checks.
 
 - **Solution and projects** — `list_solutions`, `load_solution`, `check_solution`, `get_project_info`,
   `add_projects_to_solution`, `remove_projects_from_solution`.
@@ -409,18 +409,46 @@ describes a Ghidra recovery and a Razor page.
 | Debugs and profiles | — | — | **a real debugger and a real profiler** |
 | Edits you can trust | writes whatever the model says | same | **gated, recorded, revertible** |
 
-## The honest bit
+## What each layer proves
 
-C# and Visual Basic get the semantic model; XAML, Razor, SQL, JavaScript/TypeScript, HTML/CSS, YAML
-and F# get a scanner (they are not compilers), each with a rule set that states what it proves — and
-JavaScript/TypeScript and F# also get a **lexical** symbol table (`js_symbols`, `fsharp_symbols`: names,
-the declaration a name resolves to, its references, no type model); the Node, Docker and Kubernetes
-toolchains are wrapped rather than reimplemented, with an offline manifest validator (`k8s_validate`).
-HTML and CSS are scanned, not rendered, and F# has no semantic model — on purpose, and stated with the
-other boundaries in the [gap inventory](docs/gaps.md). Everything is static analysis or process
-instrumentation: no tool proves a change preserves behaviour, and none replaces your test suite.
-And it runs on your machine, locally — no hosted service, no account, no daemon. Your code leaves the
-box only in the conversation your client already sends to its model provider.
+**What is compiled.** C# and Visual Basic are read through Roslyn's semantic model, so overloads, generics,
+interface dispatch and references resolve the way the compiler resolves them. Visual Basic gets that model
+too; the only refactorings it refuses are the three constructs it cannot express (records, primary
+constructors, nullable reference types).
+
+**What is not compiled.** XAML, Razor, SQL, JavaScript/TypeScript, HTML/CSS, YAML and F# are read as markup
+or as patterns, not compiled. Razor and XAML have their own markup scanners; a XAML binding path is resolved
+against the data type the markup names and comes back `not-checked` when no type can be named. SQL,
+JavaScript/TypeScript, HTML/CSS, YAML and F# run numbered rule sets over source whose comments and literals
+are masked first (`analyze_sql`, `analyze_js`, `analyze_markup`, `analyze_yaml`, `analyze_fsharp`).
+JavaScript/TypeScript reports an import cycle as `JS0018`, and the CSS selector engine resolves the
+structural `:nth-child()`/`:nth-of-type()` families against the page index. HTML and CSS are scanned,
+never rendered. No scanner type-checks an expression, and a green run means no rule matched, not that
+the code is correct.
+
+**What is lexical.** JavaScript/TypeScript and F# also get a lexical symbol table (`js_symbols`,
+`fsharp_symbols`): the declaration a name resolves to, and its references, with no type model behind it. A
+member reached through an untyped object, a computed name or `eval` is not resolved. The project's own `tsc`
+and `eslint` remain the authority on types and lint (`node_typecheck`, `node_lint`); F# is not a Roslyn
+language, so the compiler's own FS#### diagnostics come back through `build_project`.
+
+**What is wrapped.** Node, Docker and Kubernetes are not reimplemented: `node_*` runs the project's
+npm/pnpm/yarn, `k8s_*` runs `kubectl` and `helm`, `docker_*` runs the engine, and a missing client is
+reported rather than installed. The Kubernetes check this server performs itself is `k8s_validate`, an
+offline manifest validator over the built-in kinds (K8S001–K8S023): it proves the manifest's shape, not that
+a cluster will accept it.
+
+**What no result proves.** Everything here is static analysis or process instrumentation. The compiler gate
+proves compilation, never behaviour. A sampled stack is statistical, a decompiled body is a reconstruction,
+a scanner reports shapes. `verify_change` measures behaviour by running your suite on both sides and diffing
+the outcome test by test; code the suite does not cover comes back `unverified`, not safe. Nothing replaces
+your test suite. Every boundary, per language and per area, is in the [coverage page's cross-cutting
+table](docs/resharper-codemaid-coverage.md#cross-cutting-boundaries) and
+[requirements and guarantees](docs/reference/limits.md).
+
+**Where it runs.** On your machine, in one local process: no hosted service, no account, no daemon. Your code
+leaves the box only in the conversation your client already sends to its model provider, the same place every
+tool result goes. The exact statement is [How it works](docs/how-it-works.md#privacy).
 
 ## Documentation, by what you need
 
@@ -437,7 +465,7 @@ box only in the conversation your client already sends to its model provider.
 | profile a live process | [Profiling](docs/guides/profiling.md) |
 | use `run_plan`, planning, Git, GitHub, Docker | [Workflow and integrations](docs/guides/workflow.md) |
 | configure ports, paths and environment variables | [Configuration reference](docs/reference/configuration.md) |
-| know what it does **not** do | [The gap inventory](docs/gaps.md) and [requirements/guarantees](docs/reference/limits.md) |
+| know what it does **not** do | [Cross-cutting boundaries](docs/resharper-codemaid-coverage.md#cross-cutting-boundaries) and [requirements/guarantees](docs/reference/limits.md) |
 | see the ReSharper/CodeMaid coverage, row by row | [Coverage](docs/resharper-codemaid-coverage.md) |
 | troubleshoot | [Help and FAQ](docs/help.md) |
 | contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |

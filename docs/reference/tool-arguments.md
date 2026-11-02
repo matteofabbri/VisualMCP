@@ -122,7 +122,7 @@ and branch rates per class and per method.
 The debug tools drive a real netcoredbg session over the Debug Adapter Protocol. A session id comes
 from `debug_launch` or `debug_attach` and stays valid across calls; `debug_sessions` lists the live
 ones. The engine notes — what the adapter cannot do and what stands in — are in
-[gaps §2](../gaps.md#2-debugger).
+[the debugger section](../resharper-codemaid-coverage.md#debugger).
 
 ```
 debug_launch(program?, projectName?, programArgs?, workingDirectory?, environmentJson?,
@@ -820,11 +820,13 @@ js_files(path?, maxFiles=500)
                   build/out/coverage/.next are skipped
 
 analyze_js(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
-                → JS0001-JS0017 over masked source (comments, strings and
+                → JS0001-JS0018 over masked source (comments, strings and
                   template literals blanked first); JS0015 (any) fires only for
                   .ts/.tsx/.mts/.cts; JS0017 is a relative import that names no
                   file (a package specifier is not a defect here; js_files and
-                  js_symbols resolve those). Unknown rule ids return the catalogue.
+                  js_symbols resolve those); JS0018 is an import cycle among the
+                  scanned modules, reported at the import that reaches into the
+                  strongly connected group. Unknown rule ids return the catalogue.
 
 js_symbols(action=find|outline|refs|unused|rename, name?, file?, path?, partial=false,
            maxResults=200, newName?, dryRun=true)
@@ -853,20 +855,27 @@ markup_files(path?, kind=both, maxFiles=500)
 
 analyze_markup(path?, kind=both, minSeverity=info, rule?, maxFiles=500,
                maxFindings=200)
-                → HTML0001-HTML0014 and CSS0001-CSS0008; tags are read with a
+                → HTML0001-HTML0016 and CSS0001-CSS0010; tags are read with a
                   quote-aware scanner, script/style bodies are not parsed as
-                  markup; no DOM and no selector resolution
+                  markup; a selector resolves against the page index (compound
+                  parts, attribute conditions, structural pseudo-classes
+                  including :nth-child()/:nth-of-type(), descendant/child/
+                  sibling combinators), CSS0010 resolves specificity and source
+                  order, and there is no DOM and no rendering
 
 yaml_files(path?, maxFiles=500)
                 → per file: lines, documents, top-level keys, and for a
                   Kubernetes manifest kind / apiVersion / metadata name
 
 analyze_yaml(path?, minSeverity=info, rule?, maxFiles=500, maxFindings=200)
-                → YAML0001-YAML0012; block scalars, comments and quoted values
+                → YAML0001-YAML0015; block scalars, comments and quoted values
                   are honoured, so their content does not fire a rule. On a
                   Kubernetes manifest: kind without apiVersion or the reverse,
                   metadata with no name, a container with no image, two
-                  containers with the same name (no schema is fetched).
+                  containers with the same name. On a GitHub Actions workflow or
+                  a compose file: a job with neither runs-on nor uses, a service
+                  with neither image nor build, a workflow with jobs but no on
+                  trigger (structural checks; no schema is fetched).
 
 fsharp_files(path?, maxFiles=500)
                 → per file: lines, modules and namespaces, types, top-level

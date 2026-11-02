@@ -237,6 +237,35 @@ public sealed class MarkupAnalyzerTests
     }
 
     [Fact]
+    public void AnAttributeWrittenTwiceIsFlagged()
+    {
+        var analysis = MarkupAnalyzer.AnalyzeHtml(
+            """<div class="a" id="x" class="b" hidden hidden></div>""", "probe.html");
+
+        var findings = analysis.Findings.Where(finding => finding.RuleId == "HTML0016").ToList();
+        Assert.Equal(2, findings.Count);
+        Assert.Contains(findings, finding => finding.Message.Contains("'class'"));
+        Assert.Contains(findings, finding => finding.Message.Contains("'hidden'"));
+        Assert.All(findings, finding => Assert.Equal(1, finding.Line));
+
+        var clean = MarkupAnalyzer.AnalyzeHtml("""<div class="a" hidden></div>""", "probe.html");
+        Assert.DoesNotContain(clean.Findings, finding => finding.RuleId == "HTML0016");
+    }
+
+    [Fact]
+    public void BareAttributesAreReadAsPresentWithAnEmptyValue()
+    {
+        var disabled = MarkupAnalyzer.AnalyzeHtml("""<input disabled>""", "probe.html");
+        Assert.DoesNotContain(disabled.Findings, finding => finding.RuleId == "HTML0012");
+
+        var rel = MarkupAnalyzer.AnalyzeHtml("""<a href="/x" target="_blank" rel>link</a>""", "probe.html");
+        Assert.Contains(rel.Findings, finding => finding.RuleId == "HTML0009");
+
+        var button = MarkupAnalyzer.AnalyzeHtml("""<button type>Go</button>""", "probe.html");
+        Assert.Contains(button.Findings, finding => finding.RuleId == "HTML0011");
+    }
+
+    [Fact]
     public void SelectorsAreIndexedWithTheirCombinatorsAttributesAndPseudoClasses()
     {
         var analysis = MarkupAnalyzer.AnalyzeCss("""
@@ -247,6 +276,10 @@ public sealed class MarkupAnalyzerTests
             .a:hover { color: grey; }
             [data-x] { color: white; }
             ul > li:first-child { color: pink; }
+            ul > li:nth-child(2n+1) { color: olive; }
+            p:nth-of-type(2) { color: navy; }
+            .a:nth-child(foo) { color: silver; }
+            .a:has(.b) { color: lime; }
             """, "probe.css");
 
         var byText = analysis.Selectors!.ToDictionary(selector => selector.Text);
@@ -256,6 +289,16 @@ public sealed class MarkupAnalyzerTests
         Assert.Equal(CssCombinator.Descendant, byText[".a .b"].Complex!.Parts[1].Combinator);
         Assert.Equal(CssCombinator.Child, byText["ul > li:first-child"].Complex!.Parts[1].Combinator);
         Assert.Equal("first-child", byText["ul > li:first-child"].Complex!.Parts[1].PseudoClasses!.Single());
+
+        // An nth formula is decidable against the page index; an invalid one and :has() are not.
+        var nth = byText["ul > li:nth-child(2n+1)"].Complex!.Parts[1].Nth!.Single();
+        Assert.True(byText["ul > li:nth-child(2n+1)"].Checkable);
+        Assert.Equal("nth-child", nth.Name);
+        Assert.Equal(2, nth.Step);
+        Assert.Equal(1, nth.Offset);
+        Assert.True(byText["p:nth-of-type(2)"].Checkable);
+        Assert.False(byText[".a:nth-child(foo)"].Checkable);
+        Assert.False(byText[".a:has(.b)"].Checkable);
 
         // A dynamic state only a browser can decide: indexed (for its classes) but never reported.
         Assert.False(byText[".a:hover"].Checkable);
@@ -334,6 +377,44 @@ public sealed class MarkupAnalyzerTests
 
         // A selector with a state only the browser knows is never reported as unmatched.
         Assert.DoesNotContain(".menu:hover", snippets);
+    }
+
+    [Fact]
+    public async Task NthFormulasResolveAgainstSiblingPositionAndTag()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new MarkupService(workspace);
+        var root = workspace.RootDirectory;
+
+        await File.WriteAllTextAsync(Path.Combine(root, "index.html"),
+            """<ul class="menu"><li class="one">1</li><p class="mid">x</p><li class="two">2</li></ul>""");
+        await File.WriteAllTextAsync(Path.Combine(root, "site.css"), """
+            li:nth-child(3) { color: red; }
+            li:nth-child(odd) { color: blue; }
+            li:nth-of-type(2) { color: green; }
+            li:nth-last-of-type(1) { color: black; }
+            li:nth-child(2) { color: white; }
+            li:nth-child(even) { color: grey; }
+            li:nth-last-child(2) { color: pink; }
+            li:nth-of-type(4) { color: teal; }
+            """);
+
+        var json = ResultAssert.Json(await service.AnalyzeAsync(root, "both", "info", "CSS0009", 100, 100));
+        var snippets = json.GetProperty("findings").EnumerateArray()
+            .Select(finding => finding.GetProperty("Snippet").GetString())
+            .ToList();
+
+        // The second li is the third child, the second of its tag, and the last of its tag.
+        Assert.DoesNotContain("li:nth-child(3)", snippets);
+        Assert.DoesNotContain("li:nth-of-type(2)", snippets);
+        Assert.DoesNotContain("li:nth-last-of-type(1)", snippets);
+        Assert.DoesNotContain("li:nth-child(odd)", snippets);
+
+        // Position 2 is the p, from either end, and there is no fourth li.
+        Assert.Contains("li:nth-child(2)", snippets);
+        Assert.Contains("li:nth-child(even)", snippets);
+        Assert.Contains("li:nth-last-child(2)", snippets);
+        Assert.Contains("li:nth-of-type(4)", snippets);
     }
 
     [Fact]
