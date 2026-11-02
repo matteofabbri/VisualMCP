@@ -197,21 +197,21 @@ async/performance, complexity, metrics, clones, Big-O), the refactorings that ar
 `context_action` (33 of its 41 ids
 have a VB spelling; the C#-only ones are refused with the reason), `simplify_vb_code` (41 ids) and the
 language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only is named in the
-[Visual Basic row of the language map](gaps.md#1-language-and-platform-scope).
+[refactoring coverage](resharper-codemaid-coverage.md#refactorings).
 Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
 Core migrations run through `ef_migrations`. SQL has a scanned layer (`sql_files`, `analyze_sql` with
-SQL0001–SQL0012), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0017 — masked
+SQL0001–SQL0012), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0018 — masked
 source, specifiers resolved through relative paths, tsconfig `baseUrl`/`paths` and `node_modules` into a
-module graph with its cycles, no type model), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
+module graph with its cycles, reported as JS0018, no type model), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
 (`yaml_files`, `analyze_yaml`, which also reads a Kubernetes manifest's identity and applies
-YAML0009–YAML0012 to it) and F# another
+YAML0009–YAML0012 to it, and checks the structure of a GitHub Actions workflow or a compose file) and F# another
 (`fsharp_files`, `analyze_fsharp`, the declaration index F# has no symbol tool for; the compiler's own
 diagnostics still come through `build_project`). The JavaScript/TypeScript toolchain also runs through
 the project's own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and
 `node_typecheck`/`node_lint` interpret `tsc` and `eslint`; Kubernetes and Helm go through `k8s_*`.
 None of these layers replaces a compiler: a scanner proves the shape of a line, never a binding, a type
-or a schema. The full table is [the language map](gaps.md#1-language-and-platform-scope). C#,
+or a schema. The full table is [other languages and file kinds](resharper-codemaid-coverage.md#other-languages-and-file-kinds). C#,
 Razor, decompiled assemblies and Ghidra snapshots are all inputs to metacode.
 
 **Do I need Visual Studio?**

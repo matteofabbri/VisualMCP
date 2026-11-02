@@ -58,7 +58,7 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 javascriptRules = new
                 {
                     count = Snitch.Languages.JavaScript.JavaScriptAnalyzer.Rules.Count,
-                    range = "JS0001-JS0017",
+                    range = "JS0001-JS0018",
                 },
                 markupRules = new
                 {
@@ -68,7 +68,7 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 yamlRules = new
                 {
                     count = Snitch.Languages.Yaml.YamlAnalyzer.Rules.Count,
-                    range = "YAML0001-YAML0012",
+                    range = "YAML0001-YAML0015",
                 },
                 fsharpRules = new
                 {
@@ -95,17 +95,17 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 sql = "Snitch.Languages.Sql (SqlAnalyzer: comments/literals masked, statements split, SQL0001-SQL0012; " +
                       "a pattern scanner, not a dialect parser)",
                 javascript = "Snitch.Node (the project's own npm/pnpm/yarn plus tsc and eslint interpreted) + " +
-                             "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0017; " +
+                             "Snitch.Languages.JavaScript (JavaScriptAnalyzer: JS/TS/JSX masked, JS0001-JS0018; " +
                              "a specifier resolved through a relative path, the nearest tsconfig baseUrl/paths or " +
-                             "node_modules into a module graph with its cycles; no type checking)",
+                             "node_modules into a module graph with its cycles, reported as JS0018; no type checking)",
                 markup = "Snitch.Languages.WebMarkup (MarkupAnalyzer: quote-aware HTML tag scanner, " +
                          $"{MarkupRange("HTML")}; CSS/SCSS masked, {MarkupRange("CSS")}; a selector resolves against " +
-                         "the page's element index (tag, classes, id, attribute conditions, structural pseudo-classes, " +
-                         "descendant/child/sibling combinators) and <style> blocks are analysed; a dynamic pseudo-class " +
-                         "is not reported, and a declaration overridden on every element it matches is CSS0010 " +
-                         "(equal specificity across two files is unknown)",
-                yaml = "Snitch.Languages.Yaml (YamlAnalyzer: indentation-aware line scan, YAML0001-YAML0012, manifest " +
-                       "identity and container checks; not a schema validator)",
+                         "the page's element index (tag, classes, id, attribute conditions, structural pseudo-classes " +
+                         "including :nth-child()/:nth-of-type(), descendant/child/sibling combinators) and <style> " +
+                         "blocks are analysed; a dynamic pseudo-class is not reported, and a declaration overridden " +
+                         "on every element it matches is CSS0010 (equal specificity across two files is unknown)",
+                yaml = "Snitch.Languages.Yaml (YamlAnalyzer: indentation-aware line scan, YAML0001-YAML0015, manifest " +
+                       "identity, container checks and workflow/compose structure; not a schema validator)",
                 fsharp = "Snitch.Languages.FSharp (FSharpAnalyzer: masked scan, FS0001-FS0010, declaration inventory). " +
                          "No semantic model: F# is not a Roslyn language; build_project still returns the compiler's FS#### lines",
                 kubernetes = "Snitch.Kubernetes (kubectl/helm wrappers: status, context, get/describe/logs, kustomize " +

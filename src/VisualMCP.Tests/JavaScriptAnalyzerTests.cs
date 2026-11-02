@@ -155,6 +155,43 @@ public sealed class JavaScriptAnalyzerTests
     }
 
     [Fact]
+    public async Task AnalyzeReportsAnImportCycleAsJS0018()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new JavaScriptService(workspace);
+
+        var root = workspace.RootDirectory;
+        Directory.CreateDirectory(Path.Combine(root, "src"));
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "a.ts"), "import { b } from './b';\n");
+        await File.WriteAllTextAsync(Path.Combine(root, "src", "b.ts"), "import { a } from './a';\n");
+
+        var analysis = ResultAssert.Json(await service.AnalyzeAsync(root, "info", "JS0018", 100, 100));
+
+        Assert.Equal(1, analysis.GetProperty("findingCount").GetInt32());
+        var finding = analysis.GetProperty("findings")[0];
+        Assert.Equal("JS0018", finding.GetProperty("RuleId").GetString());
+        Assert.Equal("src/a.ts", finding.GetProperty("File").GetString());
+        Assert.Equal(1, finding.GetProperty("Line").GetInt32());
+        Assert.Contains("src/a.ts", finding.GetProperty("Message").GetString());
+        Assert.Contains("src/b.ts", finding.GetProperty("Message").GetString());
+    }
+
+    [Fact]
+    public async Task AnalyzeDoesNotReportACycleForAnAcyclicGraph()
+    {
+        using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));
+        var service = new JavaScriptService(workspace);
+
+        var root = workspace.RootDirectory;
+        await File.WriteAllTextAsync(Path.Combine(root, "a.js"), "import { b } from './b.js';\n");
+        await File.WriteAllTextAsync(Path.Combine(root, "b.js"), "export const b = 1;\n");
+
+        var analysis = ResultAssert.Json(await service.AnalyzeAsync(root, "info", "JS0018", 100, 100));
+
+        Assert.Equal(0, analysis.GetProperty("findingCount").GetInt32());
+    }
+
+    [Fact]
     public async Task TheInventoryBuildsTheModuleGraphAndReportsImportCycles()
     {
         using var workspace = FakeWorkspace.Create(("Probe.cs", "class C { }"));

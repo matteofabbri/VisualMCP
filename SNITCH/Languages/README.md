@@ -40,7 +40,7 @@ counts; this page is the map of the folders.
 
 A rule is only real when it is both catalogued and applicable: `docs/engine-state.md` lists the
 IDE rules that are rewritten and why the others are not, `CAPABILITY_MAP.md` has the
-rule-by-rule table, and `docs/gaps.md` is the honest list of what is missing.
+rule-by-rule table, and the coverage page states what each layer proves and where it stops.
 
 ## Adding a language
 
