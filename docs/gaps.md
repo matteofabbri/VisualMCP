@@ -13,7 +13,7 @@ statements, not a second backlog, and it has no revision log of its own.
 | the decompiled-code surface | [Decompilation & profiling](resharper-codemaid-coverage.md#decompilation--profiling) |
 | the project kinds (WinForms, WPF/MAUI, gRPC, SignalR, Unity, legacy SDK) | [Project kinds](resharper-codemaid-coverage.md#project-kinds) |
 | requirements, what a result proves and the scope of the product | [Requirements and guarantees](reference/limits.md) |
-| the history of the batches | [the coverage revision log](resharper-codemaid-coverage.md#revision-log) and [CAPABILITY_MAP](../CAPABILITY_MAP.md) |
+| the history of the batches | [CAPABILITY_MAP](../CAPABILITY_MAP.md) — each batch is a section next to the features it added |
 
 What is left to do is tracked on the board (`board_brief`), which is the source of truth; this page is not
 a backlog.

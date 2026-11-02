@@ -9,7 +9,7 @@ a tool call.
 **429 tools.** Of the codes it fixes automatically: **97 of the 126 Visual Studio code-style ids** (plus
 **41 for Visual Basic**), **8 compiler diagnostics**, **19 ReSharper inspections** (16 with a code fix),
 **~800 analyzer inspection ids** from five packs (each with its own fix where the analyzer ships one),
-**54 context actions** and **60+ refactorings**. Every write is a Roslyn operation, compiler-gated,
+**75 context actions** and **60+ refactorings**. Every write is a Roslyn operation, compiler-gated,
 recorded in the solution's edit history and revertible.
 
 ## Start in two minutes
@@ -188,15 +188,18 @@ diagnostic or a construct VB defines instead — and each is named with its reas
   `RedundantStringInterpolation`, `ReplaceSequenceEqualWithConstantPattern`,
   `ReplaceWithStringIsNullOrEmpty`, `StringLiteralAsInterpolationArgument`, `UseNameofExpression`.
   16 of them ship a code fix for `apply_code_fix`.
-- **54 context actions** applied by `context_action`: type import; eight argument guards (null, all
-  parameters, string not null/empty, collection, variable, dictionary key, enum value, index range);
-  four wrap actions (try/catch, try/finally, if, using) plus `#region`; the statement and declaration
-  shapes (braces, foreach↔for, if→switch, split/join/merge checks, remove argument name, `var`/explicit
-  type, split declaration, invert loop, extension block in both directions); the string conversions (raw,
-  verbatim, regular, concatenation↔interpolation, split/join literals, `''`↔`string.Empty`); digit
-  separators; nullable migration; `ConfigureAwait(false)`; `StringBuilder`; pattern merging; LINQ in both
-  directions; static member import/qualify/unqualify; a file header; a property over a backing field;
-  block↔expression body. Visual Basic implements the 33 ids that have a VB spelling.
+- **75 context actions** applied by `context_action`: type import; eight argument guards (null, all
+  parameters, string not null/empty, string not null/whitespace, collection, variable, dictionary key,
+  enum value, index range); four wrap actions (try/catch, try/finally, if, using) plus `#region`; the
+  statement and declaration shapes (braces, foreach↔for, if→switch, split/join/merge checks, remove
+  argument name, `var`/explicit type, split declaration, invert loop, extension block in both directions);
+  the string conversions (raw, verbatim, regular, concatenation↔interpolation, split/join literals,
+  `''`↔`string.Empty`); digit separators; nullable migration; `ConfigureAwait(false)`; `StringBuilder`;
+  pattern merging; LINQ in both directions; static member import/qualify/unqualify; a file header; a
+  property over a backing field; block↔expression body; and the census tail (argument/tuple names,
+  switch-section braces, literal bases, target-typed/explicit `new`, `default`, relational flip, ternary
+  inversion, if-to-ternary, `<inheritdoc/>` and exception docs, region removal, `Environment.NewLine`,
+  `params` on/off, `await foreach`). Visual Basic implements the 33 ids that have a VB spelling.
 - **~800 inspection ids** from five analyzer packs — Roslynator (RCS), the .NET analyzers (CA),
   AsyncFixer (ASYNC), Meziantou (MA) and StyleCop (SA) — reported by `inspect_code`, fixed by
   `apply_code_fix` where the analyzer ships a `CodeFixProvider`, with `inspection_baseline` to show only

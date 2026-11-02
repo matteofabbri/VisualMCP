@@ -22,20 +22,15 @@ a context action is the Alt+Enter menu on a code construct. Our coverage of the 
   not applicable to C#, or not a rewrite.
 - The refactoring-shaped ones are the Refactoring tools (~38 of Rider's ~46 main refactorings).
 - The analyzer-shaped ones are `apply_code_fix`, which runs the CodeFixProvider of the bundled packs.
-- **The 14 rows marked below are `context_action`** (13 action ids: two ReSharper names share a raw-string
-  conversion, and two share `wrap_in_using`), added because none of the three reached them.
-
-Two of the 13 have no ReSharper *context action* behind them — `wrap_in_try_catch` and `wrap_in_if` mirror the
-"Surround with" templates — so counting them here would be wrong. The 14 marked rows are the honest overlap
-with the table below.
-
-The **41 ids** `context_action` implements today are more than that first tranche: the guards, the wrap
-actions, the statement and declaration shapes, nullable migration, the string conversions, LINQ in both
-directions, StringBuilder, pattern merging and the C# 14 extension block. The census rows carry a status
-only where the row maps one-to-one onto an id; a family that several ids cover is marked on its cluster.
+- **`context_action` implements 75 ids** — the guards, the wrap actions, the statement and declaration
+  shapes, nullable migration, the string conversions, LINQ in both directions, StringBuilder, pattern
+  merging, the C# 14 extension block, and the 21 census-tail ids added on 2026-11-02. A ReSharper name whose
+  normalized form already is an id (`AddBracesAction` → `add_braces`) reaches it directly; 36 more names are
+  aliases, and the table below marks them. A blank row is not a claim of absence: it is an action reached by
+  `simplify_code`, a refactoring tool, an inspection fix, or one of the families below.
 
 **Visual Basic** (closed 2026-10-31): `context_action` routes a `.vb` document to
-`VbContextActionService`, which implements **33 of the 41 ids** — every one that has a VB spelling. The
+`VbContextActionService`, which implements **33 of the ids** — every one that has a VB spelling. The
 engine is a set of text edits over VB syntax under the same compiler gate, preview and edit history:
 the argument guards (`If x Is Nothing Then Throw New ArgumentNullException(NameOf(x))`, `String.IsNullOrEmpty`,
 `Count = 0`, `ContainsKey`, `[Enum].IsDefined`, the index bound), `Try`/`Catch`/`Finally`, `If`, `Using`
@@ -57,15 +52,15 @@ refactoring tool or an inspection fix. These are the clusters that are **not**, 
 | if → switch expression | `IfToSwitchExpressionAction` | the statement form is `context_action if_to_switch`; the expression form is the IDE0066 rewrite, still absent |
 | pattern merging | `MergeSequentialChecksAction`, `MergeIntoPatternAction`, `JoinNullCheckWithUsageAction` | ✅ `merge_sequential_checks`, `merge_patterns` (`x is A \|\| x is B` → `x is A or B`) and `join_null_check_with_usage` |
 | LINQ shape | `QueryToExtensionMethodAction`, `FromLinqContextAction` | ✅ `linq_query_to_method` / `linq_method_to_query` over from/where/orderby/select; `join`, `let`, `group` and a second `from` are refused |
-| loops | `ForeachToForAction`, `IterateViaForeachAction`, `IterateViaAwaitForeachAction` | `foreach_to_for`/`for_to_foreach` and `invert_loop` cover the first two; `await foreach` conversion is absent |
+| loops | `ForeachToForAction`, `IterateViaForeachAction`, `IterateViaAwaitForeachAction` | ✅ `foreach_to_for`/`for_to_foreach` cover the first two and `await_foreach` covers the third; `invert_loop` is the separate descending conversion |
 | string composition | `ConvertConcatenationToInterpolationAction`, `InterpolationToStringConcatAction`, `UseStringInterpolationAction`, the `PassStringFormat*` family | `concat_to_interpolated`/`interpolated_to_concat` cover the first two; the format family is absent |
 | modifiers in bulk | `ChangeModifierAction` (visibility, `static`, `readonly`, `const`), `ChangeSetterKindAction`, `ChangeTypeKindAction` | one edit per modifier; the refactoring tools cover the single cases, not the menu |
 | C# 14 extension blocks | `ConsolidateExtensionMembersAction`, `ConvertExtensionBlockToClassicExtensionMethodsAction` | ✅ `convert_to_extension_block` converts the classic form; consolidating existing blocks and the reverse conversion are absent |
 | nullable migration | `MigrateToNullableEnableAction`, `AnnotateNullableAction`, `MarkNullableAction`, `AnnotateDataMembersAction` | `migrate_to_nullable` enables the context; the per-member annotations and their flow analysis are absent |
-| XML doc generation | `AddInheritdocAction`, `AddExceptionDocCommentAction`, `CopyDocumentationAction` | `generate_docs` writes fresh docs, it does not derive them from a base |
-| index/value checks | `CheckArrayIndexValueAction`, `CheckDictionaryKeyValueAction`, `CheckSpanIndexValueAction`, `NumericParameterCheckRangeAction` | `check_index_range`, `check_dictionary_key` and the numeric guards cover the first two; the span and range forms are absent |
+| XML doc generation | `AddInheritdocAction`, `AddExceptionDocCommentAction`, `CopyDocumentationAction` | ✅ `add_inheritdoc` and `add_exception_docs`; `CopyDocumentationAction` is still absent, because it needs the base member's documentation text |
+| index/value checks | `CheckArrayIndexValueAction`, `CheckDictionaryKeyValueAction`, `CheckSpanIndexValueAction`, `NumericParameterCheckRangeAction` | ✅ `check_index_range`, `check_dictionary_key` and `check_span_index`; `NumericParameterCheckRangeAction` is still absent |
 | StringBuilder rewriting | the 5 `StringBuilderRewriting` actions | ✅ `concat_to_stringbuilder`; the Append-chain rewrites the family also holds are absent |
-| ternary/guard shapes | `IfToTernaryAction`, `IfToGuardClauseAction`, `InvertTernaryConditionAction` | the IDE0045/0046 rewrites exist; the *statement* forms do not |
+| ternary/guard shapes | `IfToTernaryAction`, `IfToGuardClauseAction`, `InvertTernaryConditionAction` | ✅ `if_to_ternary` and `invert_ternary_condition`; `IfToGuardClauseAction` is still absent, because the tail branch has to be proven to be a tail |
 
 ## The 307 context actions
 
@@ -77,21 +72,21 @@ families above are the places to look before assuming the latter.
 | ReSharper action | Status |
 |---|---|
 | `AddAnonymousFieldNameAction` |  |
-| `AddArgumentNameContextAction` |  |
-| `AddBracesAction` |  |
+| `AddArgumentNameContextAction` | ✅ `context_action` → `add_argument_name` |
+| `AddBracesAction` | ✅ `context_action` → `add_braces` |
 | `AddDeconstructionPatternComponentNameAction` |  |
-| `AddExceptionDocCommentAction` |  |
+| `AddExceptionDocCommentAction` | ✅ `context_action` → `add_exception_docs` |
 | `AddFormatItemAction` |  |
-| `AddInheritdocAction` |  |
+| `AddInheritdocAction` | ✅ `context_action` → `add_inheritdoc` |
 | `AddPatternVariableAction` |  |
 | `AddSecondAccessorAction` |  |
 | `AddStringInterpolationArgumentAction` |  |
 | `AddSwitchConditionComponentAction` |  |
-| `AddSwitchSectionBracesAction` |  |
-| `AddTupleComponentNameAction` |  |
+| `AddSwitchSectionBracesAction` | ✅ `context_action` → `add_switch_section_braces` |
+| `AddTupleComponentNameAction` | ✅ `context_action` → `add_tuple_component_name` |
 | `AddUsingDeclarationAction` |  |
 | `AllStringParameterIsNotNullOrEmptyCheckAction` | ✅ `context_action` → `check_string_not_null_or_empty` |
-| `AllStringParameterIsNotNullOrWhitespaceCheckAction` |  |
+| `AllStringParameterIsNotNullOrWhitespaceCheckAction` | ✅ `context_action` → `check_string_not_null_or_whitespace` |
 | `AnnotateDataMembersAction` |  |
 | `AnnotateEnumMembersAction` |  |
 | `AnnotateHighlightingTypesAction` |  |
@@ -106,13 +101,13 @@ families above are the places to look before assuming the latter.
 | `AutoAccessorToExplicitAction` |  |
 | `AutoPropertyToBackingFieldAction` |  |
 | `AutoPropertyToFieldKeywordAction` |  |
-| `BodyExpressionToStatementAction` |  |
-| `BodyStatementToExpressionAction` |  |
+| `BodyExpressionToStatementAction` | ✅ `context_action` → `expression_body_to_block` |
+| `BodyStatementToExpressionAction` | ✅ `context_action` → `block_body_to_expression` |
 | `CSharpInitializeAutoPropertyAction` |  |
 | `CSharpInitializeFieldAction` |  |
 | `CSharpInitializeNonPrivateFieldAction` |  |
-| `CSharpUseEmptyStringLiteralAction` |  |
-| `CSharpUseStringEmptyAction` |  |
+| `CSharpUseEmptyStringLiteralAction` | ✅ `context_action` → `empty_string_to_string_empty` |
+| `CSharpUseStringEmptyAction` | ✅ `context_action` → `string_empty_to_empty_string` |
 | `CSharpXmlDocContextActionDataBuilder` |  |
 | `CSharpXmlDocContextActionDataProvider` |  |
 | `CaptureEntityNameFromStringLiteralAction` |  |
@@ -123,12 +118,12 @@ families above are the places to look before assuming the latter.
 | `ChangeSignatureAction` |  |
 | `ChangeTypeKindAction` |  |
 | `CheckAllParamsNullAction` | ✅ `context_action` → `check_all_params_null` |
-| `CheckArrayIndexValueAction` |  |
+| `CheckArrayIndexValueAction` | ✅ `context_action` → `check_index_range` |
 | `CheckCollectionIndexValueAction` |  |
-| `CheckDictionaryKeyValueAction` |  |
+| `CheckDictionaryKeyValueAction` | ✅ `context_action` → `check_dictionary_key` |
 | `CheckParamNullAction` | ✅ `context_action` → `check_param_null` |
 | `CheckReferenceNullAction` |  |
-| `CheckSpanIndexValueAction` |  |
+| `CheckSpanIndexValueAction` | ✅ `context_action` → `check_span_index` |
 | `CheckStringBuilderIndexValueAction` |  |
 | `CheckStringIndexValueAction` |  |
 | `CheckVariableNullAction` | ✅ `context_action` → `check_variable_null` |
@@ -142,12 +137,12 @@ families above are the places to look before assuming the latter.
 | `ConditionalExpressionToAccessAction` |  |
 | `ConditionalToNormalAccessAction` |  |
 | `ConsolidateExtensionMembersAction` |  |
-| `ConvertConcatenationToInterpolationAction` |  |
+| `ConvertConcatenationToInterpolationAction` | ✅ `context_action` → `concat_to_interpolated` |
 | `ConvertExtensionBlockToClassicExtensionMethodsAction` |  |
 | `ConvertForEachCallToStatementAction` |  |
-| `ConvertLiteralToBinAction` |  |
-| `ConvertLiteralToDecAction` |  |
-| `ConvertLiteralToHexAction` |  |
+| `ConvertLiteralToBinAction` | ✅ `context_action` → `convert_literal_to_binary` |
+| `ConvertLiteralToDecAction` | ✅ `context_action` → `convert_literal_to_decimal` |
+| `ConvertLiteralToHexAction` | ✅ `context_action` → `convert_literal_to_hex` |
 | `ConvertRegularStringInterpolationToVerbatimAction` |  |
 | `ConvertRegularStringToVerbatimAction` | ✅ `context_action` → `string_to_verbatim` |
 | `ConvertRegularToRawInterpolatedStringAction` |  |
@@ -158,7 +153,7 @@ families above are the places to look before assuming the latter.
 | `ConvertToBlockScopedNamespaceAction` |  |
 | `ConvertToClassicExtensionMethodAction` |  |
 | `ConvertToCollectionInitializerAction` |  |
-| `ConvertToDefaultExpressionAction` |  |
+| `ConvertToDefaultExpressionAction` | ✅ `context_action` → `convert_to_default_expression` |
 | `ConvertToExtensionBlockAction` |  |
 | `ConvertToFileScopedNamespaceAction` |  |
 | `ConvertToGlobalUsingAction` |  |
@@ -183,7 +178,7 @@ families above are the places to look before assuming the latter.
 | `DisableImplicitUsingsAction` |  |
 | `EnableImplicitUsingsAction` |  |
 | `EncapsulateLazyFieldAction` |  |
-| `EnumParameterIsDefinedCheckAction` |  |
+| `EnumParameterIsDefinedCheckAction` | ✅ `context_action` → `check_enum_defined` |
 | `EqualityOperatorToEqualsAction` |  |
 | `EqualityOperatorToReferenceEqualsAction` |  |
 | `EqualsToEqualityOperatorAction` |  |
@@ -197,19 +192,19 @@ families above are the places to look before assuming the latter.
 | `FixRegularStringToVerbatimAction` |  |
 | `FlipInvocationAction` |  |
 | `FlipOperatorArgumentsAction` |  |
-| `FlipRelationalExpressionAction` |  |
-| `ForeachToForAction` |  |
+| `FlipRelationalExpressionAction` | ✅ `context_action` → `flip_relational_expression` |
+| `ForeachToForAction` | ✅ `context_action` → `foreach_to_for` |
 | `GenerateFlagPresenceCheckExtensionAction` |  |
 | `GenerateTypePatternsAction` |  |
 | `IfAndMergeAction` |  |
 | `IfNotNullToConditionalAccessAction` |  |
 | `IfToGuardClauseAction` |  |
 | `IfToNullPropagationAction` |  |
-| `IfToTernaryAction` |  |
+| `IfToTernaryAction` | ✅ `context_action` → `if_to_ternary` |
 | `ImplementEventAction` |  |
 | `ImplementNotifyPropertyChangedAction` |  |
 | `ImplicitToExplicitMemberAction` |  |
-| `ImportStaticMembersAction` |  |
+| `ImportStaticMembersAction` | ✅ `context_action` → `import_static_member` |
 | `IncludeIntoObjectPatternAction` |  |
 | `InitializeMemberFromConstructorAction` |  |
 | `InlineControlTransferStatementAction` |  |
@@ -225,23 +220,23 @@ families above are the places to look before assuming the latter.
 | `InternalCreateStringsFileContextAction` |  |
 | `InternalExportAnnotationsToExternal` |  |
 | `InternalLocalizeContextAction` |  |
-| `InterpolationToStringConcatAction` |  |
+| `InterpolationToStringConcatAction` | ✅ `context_action` → `interpolated_to_concat` |
 | `InterpolationToStringFormatAction` |  |
 | `IntroduceParameterAction` |  |
 | `IntroduceTypeAliasAction` |  |
 | `IntroduceVariableAction` |  |
 | `InvertIfAction` |  |
-| `InvertTernaryConditionAction` |  |
+| `InvertTernaryConditionAction` | ✅ `context_action` → `invert_ternary_condition` |
 | `InvokeAsStaticMethodAction` |  |
 | `InvokeEventAction` |  |
-| `IterateViaAwaitForeachAction` |  |
+| `IterateViaAwaitForeachAction` | ✅ `context_action` → `await_foreach` |
 | `IterateViaForeachAction` |  |
 | `Iterator2FunctionAction` |  |
 | `JoinAttributesAction` |  |
 | `JoinDeclarationAction` |  |
 | `JoinDeconstructionDeclarationsAction` |  |
-| `JoinNullCheckWithUsageAction` |  |
-| `JoinStringsAction` |  |
+| `JoinNullCheckWithUsageAction` | ✅ `context_action` → `join_null_check_with_usage` |
+| `JoinStringsAction` | ✅ `context_action` → `join_string` |
 | `LambdaExpressionToAnonymousMethodAction` |  |
 | `LambdaExpressionToLocalFunctionAction` |  |
 | `LambdaExpressionToStatementAction` |  |
@@ -251,10 +246,10 @@ families above are the places to look before assuming the latter.
 | `LiveTemplateBasedIterateViaForeachAction` |  |
 | `LocalFunctionToNamedMethodAction` |  |
 | `MergeDeconstructedDeclarationAction` |  |
-| `MergeIntoPatternAction` |  |
+| `MergeIntoPatternAction` | ✅ `context_action` → `merge_patterns` |
 | `MergeSequentialChecksAction` |  |
 | `MethodToPropertyAction` |  |
-| `MigrateToNullableEnableAction` |  |
+| `MigrateToNullableEnableAction` | ✅ `context_action` → `migrate_to_nullable` |
 | `MoveAnnotationOntoAnotherPartAction` |  |
 | `MoveLocalFunctionToTheEndOfAScopeAction` |  |
 | `MoveToAnotherPartAction` |  |
@@ -274,42 +269,42 @@ families above are the places to look before assuming the latter.
 | `PassStringInterpolationAction` |  |
 | `PropertyToMethodAction` |  |
 | `QualifyReferenceAction` |  |
-| `QualifyStaticMembersAction` |  |
+| `QualifyStaticMembersAction` | ✅ `context_action` → `qualify_member` |
 | `QueryToExtensionMethodAction` |  |
 | `RecursivePatternToAccessExpressionAction` |  |
 | `ReferenceEqualsToEqualityOperatorAction` |  |
 | `ReinterpretStringLiteralAsInterpolationAction` |  |
-| `RemoveArgumentNameAction` |  |
-| `RemoveBracesAction` |  |
+| `RemoveArgumentNameAction` | ✅ `context_action` → `remove_argument_name` |
+| `RemoveBracesAction` | ✅ `context_action` → `remove_braces` |
 | `RemoveDeconstructionPatternComponentNameAction` |  |
-| `RemoveDigitSeparatorsAction` |  |
+| `RemoveDigitSeparatorsAction` | ✅ `context_action` → `remove_digit_separators` |
 | `RemoveFormatItemAction` |  |
-| `RemoveParamsModifierAction` |  |
+| `RemoveParamsModifierAction` | ✅ `context_action` → `remove_params_modifier` |
 | `RemoveParenthesisAction` |  |
 | `RemovePreprocessorParenthesesAction` |  |
-| `RemoveRegionAction` |  |
+| `RemoveRegionAction` | ✅ `context_action` → `remove_region` |
 | `RemoveSwitchConditionComponentAction` |  |
-| `RemoveTupleComponentNameAction` |  |
+| `RemoveTupleComponentNameAction` | ✅ `context_action` → `remove_tuple_component_name` |
 | `RenameFileToMatchTypeNameAction` |  |
 | `ReplaceLogicalExpressionAction` |  |
 | `ReturnValueAction` |  |
 | `ReverseAssignmentAction` |  |
 | `RevertForLoopAction` |  |
-| `SeparateIntegralLiteralDigitsAction` |  |
+| `SeparateIntegralLiteralDigitsAction` | ✅ `context_action` → `digit_separators` |
 | `SeparateLocalFunctionsWithJumpStatementAction` |  |
-| `SeparateRealLiteralDigitsAction` |  |
+| `SeparateRealLiteralDigitsAction` | ✅ `context_action` → `digit_separators` |
 | `SetDisposeAnalysisModeAction` |  |
-| `SetParamsModifierAction` |  |
+| `SetParamsModifierAction` | ✅ `context_action` → `set_params_modifier` |
 | `SimplifyLinqExpressionUseMinByAndMaxByAction` |  |
 | `SortHighlightingTypesAction` |  |
 | `SortUsingDirectivesAction` |  |
 | `SpecifyEnumValuesAction` |  |
-| `SplitAndInIfAction` |  |
+| `SplitAndInIfAction` | ✅ `context_action` → `split_and_in_if` |
 | `SplitAndInReturnAction` |  |
 | `SplitAndPatternAction` |  |
 | `SplitAttributesAction` |  |
 | `SplitConditionalAccessAction` |  |
-| `SplitDeclarationAction` |  |
+| `SplitDeclarationAction` | ✅ `context_action` → `split_declaration` |
 | `SplitDeclarationAndMoveToOuterScopeAction` |  |
 | `SplitDeclarationsListAction` |  |
 | `SplitFluentApiDivisionAction` |  |
@@ -328,10 +323,10 @@ families above are the places to look before assuming the latter.
 | `StaticMethodToExtensionAction` |  |
 | `StringEqualityToMethodInvocationAction` |  |
 | `StringParameterIsNotNullOrEmptyCheckAction` | ✅ `context_action` → `check_string_not_null_or_empty` |
-| `StringParameterIsNotNullOrWhitespaceCheckAction` |  |
+| `StringParameterIsNotNullOrWhitespaceCheckAction` | ✅ `context_action` → `check_string_not_null_or_whitespace` |
 | `StringToXElementCodeAction` |  |
 | `SurroundWithFormatAction` |  |
-| `SurroundWithQuotesAction` |  |
+| `SurroundWithQuotesAction` | ✅ `context_action` → `wrap_in_quotes` |
 | `SwitchExpressionToIfElseAction` |  |
 | `SwitchExpressionToStatementAction` |  |
 | `SwitchExpressionToTernaryAction` |  |
@@ -361,17 +356,17 @@ families above are the places to look before assuming the latter.
 | `ToTopLevelCodeAction` |  |
 | `TransformParametersAction` |  |
 | `TransformSingleParameterAction` |  |
-| `TypeToVarAction` |  |
+| `TypeToVarAction` | ✅ `context_action` → `use_var` |
 | `UncommentAction` |  |
 | `UseArrayCreationExpressionAction` |  |
 | `UseAsAndCheckForNullAction` |  |
 | `UseCollectionExpressionAction` |  |
-| `UseConfigureAwaitFalseAction` |  |
-| `UseEnvironmentNewLineAction` |  |
+| `UseConfigureAwaitFalseAction` | ✅ `context_action` → `use_configure_await_false` |
+| `UseEnvironmentNewLineAction` | ✅ `context_action` → `use_environment_newline` |
 | `UseExplicitArrayAction` |  |
 | `UseExplicitDiscardDeclarationAction` |  |
 | `UseExplicitTypeParametersAction` |  |
-| `UseExplicitlyTypedNewAction` |  |
+| `UseExplicitlyTypedNewAction` | ✅ `context_action` → `use_explicitly_typed_new` |
 | `UseFormatStringAction` |  |
 | `UseImplicitDiscardDeclarationAction` |  |
 | `UseObjectInitializerAction` |  |
@@ -379,7 +374,7 @@ families above are the places to look before assuming the latter.
 | `UseSeparateDeconstructionDeclarationsAction` |  |
 | `UseSpanForStackAllocAction` |  |
 | `UseStringInterpolationAction` |  |
-| `UseTargetTypedNewAction` |  |
+| `UseTargetTypedNewAction` | ✅ `context_action` → `use_target_typed_new` |
 | `UseTypeAliasAction` |  |
-| `VarToTypeAction` |  |
+| `VarToTypeAction` | ✅ `context_action` → `use_explicit_type` |
 | `WrapTernaryExpressionInInterpolationWithParenthesesAction` |  |

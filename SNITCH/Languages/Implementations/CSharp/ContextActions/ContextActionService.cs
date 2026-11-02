@@ -78,7 +78,73 @@ public sealed partial class ContextActionService : IContextActionService
         ("check_span_index", "Check an index against a span's length"),
         ("block_body_to_expression", "Convert a body to an expression body"),
         ("expression_body_to_block", "Convert an expression body to a block"),
+        ("check_string_not_null_or_whitespace", "Check string parameter for null or whitespace"),
+        ("add_argument_name", "Add argument name"),
+        ("add_tuple_component_name", "Add tuple component name"),
+        ("remove_tuple_component_name", "Remove tuple component name"),
+        ("add_switch_section_braces", "Add braces to a switch section"),
+        ("convert_literal_to_hex", "Convert a numeric literal to hexadecimal"),
+        ("convert_literal_to_binary", "Convert a numeric literal to binary"),
+        ("convert_literal_to_decimal", "Convert a numeric literal to decimal"),
+        ("use_target_typed_new", "Use target-typed new"),
+        ("use_explicitly_typed_new", "Use explicitly typed new"),
+        ("convert_to_default_expression", "Convert default(T) to default"),
+        ("flip_relational_expression", "Flip the operands of a relational expression"),
+        ("invert_ternary_condition", "Invert a ternary condition"),
+        ("if_to_ternary", "Convert if/else to a ternary expression"),
+        ("add_inheritdoc", "Add <inheritdoc/>"),
+        ("add_exception_docs", "Add <exception> documentation"),
+        ("remove_region", "Remove the region around the line"),
+        ("use_environment_newline", "Use Environment.NewLine"),
+        ("remove_params_modifier", "Remove the params modifier"),
+        ("set_params_modifier", "Set the params modifier"),
+        ("await_foreach", "Convert foreach to await foreach"),
     ];
+
+    /// <summary>
+    /// ReSharper's own names that are not the id we spell: after the trailing Action wording is
+    /// normalized away, <c>AddBracesAction</c> already reaches <c>add_braces</c>, and this table covers the
+    /// ones whose ReSharper name differs from the id that implements the same edit.
+    /// </summary>
+    private static readonly Dictionary<string, string> Aliases = new(StringComparer.Ordinal)
+    {
+        ["string_parameter_is_not_null_or_empty_check"] = "check_string_not_null_or_empty",
+        ["all_string_parameter_is_not_null_or_empty_check"] = "check_string_not_null_or_empty",
+        ["string_parameter_is_not_null_or_whitespace_check"] = "check_string_not_null_or_whitespace",
+        ["all_string_parameter_is_not_null_or_whitespace_check"] = "check_string_not_null_or_whitespace",
+        ["check_dictionary_key_value"] = "check_dictionary_key",
+        ["check_array_index_value"] = "check_index_range",
+        ["check_span_index_value"] = "check_span_index",
+        ["collection_is_not_empty_check"] = "check_collection_not_empty",
+        ["enum_parameter_is_defined_check"] = "check_enum_defined",
+        ["import_static_members"] = "import_static_member",
+        ["qualify_static_members"] = "qualify_member",
+        ["surround_with_quotes"] = "wrap_in_quotes",
+        ["join_strings"] = "join_string",
+        ["convert_concatenation_to_interpolation"] = "concat_to_interpolated",
+        ["interpolation_to_string_concat"] = "interpolated_to_concat",
+        ["type_to_var"] = "use_var",
+        ["var_to_type"] = "use_explicit_type",
+        ["body_expression_to_statement"] = "expression_body_to_block",
+        ["body_statement_to_expression"] = "block_body_to_expression",
+        ["c_sharp_use_empty_string_literal"] = "empty_string_to_string_empty",
+        ["c_sharp_use_string_empty"] = "string_empty_to_empty_string",
+        ["convert_regular_string_to_verbatim"] = "string_to_verbatim",
+        ["convert_regular_to_raw_string"] = "string_to_raw",
+        ["convert_verbatim_string_to_regular"] = "string_to_regular",
+        ["convert_verbatim_to_raw_string"] = "string_to_raw",
+        ["migrate_to_nullable_enable"] = "migrate_to_nullable",
+        ["separate_integral_literal_digits"] = "digit_separators",
+        ["separate_real_literal_digits"] = "digit_separators",
+        ["convert_to_using_statement"] = "wrap_in_using",
+        ["convert_to_try_finally"] = "wrap_in_try_finally",
+        ["merge_into_pattern"] = "merge_patterns",
+        ["convert_literal_to_bin"] = "convert_literal_to_binary",
+        ["convert_literal_to_dec"] = "convert_literal_to_decimal",
+        ["add_exception_doc_comment"] = "add_exception_docs",
+        ["use_environment_new_line"] = "use_environment_newline",
+        ["iterate_via_await_foreach"] = "await_foreach",
+    };
 
     public async Task<object> Apply(
         string action,
@@ -96,7 +162,8 @@ public sealed partial class ContextActionService : IContextActionService
         if (line < 1)
             return new { error = "Line must be 1-based." };
 
-        var id = Normalize(action);
+        var normalized = Normalize(action);
+        var id = Aliases.TryGetValue(normalized, out var alias) ? alias : normalized;
         if (!Catalogue.Any(entry => entry.Id == id))
             return new { error = $"Unknown context action '{action}'. Known: {string.Join(", ", Catalogue.Select(entry => entry.Id))}." };
 
@@ -204,6 +271,27 @@ public sealed partial class ContextActionService : IContextActionService
         "check_span_index" => CheckSpanIndex(target, text),
         "block_body_to_expression" => BlockBodyToExpression(target),
         "expression_body_to_block" => ExpressionBodyToBlock(target),
+        "check_string_not_null_or_whitespace" => ArgumentGuards(target, text, Guard.NotNullOrWhitespace, all: false),
+        "add_argument_name" => AddArgumentName(target, text),
+        "add_tuple_component_name" => AddTupleComponentName(target, text),
+        "remove_tuple_component_name" => RemoveTupleComponentName(target),
+        "add_switch_section_braces" => AddSwitchSectionBraces(target),
+        "convert_literal_to_hex" => ConvertLiteralToHex(target),
+        "convert_literal_to_binary" => ConvertLiteralToBinary(target),
+        "convert_literal_to_decimal" => ConvertLiteralToDecimal(target),
+        "use_target_typed_new" => UseTargetTypedNew(target),
+        "use_explicitly_typed_new" => UseExplicitlyTypedNew(target),
+        "convert_to_default_expression" => ConvertToDefaultExpression(target),
+        "flip_relational_expression" => FlipRelationalExpression(target),
+        "invert_ternary_condition" => InvertTernaryCondition(target),
+        "if_to_ternary" => IfToTernary(target),
+        "add_inheritdoc" => AddInheritdoc(target),
+        "add_exception_docs" => AddExceptionDocs(target),
+        "remove_region" => RemoveRegion(target),
+        "use_environment_newline" => UseEnvironmentNewLine(target),
+        "remove_params_modifier" => RemoveParamsModifier(target),
+        "set_params_modifier" => SetParamsModifier(target),
+        "await_foreach" => AwaitForeach(target),
         _ => Outcome.Fail($"'{id}' has no implementation."),
     };
 
@@ -224,7 +312,15 @@ public sealed partial class ContextActionService : IContextActionService
             builder.Append(char.ToLowerInvariant(c));
         }
 
-        return builder.ToString();
+        var normalized = builder.ToString();
+        if (normalized.EndsWith("_context_action", StringComparison.Ordinal))
+            normalized = normalized[..^"_context_action".Length];
+        else if (normalized.EndsWith("_check_action", StringComparison.Ordinal))
+            normalized = normalized[..^"_check_action".Length];
+        else if (normalized.EndsWith("_action", StringComparison.Ordinal))
+            normalized = normalized[..^"_action".Length];
+
+        return normalized;
     }
 
     // ── The document ─────────────────────────────────────────────────────────────────────────────

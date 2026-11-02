@@ -10,6 +10,7 @@ public sealed partial class ContextActionService
     {
         Null,
         NotNullOrEmpty,
+        NotNullOrWhitespace,
         CollectionNotEmpty,
     }
 
@@ -36,7 +37,7 @@ public sealed partial class ContextActionService
             return Outcome.Fail($"Could not resolve the declaration that contains line {target.Line}.");
 
         var candidates = symbol.Parameters.Where(parameter => parameter.Type.IsReferenceType).ToList();
-        if (guard == Guard.NotNullOrEmpty)
+        if (guard is Guard.NotNullOrEmpty or Guard.NotNullOrWhitespace)
             candidates = candidates.Where(parameter => parameter.Type.SpecialType == SpecialType.System_String).ToList();
         if (guard == Guard.CollectionNotEmpty)
             candidates = candidates.Where(parameter => IsCollection(parameter.Type)).ToList();
@@ -73,6 +74,10 @@ public sealed partial class ContextActionService
 
                 case Guard.NotNullOrEmpty:
                     guards.Add($"if (string.IsNullOrEmpty({parameter.Name})) throw new ArgumentException(\"Value cannot be null or empty.\", nameof({parameter.Name}));");
+                    break;
+
+                case Guard.NotNullOrWhitespace:
+                    guards.Add($"if (string.IsNullOrWhiteSpace({parameter.Name})) throw new ArgumentException(\"Value cannot be null or whitespace.\", nameof({parameter.Name}));");
                     break;
 
                 case Guard.CollectionNotEmpty:
@@ -177,6 +182,7 @@ public sealed partial class ContextActionService
     {
         Guard.Null => "check_param_null",
         Guard.NotNullOrEmpty => "check_string_not_null_or_empty",
+        Guard.NotNullOrWhitespace => "check_string_not_null_or_whitespace",
         Guard.CollectionNotEmpty => "check_collection_not_empty",
         _ => "the action",
     };

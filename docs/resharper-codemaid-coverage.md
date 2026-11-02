@@ -10,11 +10,12 @@ and the guarantee — what that tool proves and where it stops. A row that reads
 
 **A limit is a row, never a paragraph.** Whatever is not covered lives in the cell it belongs to — a ⚠️
 row in the feature table, a sentence in the "Where it stops" column — so a table that reads ✅ never has
-an exception explained below it.
+an exception explained below it. The history of the batches is not kept here either: each batch is a
+section of [CAPABILITY_MAP.md](../CAPABILITY_MAP.md), next to the feature it added.
 
 ## Contents
 
-[ReSharper](#resharper) · [CodeMaid](#codemaid) · [Other languages and file kinds](#other-languages-and-file-kinds) · [Cross-cutting boundaries](#cross-cutting-boundaries) · [Revision log](#revision-log)
+[ReSharper](#resharper) · [CodeMaid](#codemaid) · [Other languages and file kinds](#other-languages-and-file-kinds) · [Cross-cutting boundaries](#cross-cutting-boundaries)
 
 ---
 
@@ -76,9 +77,10 @@ whose VB spelling is its own operation (`extract_interface`, `extract_method`, `
 stays C#-only is only what VB cannot express — a record, a primary constructor, a nullable reference type.
 ReSharper's **context actions** (1000+) are covered only in part: the style rewrites are
 `simplify_code` (97 IDE ids) and `simplify_vb_code` (41 VB ids), the fixes come from `apply_code_fix`,
-and 54 context-action ids are applied directly by `context_action` — the guards, the wrap actions, the
+and **75 context-action ids** are applied directly by `context_action` — the guards, the wrap actions, the
 statement and declaration shapes, the string conversions, LINQ in both directions, StringBuilder,
-pattern merging and the extension block, named in its table below.
+pattern merging, the extension block and the census tail (names, braces, literal bases, target-typed
+`new`, documentation, regions, `Environment.NewLine`, `params`, `await foreach`) — named in its table below.
 
 ### Code generation / "create" family
 
@@ -86,7 +88,7 @@ pattern merging and the extension block, named in its table below.
 |---|---|---|
 | Implement missing interface/abstract members | `implement_members` | ✅ compiler-gated |
 | Create class/member from usage | `create_from_usage` | ✅ the six declaration shapes the compiler can ask for — CS1061 member, CS0117 static member, CS1501/CS7036 overload, CS1729 constructor, CS0246 type, CS0103 method — each built from the call site and compiler-gated |
-| Context actions outside the style/refactoring families | `context_action` | ⚠️ 54 of the 307 actions in the census: import, eight argument guards, five wrap actions, the statement/declaration family, nullable migration, the string re-encodings, LINQ both ways, StringBuilder, pattern merging and the C# 14 extension block. **Visual Basic** implements the 33 ids that have a VB spelling and refuses the C#-syntax ones with the reason. What remains is the proprietary tail — actions whose condition is a type-system fact rather than a shape — and the IDE-only ones; see [the census](resharper-context-actions.md) |
+| Context actions outside the style/refactoring families | `context_action` | ⚠️ **75 ids**, plus 36 ReSharper action names that alias one of them and every name whose normalized form already is an id; the rest of the 307 census is reached by `simplify_code`, a refactoring tool or an inspection fix, or is one of the families the [census](resharper-context-actions.md) still lists. The 21 ids added on 2026-11-02 cover the census tail: the whitespace guard, argument/tuple names, switch-section braces, literal bases, target-typed/explicit `new`, `default`, relational flip, ternary inversion, if-to-ternary, `<inheritdoc/>`/exception docs, region removal, `Environment.NewLine`, `params` on/off and `await foreach`. **Visual Basic** implements the 33 ids that have a VB spelling and refuses the C#-syntax ones with the reason |
 | Generate XML documentation | `generate_docs` | ✅ summary/param/typeparam/returns |
 | Generate constructor / Equals / GetHashCode / ToString | `generate_members` | ✅ |
 | Implement INotifyPropertyChanged | `implement_inpc` | ✅ |
@@ -295,30 +297,3 @@ The families that have a residual boundary are stated here, next to the tools th
 | Context actions and generation | Contract annotations (`[NotNull]`/`[CanBeNull]` are the pre-nullable way of saying what `string?` says today, so generating them would write code the language obsoleted) and language injections (an embedded SQL/HTML/CSS fragment's editor service is a second parser platform, not a missing rewrite) are boundaries |
 | Packaging and deployment | MSIX is not generated: it needs the Windows packaging tools, not the SDK. `installer_project` covers WiX and ClickOnce, `deploy_target` covers IIS and Azure Web Apps/Static Web Apps, and every deployment write needs `confirm=true` |
 | SQL and EF Core | A query's own SQL is not generated (use `profile_database` on the running process for that); seeding and data operations are not modelled, and the schema is the one the scanned DDL declares, never a live catalog |
-
----
-
-## Revision log
-
-The batches that changed this page or the count it quotes, newest first. A count is the live inventory at
-the end of the batch (`capability_report` prints the current one); the per-feature detail of each batch is
-in [CAPABILITY_MAP.md](../CAPABILITY_MAP.md).
-
-| Date | What changed | Tools |
-|---|---|---|
-| 2026-11-02 | **CI and compose structure**: `analyze_yaml` gains **YAML0013** (a GitHub Actions job with neither `runs-on` nor `uses`), **YAML0014** (a compose service with neither `image` nor `build`) and **YAML0015** (a workflow with jobs but no `on` trigger), read from the same indentation-aware walk; it is a structural check, not a schema | 429 (unchanged) |
-| 2026-11-02 | **The gap inventory is retired**: every boundary it listed now lives in this page — the per-language rows, the project kinds, the cross-cutting table, the debugger and decompiler sections — and `docs/gaps.md` is an index that states there is no open gap row. The revision log below is the batch history | 429 (unchanged) |
-| 2026-11-02 | **The scanned layers gain JS0018, HTML0016 and the `:nth-*` selectors**: `analyze_js` reports an import cycle as a finding (one per strongly connected group of scanned modules, at the import that reaches into it); `analyze_markup` matches `:nth-child()`/`:nth-last-child()`/`:nth-of-type()`/`:nth-last-of-type()` (`An+B`, `odd`, `even`) against the page index, so CSS0009/CSS0010 see them, and flags an attribute written twice on one element | 429 (unchanged) |
-| 2026-11-01 | **A Cross-cutting boundaries section**: the properties every result shares (the gate, scanners, generated code, reflection, referenced assemblies, Razor, metacode readers, profiling, automation/safety) and the residual boundary of taint, mutation, database profiling and churn now live here, next to the features they qualify, instead of on the gap inventory | 420 (unchanged) |
-| 2026-11-01 | **The VB refactoring catalogue is complete except the three constructs VB does not have**: `generify`, `global_usings` (a project-level `Import`) and `transform_parameters`' wrap/replace-with-property now run on a `.vb` document | 420 (unchanged) |
-| 2026-11-01 | **CSS0010**: the CSS cascade is resolved for the dead-declaration case — every rule carries its declarations, specificity and source order, matched against each page's element index; a declaration overridden on every element it matches is reported | 420 (unchanged) |
-| 2026-11-01 | **A lexical rename for the two scanned languages and a server-side manifest check**: `js_symbols action=rename` and `fsharp_symbols action=rename` rename one declaration and every reference the table resolved (for JavaScript the uses in the importing modules and the import binding itself; for F#, the uses before it in its file and in a file that opens the declaring module), previewed by default, with no compiler gate; `k8s_validate server=true` adds `kubectl apply --dry-run=server`, so a CRD's schema and an admission webhook are the cluster's answer rather than the built-in table's | 420 (unchanged) |
-| 2026-11-01 | **The Visual Basic refactoring coverage grows**: thirteen paths that used to stop at a C# syntax tree now run on a `.vb` document — the `introduce_*` family, `invert_boolean`, `copy_type`, the `<Extension>` pair, `convert_anonymous_to_type`, `implement_inpc`, `pull_members_up`/`push_members_down`, and `transform_parameters` for make-optional/make-required/change-type. The C#-only remainder is now what VB cannot express (records, primary constructors, nullable reference types) plus `global_usings`, `generify` and the two call-site rewrites | 420 (unchanged) |
-| 2026-11-01 | **The JS/TS and F# symbol tables, and Kubernetes closed at its own surface**: `js_symbols` (a tokeniser over the masked source, a scope per brace block, declarations and the declaration a name resolves to, references through the module's imports, JSX tags as references, `outline`/`find`/`refs`/`unused`); `fsharp_symbols` (the same four questions as a name table, a use resolving before it in its file and across files only through an `open`); `k8s_validate` (K8S001–K8S023 offline, with its own YAML path reader) and `k8s_port_forward` (a forward as a session: start/list/status/stop). The scanned rows for JS/TS, YAML and F# now say what the symbol tables prove and where the type model is still absent | 416 → 420 |
-| 2026-11-01 | **The debugger, against the adapter's real surface**: per-exception-type filters (`filterOptions`) and the stopped exception's block (`exceptionInfo`), function breakpoints, Set Value through `debug_evaluate newValue`, hit conditions counted by the server, **data breakpoints as the solution's Roslyn-resolved write sites**, and `debug_restart` with an optional rebuild. Edit-and-continue/hot reload is a ⚠️ row: the adapter applies metadata deltas only over GDB/MI | 413 → 416 |
-| 2026-10-31 | **The HTML/CSS depth**: `markup_files` indexes every page's tags/classes/ids and every sheet's simple selectors; `analyze_markup` gains CSS0009 (a simple selector that matches no element) and HTML0015 (a class used and defined in no scanned sheet), runs the CSS rules and selectors on every `<style>` block, and checks an inline `style` attribute for `!important`, `javascript:` and `expression()` | 404 (unchanged) |
-| 2026-10-31 | **The depth of the scanned layers and the data-flow reach**: `analyze_yaml` gains YAML0009–YAML0012 (kind/apiVersion asymmetry, metadata without a name, a container with no image, duplicate container names), `analyze_js` resolves a relative import and reports JS0017, and `trace_data_flow` follows a value stored in a field of the same type across the method that writes it and the method that reads it. No new tool: the range of three existing ones | 401 (unchanged) |
-| 2026-10-31 | **Version control and collaboration** stops being a row in `gaps.md` and becomes a feature section here: the 37 tools — 28 in the Git family (27 `git_*` and `commit_lint`), 8 GitHub and `code_review`. The section adds no tool, it moves ones already counted | 401 (unchanged) |
-| 2026-10-31 | **The board becomes the source of truth**: `board_brief` (counts, the card to pick up, staleness) and `board_audit` (each open card cross-checked against the live tool and context-action catalogue); the rows on this page do not move, the inventory does | 399 → 401 |
-| 2026-10-31 | **The last point of every open family**: the scanned layers (`js_files`/`analyze_js`, `markup_files`/`analyze_markup`, `yaml_files`/`analyze_yaml`, `fsharp_files`/`analyze_fsharp`), `trace_data_flow`, `find_throw_sites` (387 → 397), five context actions (`merge_patterns`, `concat_to_stringbuilder`, `linq_query_to_method`, `linq_method_to_query`, `convert_to_extension_block`) and CS1729 in `create_from_usage`; then `commit_lint` (→ 398) and `disk_usage` (→ 399) | 387 → 399 |
-| 2026-10-31 | **The rows that used to close this page**: the debugger (16 `debug_*` tools over netcoredbg), the test workflow (`run_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `debug_test`), decompiled code as a workspace (`assembly_workspace`), the diagram and exploration tools (`call_graph`, `sequence_diagram`, `control_flow_graph`, `find_todos`, `find_endpoints`, `find_file`, `solution_map`), the smaller refactorings (`transform_parameters`, `make_non_static`, `move_type_to_nested_scope`, `generify`, `remove_params`, `extension_to_static`, `invert_boolean`, `inline_field`, `extract_members_to_partial`), and the last ReSharper/CodeMaid rows: templates (`templates`), cleanup profiles (`code_cleanup profile=`), CodeMaid's layout rules (`layout_code`), fuzzy symbol search (`find_symbol`), ten more context actions (merge/split conditions, a null check joined with its use, `var` and back, split declaration, remove braces, nullable migration, digit separators, `ConfigureAwait(false)`) and the create-from-usage long tail (CS0117, CS1501, CS7036 next to CS1061/CS0246/CS0103) | — |

@@ -737,7 +737,7 @@ asks what to do next.
 | Feature | Implemented | Notes |
 |---------|:---:|-------|
 | One-call answer to "what is missing / what comes next" | ✅ | `board_brief` — per-column counts, the card to pick up (in_progress → review → todo → backlog, then by priority), every open card with its age, idle days and a stale flag, the cards that need a look, and the one call that goes next. Deliberately compact: titles and signals, never whole descriptions |
-| The board cross-checked against the build | ✅ | `board_audit` — every open card's snake_case names are matched against the live catalogue (tools **and** the ~40 context-action ids, so a capability that lives inside `context_action` counts) and the paths it names are checked on disk: `closure-candidate` / `partly-shipped` (with the names this build does not have) / `open` / `no-signal`, each with its evidence. `close=true` moves the candidates to done with the evidence as a comment — never silently |
+| The board cross-checked against the build | ✅ | `board_audit` — every open card's snake_case names are matched against the live catalogue (tools **and** the ~75 context-action ids, so a capability that lives inside `context_action` counts) and the paths it names are checked on disk: `closure-candidate` / `partly-shipped` (with the names this build does not have) / `open` / `no-signal`, each with its evidence. `close=true` moves the candidates to done with the evidence as a comment — never silently |
 | Definition of done recorded, not implied | ✅ | `board_move` gains `note=`/`author=`: closing a card appends the evidence (what shipped, which test proved it) as a comment instead of leaving it to the reader |
 | Discovery, not just documentation | ✅ | `capability_report` answers what EXISTS and now points at the board for what is missing; `read_project_docs` attaches a `board` block (counts + the card to pick up) to every answer that is not empty; the server instructions, the installed `AGENTS.md` block and every `board_*` description state that the board — not `docs/gaps.md`, a backlog file or a memory note — is the source of truth |
 
@@ -750,7 +750,7 @@ and `apply_code_fix` learn the document's language. **401 tools (unchanged).**
 
 | Feature | Implemented | Notes |
 |---------|:---:|-------|
-| Context actions on a `.vb` document | ✅ | `context_action` routes `.vb` to `VbContextActionService`: **33 of the 41 ids** — `import_type` (`Imports`), the eight guards (`If x Is Nothing Then Throw …`, `String.IsNullOrEmpty`, `Count = 0`, `ContainsKey`, `[Enum].IsDefined`, the index bound), `wrap_in_try_catch`/`_try_finally`/`_if`/`_using`/`_region`, `concat_to_interpolated`/`interpolated_to_concat`, digit separators both ways, `name:=value` → positional, `Dim x As T` ↔ `Dim x`, `Await x.ConfigureAwait(False)`, one `Dim` per declarator, `&=` → `StringBuilder.Append`, nested `If` ↔ `AndAlso`, `If x IsNot Nothing Then x.M()` → `x?.M()`, `If`/`ElseIf` → `Select Case`, `From … Select` ↔ `Where(Function(x) …)`, `For Each` ↔ indexed `For`, the descending `For` — each a text edit under the same compiler gate, preview and edit history; the 8 C#-syntax ids (raw/verbatim strings, braces, `#nullable`, patterns, the C# 14 extension block) are refused with the reason |
+| Context actions on a `.vb` document | ✅ | `context_action` routes `.vb` to `VbContextActionService`: **33 of the 75 ids** — `import_type` (`Imports`), the eight guards (`If x Is Nothing Then Throw …`, `String.IsNullOrEmpty`, `Count = 0`, `ContainsKey`, `[Enum].IsDefined`, the index bound), `wrap_in_try_catch`/`_try_finally`/`_if`/`_using`/`_region`, `concat_to_interpolated`/`interpolated_to_concat`, digit separators both ways, `name:=value` → positional, `Dim x As T` ↔ `Dim x`, `Await x.ConfigureAwait(False)`, one `Dim` per declarator, `&=` → `StringBuilder.Append`, nested `If` ↔ `AndAlso`, `If x IsNot Nothing Then x.M()` → `x?.M()`, `If`/`ElseIf` → `Select Case`, `From … Select` ↔ `Where(Function(x) …)`, `For Each` ↔ indexed `For`, the descending `For` — each a text edit under the same compiler gate, preview and edit history; the 8 C#-syntax ids (raw/verbatim strings, braces, `#nullable`, patterns, the C# 14 extension block) are refused with the reason |
 | `apply_code_fix` on a VB project | ✅ | analyzers and fixers are selected by `AnalyzersFor(project.Language)` / `FixersFor(language)`; the .NET analyzers' `vb` assembly ships 100+ `CodeFixProvider`s (`Basic…Fixer`), and the service tries each fixer that declares the id until one registers a fix at the location. Before this the C# fixer was picked first for a VB document and did nothing |
 
 The remaining boundary is the refactoring catalogue: its C#-syntax members (primary constructors, records,
@@ -843,6 +843,24 @@ checks with their clean controls.
 
 ---
 
+## 28. Context actions: the census tail and the ReSharper name aliases (2026-11-02)
+
+No new tool: `context_action` grows from 54 to **75 ids**, and 36 more ReSharper action names are aliases
+of one of them (a name whose normalized form already is an id, like `AddBracesAction` → `add_braces`, needs
+no alias at all). **429 tools (unchanged).**
+
+| Feature | Implemented | Notes |
+|---------|:---:|-------|
+| The census tail | ✅ | 21 ids: `check_string_not_null_or_whitespace`, `add_argument_name`, `add_tuple_component_name`/`remove_tuple_component_name`, `add_switch_section_braces`, `convert_literal_to_hex`/`_binary`/`_decimal`, `use_target_typed_new`/`use_explicitly_typed_new`, `convert_to_default_expression`, `flip_relational_expression`, `invert_ternary_condition`, `if_to_ternary`, `add_inheritdoc`, `add_exception_docs`, `remove_region`, `use_environment_newline`, `remove_params_modifier`/`set_params_modifier`, `await_foreach`. Each is a single verified splice, previewed and compiler-gated |
+| ReSharper names | ✅ | `Normalize` strips the trailing `Action`/`ContextAction` wording, and the `Aliases` table maps the rest (`StringParameterIsNotNullOrEmptyCheckAction` → `check_string_not_null_or_empty`, `ConvertLiteralToBinAction` → `convert_literal_to_binary`, `IterateViaAwaitForeachAction` → `await_foreach`, …), so the name a census row carries reaches the id that implements the edit |
+| The census | ✅ | [resharper-context-actions.md](docs/resharper-context-actions.md) marks 63 of the 307 rows with the id that reaches them — the census has 307 rows for 75 ids because some rows share one (the raw/verbatim pairs, the guard aliases); the rows still blank are reached by `simplify_code`, a refactoring tool or an inspection fix, or are one of the families the census states with the reason (if→switch expression, the format family, modifiers in bulk, extension-block consolidation, per-member nullable annotations, `CopyDocumentationAction`, numeric range checks, the StringBuilder append chain, `IfToGuardClauseAction`) |
+
+Nine tests in `ContextActionCoverageTests` (argument/tuple names, literal bases, target-typed new both ways,
+relational/ternary/if shapes, inheritdoc and exception docs, region/newline/params, switch braces and await
+foreach, and the catalogue itself); build green.
+
+---
+
 ## Summary by Category
 
 
@@ -902,7 +920,7 @@ What remains, in order of impact:
 | Test flow: debugging a test, continuous testing, "which tests cover this symbol", scaffolding, mutation testing | 🟡 Medium | ✅ closed: `run_test`, `rerun_failed`, `debug_test`, `continuous_testing`, `tests_covering_symbol`, `generate_tests`, `run_mutation_tests`, `run_affected_tests`, `find_flaky_tests` |
 | Decompiled code as a workspace (go-to-definition, find usages) and IL view | 🟡 Medium | ✅ closed for navigation: `assembly_workspace` (search/source/il/references/outline over a Roslyn workspace per MVID) + `disassemble` for IL; `action=il` links the decompiled symbol and its IL. Rename and debugging in decompiled code remain impossible (there is no source to write) |
 | Diagrams and exploration: interactive type/project graph, sequence diagram, structure view, code vision, TODO explorer | 🟢 Low | ⚠️ `export_dependency_graph` (projects/namespaces/types), `call_graph`, `sequence_diagram`, `control_flow_graph`, `track_value`, `find_todos`, `find_endpoints`, `solution_map` and `find_file` exist |
-| Rest of the "create/generate" family and context actions: long tail and live/postfix/file templates | 🟡 Medium | ⚠️ `context_action` covers 26 ids; `implement_members`, `create_from_usage`, `generate_docs`, `generate_dto_from_json`, `generate_builder` cover the frequent cases; templates and the long tail remain |
+| Rest of the "create/generate" family and context actions: long tail and live/postfix/file templates | 🟡 Medium | ⚠️ `context_action` covers 75 ids; `implement_members`, `create_from_usage`, `generate_docs`, `generate_dto_from_json`, `generate_builder` cover the frequent cases; templates and the long tail remain |
 | Inspection administration (per-scope severity, suppressions, `.DotSettings`, daemon with warm compilation) | 🟡 Medium | ✅ closed: `configure_inspection`, `suppress_finding`, `read_dot_settings`, `custom_inspections`, `naming_rules`, `find_spelling_issues`, `background_analysis`/`analysis_findings`; only ReSharper's proprietary catalogue remains outside |
 | Local history, three-way merge assistance, GitLab/Azure DevOps | 🟢 Low | ✅ closed on 2026-10-31: `local_history`, `git_conflicts` (conflict model), `git_rebase action=plan`, `git_patch`, `git_host` (GitLab/Azure DevOps/Bitbucket), inline review and `code_review` |
 | Minor refactorings: Extract Members to Partial, Inline Field, Transform Parameters, Extension → static, Invert Boolean, Make non-static, Move Type into Another Type, Generify | 🟢 Low | ✅ closed on 2026-10-31 (`extract_members_to_partial`, `inline_field`, `transform_parameters`, `extension_to_static`, `invert_boolean`, `make_non_static`, `move_type_to_nested_scope`, `generify`) |

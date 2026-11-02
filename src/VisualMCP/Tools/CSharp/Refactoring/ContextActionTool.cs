@@ -38,7 +38,13 @@ public static class ContextActionTool
         "concat_to_stringbuilder (a string local built with '+=' becomes a StringBuilder, appends and reads rewritten with it) · " +
         "linq_query_to_method / linq_method_to_query (the two directions of LINQ syntax, over from/where/orderby/select) · " +
         "convert_to_extension_block (a static class of 'this' extension methods becomes a C# 14 `extension(T receiver)` block) · " +
-        "string_to_raw / string_to_verbatim / string_to_regular (re-encoded from the value the compiler sees). " +
+        "string_to_raw / string_to_verbatim / string_to_regular (re-encoded from the value the compiler sees) · " +
+        "check_string_not_null_or_whitespace · add_argument_name · add/remove_tuple_component_name · " +
+        "add_switch_section_braces · convert_literal_to_hex / _binary / _decimal · use_target_typed_new / " +
+        "use_explicitly_typed_new · convert_to_default_expression · flip_relational_expression · " +
+        "invert_ternary_condition · if_to_ternary · add_inheritdoc · add_exception_docs · remove_region · " +
+        "use_environment_newline · remove_params_modifier / set_params_modifier · await_foreach. " +
+        "On C#, ReSharper's own Action names are accepted as aliases (AddBracesAction → add_braces). " +
         "A .vb file routes to the Visual Basic engine, which implements the ids that have a VB spelling (guards, Try/If/Using " +
         "wrapping, Imports, interpolation, digit separators, named arguments, use var/explicit type, split declaration, " +
         "StringBuilder, merge/split checks, conditional access, Select Case, For Each↔For, invert loop) and refuses the " +
