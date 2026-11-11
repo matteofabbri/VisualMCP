@@ -59,9 +59,11 @@ These are load-bearing, not style:
 `Dashboard/DashboardServer` hosts a minimal ASP.NET Core app in a second, in-process host on
 **http://127.0.0.1:4677** (else the last port in the store, else an OS-assigned one). It serves
 the process state, the tool catalogue, the `debug.log` tail and one page per table found in
-`sqlite_master`, so new store tables appear without code changes. It binds loopback only, every
-route is a `GET`, logging providers are cleared first (stdout belongs to the protocol), and a port
-that cannot be bound is a warning, never an MCP failure. `VISUALMCP_DASHBOARD=off` disables it;
+`sqlite_master`, so new store tables appear without code changes. The `/board` page is the one
+writing surface: it renders the kanban and edits it through `DashboardBoard`, which calls the same
+`IBoardService` the tools use, behind a same-origin JSON + `X-VisualMCP: 1` guard. It binds loopback
+only, logging providers are cleared first (stdout belongs to the protocol), and a port that cannot
+be bound is a warning, never an MCP failure. `VISUALMCP_DASHBOARD=off` disables it;
 `VISUALMCP_DASHBOARD_PORT` / `VISUALMCP_DASHBOARD_HOST` move it.
 
 ## Logging

@@ -16,9 +16,9 @@ namespace VisualMCP.Dashboard;
 
 /// <summary>
 /// The dashboard's HTTP host: a small ASP.NET Core application started next to the MCP stdio
-/// transport, bound to loopback. It is an observer — every route is a GET that reads the SQLite
-/// store and the process — so it can run at any time without touching the solution, and a
-/// failure to bind a port leaves the MCP server completely unaffected.
+/// transport, bound to loopback. Every page reads the SQLite store and the process, and the board
+/// page is the one surface that writes — through the same <see cref="Snitch.Planning.IBoardService"/>
+/// the board tools call. A failure to bind a port leaves the MCP server completely unaffected.
 /// </summary>
 /// <remarks>
 /// Port choice, in order: the preferred port (4677 by default), the port the dashboard last
@@ -31,11 +31,13 @@ public sealed class DashboardServer : IAsyncDisposable
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     private readonly DashboardOptions _options;
     private readonly DashboardDatabase _database;
+    private readonly DashboardBoard _board;
     private readonly DashboardPages _pages;
     private readonly ILogger<DashboardServer> _logger;
 
@@ -48,10 +50,12 @@ public sealed class DashboardServer : IAsyncDisposable
         IServiceProvider services,
         DashboardOptions options,
         DashboardDatabase database,
+        DashboardBoard board,
         ILogger<DashboardServer> logger)
     {
         _options = options;
         _database = database;
+        _board = board;
         _logger = logger;
         _pages = new DashboardPages(database, options, services);
         _info = new DashboardInfo(0, null, "starting", null, ProcessStart());
@@ -210,8 +214,41 @@ public sealed class DashboardServer : IAsyncDisposable
         app.MapGet("/tables", (HttpContext http) => Render(http, info => _pages.TablesPage(info)));
         app.MapGet("/schema", (HttpContext http) => Render(http, info => _pages.Schema(info)));
         app.MapGet("/tools", (HttpContext http) => Render(http, info => _pages.ToolsPage(info)));
+        app.MapGet("/board", (Delegate)((HttpContext http) => Board(http)));
 
         app.MapGet("/t/{table}", (string table, HttpContext http) => Table(http, table));
+
+        app.MapGet("/api/board", async () =>
+            Results.Json(new { columns = await _board.SnapshotAsync() }, JsonOptions));
+
+        // The cast to Delegate matters: without it the lambda binds to the RequestDelegate overload,
+        // which returns void, and the IResult a board write produces would be discarded.
+        app.MapPost("/api/board/move", (Delegate)((HttpContext http) => BoardWrite(http, body =>
+            _board.MoveAsync(Number(body, "id") ?? 0, Text(body, "status"), Number(body, "position")))));
+
+        app.MapPost("/api/board/update", (Delegate)((HttpContext http) => BoardWrite(http, body =>
+            _board.UpdateAsync(
+                Number(body, "id") ?? 0,
+                Text(body, "title"),
+                Text(body, "description"),
+                Text(body, "priority"),
+                Text(body, "assignee"),
+                TextOrArray(body, "labels")))));
+
+        app.MapPost("/api/board/comment", (Delegate)((HttpContext http) => BoardWrite(http, body =>
+            _board.CommentAsync(Number(body, "id") ?? 0, Text(body, "body"), Text(body, "author")))));
+
+        app.MapPost("/api/board/add", (Delegate)((HttpContext http) => BoardWrite(http, body =>
+            _board.AddAsync(
+                Text(body, "title") ?? string.Empty,
+                Text(body, "description"),
+                Text(body, "status"),
+                Text(body, "priority"),
+                Text(body, "assignee"),
+                TextOrArray(body, "labels")))));
+
+        app.MapPost("/api/board/delete", (Delegate)((HttpContext http) => BoardWrite(http, body =>
+            _board.DeleteAsync(Number(body, "id") ?? 0))));
 
         app.MapGet("/log", (HttpContext http) =>
         {
@@ -367,6 +404,132 @@ public sealed class DashboardServer : IAsyncDisposable
     // An error page is rendered without the store's command list: it may be the reason the page failed.
     private string Shell(string title, string body) =>
         Html.Document(title, "", Html.E($"pid {Environment.ProcessId} · :{_info.Port}"), body, "");
+
+    // ── the board ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The board page. It is the one page that can change something (a card), and it does so through
+    /// the POST endpoints below — never from the GET.
+    /// </summary>
+    private async Task<IResult> Board(HttpContext http)
+    {
+        try
+        {
+            var columns = await _board.SnapshotAsync();
+            var requested = int.TryParse(
+                http.Request.Query["card"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
+                ? id
+                : (int?)null;
+            var selected = requested is null ? null : await _board.DetailAsync(requested.Value);
+
+            return Results.Content(
+                _pages.BoardPage(_info, columns, selected, _database.Exists, requested),
+                "text/html; charset=utf-8");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Web dashboard page failed: {Path}", http.Request.Path);
+            return Results.Content(
+                Shell("Error", "<h1>500 - this page failed</h1>" +
+                               "<p class=\"sub\">The dashboard caught the exception below; the MCP server keeps running.</p>" +
+                               $"<pre class=\"full\">{Html.E(ex.ToString())}</pre>" +
+                               "<p><a class=\"btn\" href=\"/board\">Back to the board</a></p>"),
+                "text/html; charset=utf-8", Encoding.UTF8, StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// One board write. It requires more than the other routes because it is the only one that changes
+    /// the store: a same-origin <c>application/json</c> POST carrying the <c>X-VisualMCP: 1</c> header.
+    /// A browser cannot send that header cross-origin without a CORS preflight this host never grants,
+    /// and an HTML form cannot set either the content type or the header, so a page on another origin
+    /// cannot drive it.
+    /// </summary>
+    private async Task<IResult> BoardWrite(HttpContext http, Func<JsonElement, Task<BoardWriteResult>> action)
+    {
+        if (!IsWriteAllowed(http))
+            return Results.Json(
+                new { ok = false, error = "A board write needs a same-origin application/json POST with the X-VisualMCP: 1 header." },
+                JsonOptions, statusCode: StatusCodes.Status403Forbidden);
+
+        JsonDocument document;
+        try
+        {
+            document = await JsonDocument.ParseAsync(http.Request.Body, cancellationToken: http.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            return Results.Json(
+                new { ok = false, error = "The request body is not valid JSON." },
+                JsonOptions, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        using (document)
+        {
+            BoardWriteResult result;
+            try
+            {
+                result = await action(document.RootElement);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+            {
+                return Results.Json(
+                    new { ok = false, error = ex.Message },
+                    JsonOptions, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Json(
+                new { ok = result.Ok, id = result.Id, error = result.Error },
+                JsonOptions,
+                statusCode: result.Ok ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static bool IsWriteAllowed(HttpContext http)
+    {
+        var contentType = http.Request.ContentType ?? string.Empty;
+        if (!contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!string.Equals(http.Request.Headers["X-VisualMCP"].ToString(), "1", StringComparison.Ordinal)) return false;
+
+        var origin = http.Request.Headers.Origin.ToString();
+        if (string.IsNullOrEmpty(origin)) return true;   // a tool or curl: no browser policy to enforce
+
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var parsed)) return false;
+        var host = http.Request.Host;
+        return string.Equals(parsed.Host, host.Host, StringComparison.OrdinalIgnoreCase)
+            && parsed.Port == (host.Port ?? (http.Request.IsHttps ? 443 : 80));
+    }
+
+    private static string? Text(JsonElement body, string name) =>
+        body.ValueKind == JsonValueKind.Object
+        && body.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static int? Number(JsonElement body, string name) =>
+        body.ValueKind == JsonValueKind.Object
+        && body.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetInt32(out var number)
+            ? number
+            : null;
+
+    /// <summary>A label set arrives as a JSON array from the page or as a comma list from a script.</summary>
+    private static string? TextOrArray(JsonElement body, string name)
+    {
+        if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty(name, out var value)) return null;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Array => string.Join(",", value.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString())
+                .Where(text => !string.IsNullOrWhiteSpace(text))),
+            JsonValueKind.String => value.GetString(),
+            _ => null,
+        };
+    }
 
     // ── query strings ────────────────────────────────────────────────────────
 

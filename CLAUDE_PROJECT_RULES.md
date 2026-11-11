@@ -142,7 +142,6 @@ Do not add NuGet packages without a concrete reason. Prefer .NET BCL APIs over t
 
 - Imperative subject line: `Add ...`, `Fix ...`, `Refactor ...`
 - Body explains *why*, not just *what*
-- Always include `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` when Claude authored the commit
 - Kill the running MCP server process before building so the `.exe` is not locked
 
 ---

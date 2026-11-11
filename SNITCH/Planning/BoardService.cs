@@ -140,6 +140,11 @@ public sealed class BoardService : IBoardService
         ".http", ".rest", ".xml", ".config",
     };
 
+    /// <summary>The refusal every board operation returns when the workspace has no store.</summary>
+    private const string NoStoreError =
+        "No solution is loaded (or its folder is not writable), so there is no board database. " +
+        "Start the server in a folder that contains a .sln/.slnx, so the workspace has a store.";
+
     private readonly IVisualMcpStore _store;
 
     public BoardService(IVisualMcpStore store) => _store = store;
@@ -222,7 +227,8 @@ public sealed class BoardService : IBoardService
             Apply("title", title?.Trim());
             Apply("description", description);
             Apply("priority", level);
-            Apply("labels", labels is null ? null : Join(labels));
+            // An empty array clears the set; null (the argument omitted) leaves it alone.
+            Apply("labels", labels is null ? null : Join(labels) ?? string.Empty);
             Apply("assignee", assignee);
 
             if (changes.Count == 0)
@@ -1324,21 +1330,36 @@ public sealed class BoardService : IBoardService
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens the board's own connection. The board is one of several writers of the workspace file
+    /// (two sessions, the indexes, the edit history), so it waits on the others instead of failing
+    /// while one of them is mid-write.
+    /// </summary>
+    private static SqliteConnection Open(string path)
+    {
+        var connection = new SqliteConnection($"Data Source={path}");
+        connection.Open();
+
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA busy_timeout=5000;";
+            pragma.ExecuteNonQuery();
+        }
+
+        VisualMcpSchema.Ensure(connection);
+        return connection;
+    }
+
     private Task<object> With(Func<VisualMcpDbContext, object> work)
     {
         var path = _store.EnsureDatabase();
         if (path is null)
-            return Task.FromResult<object>(new
-            {
-                error = "No solution is loaded (or its folder is not writable), so there is no board database. " +
-                        "Call load_solution first.",
-            });
+            return Task.FromResult<object>(new { error = NoStoreError });
 
         try
         {
-            using var connection = new SqliteConnection($"Data Source={path}");
-            connection.Open();
-            VisualMcpSchema.Ensure(connection);
+            using var connection = Open(path);
 
             using var context = VisualMcpSchema.CreateContext(connection);
             return Task.FromResult(work(context));
@@ -1353,18 +1374,11 @@ public sealed class BoardService : IBoardService
     private Task<T> WithTyped<T>(Func<VisualMcpDbContext, T> work, Func<string, T> failure)
     {
         var path = _store.EnsureDatabase();
-        if (path is null)
-        {
-            return Task.FromResult(failure(
-                "No solution is loaded (or its folder is not writable), so there is no board database. " +
-                "Call load_solution first."));
-        }
+        if (path is null) return Task.FromResult(failure(NoStoreError));
 
         try
         {
-            using var connection = new SqliteConnection($"Data Source={path}");
-            connection.Open();
-            VisualMcpSchema.Ensure(connection);
+            using var connection = Open(path);
 
             using var context = VisualMcpSchema.CreateContext(connection);
             return Task.FromResult(work(context));
@@ -1383,9 +1397,7 @@ public sealed class BoardService : IBoardService
 
         try
         {
-            using var connection = new SqliteConnection($"Data Source={path}");
-            connection.Open();
-            VisualMcpSchema.Ensure(connection);
+            using var connection = Open(path);
 
             using var context = VisualMcpSchema.CreateContext(connection);
             return work(context);

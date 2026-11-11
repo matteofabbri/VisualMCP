@@ -136,8 +136,11 @@ immediately. FTS5 shadow tables are hidden.
 | `GET /api/overview` | Process facts, dashboard state, database path and size, per-table row counts |
 | `GET /api/tables` | Every table: name, kind, rows, columns, title, area, description |
 | `GET /api/tables/{table}` | One page of rows plus the column list |
+| `GET /api/board` | The board: five columns with their cards |
+| `POST /api/board/{add,update,move,comment,delete}` | One board write; same-origin `application/json` plus the `X-VisualMCP: 1` header, otherwise `403` |
 
-Blobs are summarised (`<blob N bytes>`), never served.
+Blobs are summarised (`<blob N bytes>`), never served. The board `POST` endpoints are the only writes
+in the dashboard; every other route is a `GET`.
 
 ## The solution store
 

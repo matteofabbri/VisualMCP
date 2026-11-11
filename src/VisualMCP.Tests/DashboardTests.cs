@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Snitch.Planning;
 using Snitch.Storage;
 using VisualMCP.Dashboard;
 using Xunit;
@@ -164,6 +167,7 @@ public sealed class DashboardTests : IDisposable
         services.AddSingleton<IVisualMcpStore>(_store);
         services.AddSingleton(new DashboardOptions { PreferredPort = 0, LogPath = logPath });
         services.AddSingleton<DashboardDatabase>();
+        services.AddSingleton<DashboardBoard>();
         services.AddSingleton<DashboardServer>();
 
         await using var provider = services.BuildServiceProvider();
@@ -235,5 +239,182 @@ public sealed class DashboardTests : IDisposable
             await server.StopAsync();
             Assert.False(server.IsRunning);
         }
+    }
+
+    // ── the board page ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task The_board_page_renders_the_five_columns_and_the_card_detail()
+    {
+        await new BoardService(_store).AddAsync(
+            "First card", "The description", "todo", "high", ["api"], "me");
+
+        var (provider, server) = await StartBoardAsync();
+        await using var host = provider;
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var root = server.Info.Url!.TrimEnd('/');
+
+            var page = await client.GetStringAsync($"{root}/board");
+            Assert.Contains("First card", page);
+            Assert.Contains("In progress", page);       // the five columns are always drawn
+            Assert.Contains("Drag a card", page);
+            Assert.Contains("New card", page);
+
+            var detail = await client.GetStringAsync($"{root}/board?card=1");
+            Assert.Contains("Card #1", detail);
+            Assert.Contains("The description", detail);
+            Assert.Contains("Save changes", detail);
+            Assert.Contains("History", detail);
+
+            var api = await client.GetStringAsync($"{root}/api/board");
+            Assert.Contains("\"title\": \"First card\"", api);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task A_board_write_needs_the_header_and_a_same_origin_json_body()
+    {
+        await new BoardService(_store).AddAsync("Movable", null, "backlog", "medium", null, null);
+
+        var (provider, server) = await StartBoardAsync();
+        await using var host = provider;
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var root = server.Info.Url!.TrimEnd('/');
+
+            // A plain JSON POST — what a form or another site could send — is refused.
+            var refused = await client.PostAsync(
+                $"{root}/api/board/move", JsonContent.Create(new { id = 1, status = "done" }));
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+
+            // The header is there, the origin is not: still refused.
+            var foreign = new HttpRequestMessage(HttpMethod.Post, $"{root}/api/board/move")
+            {
+                Content = JsonContent.Create(new { id = 1, status = "done" }),
+            };
+            foreign.Headers.Add("X-VisualMCP", "1");
+            foreign.Headers.Add("Origin", "http://evil.example");
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(foreign)).StatusCode);
+
+            // This page's own request succeeds — and a same-origin Origin header is accepted.
+            var move = new HttpRequestMessage(HttpMethod.Post, $"{root}/api/board/move")
+            {
+                Content = JsonContent.Create(new { id = 1, status = "done", position = 0 }),
+            };
+            move.Headers.Add("X-VisualMCP", "1");
+            move.Headers.Add("Origin", root);
+            var moved = await client.SendAsync(move);
+            Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+            Assert.Contains("\"ok\": true", await moved.Content.ReadAsStringAsync());
+
+            var snapshot = await client.GetStringAsync($"{root}/api/board");
+            Assert.Contains("\"status\": \"done\"", snapshot);
+
+            // A status the board does not have is a 400 with the service's own explanation.
+            var invalid = new HttpRequestMessage(HttpMethod.Post, $"{root}/api/board/move")
+            {
+                Content = JsonContent.Create(new { id = 1, status = "nope" }),
+            };
+            invalid.Headers.Add("X-VisualMCP", "1");
+            var bad = await client.SendAsync(invalid);
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+            Assert.Contains("not a column", await bad.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task A_card_can_be_added_commented_edited_and_deleted_from_the_page()
+    {
+        var (provider, server) = await StartBoardAsync();
+        await using var host = provider;
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var root = server.Info.Url!.TrimEnd('/');
+
+            var added = await BoardWrite(client, $"{root}/api/board/add", new
+            {
+                title = "From the web", status = "review", priority = "highest",
+            });
+            Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+
+            int id;
+            using (var json = JsonDocument.Parse(await added.Content.ReadAsStringAsync()))
+                id = json.RootElement.GetProperty("id").GetInt32();
+            Assert.True(id > 0);
+
+            var commented = await BoardWrite(client, $"{root}/api/board/comment", new
+            {
+                id, body = "looks good", author = "test",
+            });
+            Assert.Equal(HttpStatusCode.OK, commented.StatusCode);
+
+            var updated = await BoardWrite(client, $"{root}/api/board/update", new
+            {
+                id, title = "Renamed", description = "New body", priority = "low",
+                assignee = "qa", labels = new[] { "web" },
+            });
+            Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+
+            var detail = await client.GetStringAsync($"{root}/board?card={id}");
+            Assert.Contains("Renamed", detail);
+            Assert.Contains("New body", detail);
+            Assert.Contains("looks good", detail);
+            Assert.Contains("qa", detail);
+
+            // An empty label set clears the labels; the board answers with none.
+            var cleared = await BoardWrite(client, $"{root}/api/board/update", new
+            {
+                id, labels = Array.Empty<string>(),
+            });
+            Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+            Assert.Contains("\"labels\": []", await client.GetStringAsync($"{root}/api/board"));
+
+            var deleted = await BoardWrite(client, $"{root}/api/board/delete", new { id });
+            Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+
+            var after = await client.GetStringAsync($"{root}/board");
+            Assert.DoesNotContain("Renamed", after);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    /// <summary>A dashboard host whose port is assigned by the OS; the caller stops it.</summary>
+    private async Task<(ServiceProvider Provider, DashboardServer Server)> StartBoardAsync()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IVisualMcpStore>(_store);
+        services.AddSingleton(new DashboardOptions { PreferredPort = 0 });
+        services.AddSingleton<DashboardDatabase>();
+        services.AddSingleton<DashboardBoard>();
+        services.AddSingleton<DashboardServer>();
+
+        var provider = services.BuildServiceProvider();
+        var server = provider.GetRequiredService<DashboardServer>();
+        Assert.True(await server.StartAsync(), server.Info.LastError);
+        return (provider, server);
+    }
+
+    /// <summary>One guarded board write: JSON body plus the header the page's script sends.</summary>
+    private static async Task<HttpResponseMessage> BoardWrite(HttpClient client, string url, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+        request.Headers.Add("X-VisualMCP", "1");
+        return await client.SendAsync(request);
     }
 }

@@ -1,6 +1,6 @@
 # Web dashboard
 
-A read-only web view of the running server and of the solution store it writes
+A web view of the running server and of the solution store it writes
 (`<solution>/.visualMCP/visualmcp.db`). It is hosted **inside the MCP process** — no separate
 process to launch — and answers on loopback only.
 
@@ -8,8 +8,9 @@ process to launch — and answers on loopback only.
 http://127.0.0.1:4677
 ```
 
-There is no page that writes: every route is a `GET` over SQLite and the live process. A viewer
-therefore cannot corrupt the store, and an unreachable port cannot break the MCP session.
+Every page is read-only except `/board`: the board page is the one surface that changes the store,
+and its writes go through the same `IBoardService` the `board_*` tools call. An unreachable port
+therefore cannot break the MCP session.
 
 ## Port: 4677, then the remembered port, then a random one
 
@@ -42,6 +43,7 @@ The current URL is always visible on the overview page and in `GET /api/health`.
 | Page | What it shows |
 |---|---|
 | `/` | Process facts (pid, uptime, working set, GC heap, runtime, transport, working directory, log path), the loaded solutions with their project/document counts, the counts of the most important tables, the latest tool calls and edits |
+| `/board` | The project's kanban: five columns, one draggable card per item, the detail panel of the card named by `?card=<id>` (fields, comments, history), and a New card form. The only page that writes |
 | `/tables` | Every table in the store, grouped by area, with its row count and column count |
 | `/t/{table}` | One page per table: substring filter over every non-blob column, sortable headers, paging, and `CSV` / `JSON` exports |
 | `/schema` | The columns of every table as SQLite reports them (`type`, `not null`, `primary key`) |
@@ -56,6 +58,22 @@ invoked**: the last fourteen tool calls the server received, newest first, each 
 whole log. It reads the same `command_log` rows that the overview's *Recent tool calls* card shows,
 so the calls stay visible while you read any other page, and the process facts (pid, uptime, port)
 sit at its foot. On a window narrower than 900 px the column folds to the top of the page.
+
+## The board page
+
+`/board` renders the same board the tools read: five columns (`backlog`, `todo`, `in_progress`,
+`review`, `done`), the cards in position order, and the detail panel of the card named by
+`?card=<id>` — title, description, priority, labels, assignee, comments and the full change history.
+
+- **Drag a card** onto another column to move it; the drop position is the card's new index.
+- **Open a card** (`/board?card=<id>`) to edit its fields, move it with a select, comment on it or
+  delete it.
+- **New card** creates one in the chosen column.
+
+Every write is a `POST` to `/api/board/*` and requires a same-origin `application/json` body with the
+`X-VisualMCP: 1` header; a plain form post, a cross-origin request or a POST without the header is
+answered with `403`. The write goes through the same service a `board_move` or `board_update` call
+uses, so the card's history records it identically.
 
 **One page per table, whatever the schema is.** Tables are discovered from `sqlite_master`, not
 from a hard-coded list, so a table added by a future feature gets a page immediately. The known
@@ -103,6 +121,12 @@ The tables the store is known to contain today:
 | `GET /api/overview` | Process facts, dashboard state, database path and size, per-table row counts |
 | `GET /api/tables` | Every table: name, kind, rows, columns, title, area, description |
 | `GET /api/tables/{table}` | One page of rows (`page`, `size`, `q`, `sort`, `dir`) as a column-name-free array plus the column list |
+| `GET /api/board` | The board: five columns with their cards |
+| `POST /api/board/add` | `{title, description?, status?, priority?, assignee?, labels?}` → `{ok, id}` |
+| `POST /api/board/update` | `{id, title?, description?, priority?, assignee?, labels?}`; an empty `labels` array clears the set |
+| `POST /api/board/move` | `{id, status, position?}` → `{ok}` |
+| `POST /api/board/comment` | `{id, body, author?}` → `{ok}` |
+| `POST /api/board/delete` | `{id}` → `{ok}` |
 
 Blobs are summarized (`<blob N bytes>`) in every JSON and CSV answer: a dashboard answer must
 never carry a file's bytes.
@@ -118,6 +142,9 @@ never carry a file's bytes.
   HTML-encoded).
 - **Table names** come from `sqlite_master`: a name supplied in the URL is resolved against the
   database and the *returned* name is what reaches the SQL, so a request cannot inject SQL.
+- **Board writes are guarded**: a POST needs a same-origin `application/json` body and the
+  `X-VisualMCP: 1` header, which an HTML form cannot set and another origin cannot send without a
+  preflight this host never grants.
 - **A discovery probe skips the dashboard**, like it skips the eager solution load: a probe never
   pays for opening the store.
 - The dashboard starts only after the client's first message, in the same background task that
@@ -130,14 +157,16 @@ src/VisualMCP/Dashboard/
   DashboardOptions.cs    ← port policy (preferred → remembered → random), env overrides
   DashboardDatabase.cs   ← read-only SQLite: tables, columns, rows, paging, search, export
   DashboardCatalogue.cs  ← title/area/description of the known tables
-  DashboardPages.cs      ← the pages (overview, tables, one per table, schema, tools, log)
+  DashboardBoard.cs      ← the board page's typed view over IBoardService, and the guarded writes
+  DashboardPages.cs      ← the pages (overview, board, tables, one per table, schema, tools, log)
   Html.cs                ← document template, stylesheet, escaping, small components
-  DashboardServer.cs     ← the Kestrel host, routing, JSON/CSV endpoints, port persistence
+  DashboardServer.cs     ← the Kestrel host, routing, JSON/CSV endpoints, board API, port persistence
 ```
 
 The project references the `Microsoft.AspNetCore.App` shared framework for the HTTP host; the
 self-contained release bundles it and the framework-dependent publish adds no files.
 
 Tests: `src/VisualMCP.Tests/DashboardTests.cs` — the data layer (discovery, filtering, paging,
-blob exclusion, injection refusal), the command list the sidebar reads, the port policy, and a real
-listener that serves every page.
+blob exclusion, injection refusal), the command list the sidebar reads, the port policy, a real
+listener that serves every page, and the board page: the rendered columns and detail, the guarded
+writes, and a card added, commented, edited and deleted through the API.

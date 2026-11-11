@@ -582,10 +582,12 @@ static async Task RunServerAsync(string[] args)
             services.AddSingleton<VisualMCP.Execution.IPlanToolInvoker, VisualMCP.Execution.McpToolInvoker>();
             services.AddSingleton<VisualMCP.Execution.IPlanExecutionService, VisualMCP.Execution.PlanExecutionService>();
 
-            // The web dashboard (Dashboard/): a read-only window on this process and the solution
-            // store, on http://127.0.0.1:4677 — or the port it last used, or a free one.
+            // The web dashboard (Dashboard/): a window on this process and the solution store, on
+            // http://127.0.0.1:4677 — or the port it last used, or a free one. Every page is read-only
+            // except /board, whose writes go through the same IBoardService the board tools use.
             services.AddSingleton(VisualMCP.Dashboard.DashboardOptions.FromEnvironment(logPath));
             services.AddSingleton<VisualMCP.Dashboard.DashboardDatabase>();
+            services.AddSingleton<VisualMCP.Dashboard.DashboardBoard>();
             services.AddSingleton<VisualMCP.Dashboard.DashboardServer>();
 
             services.AddMcpServer(options =>

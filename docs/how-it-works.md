@@ -17,8 +17,9 @@ The process does four things:
   frameworks, references and compiler diagnostics the way an IDE does.
 - **Keeps derived data** in `<solution>/.visualMCP/visualmcp.db` — indexes, edit history, the board and
   cached reports. The source files on disk remain the only truth.
-- **Serves an optional read-only dashboard** on a loopback port (`http://127.0.0.1:4677` by default).
-  Every route is a `GET`; `VISUALMCP_DASHBOARD=off` disables it.
+- **Serves an optional dashboard** on a loopback port (`http://127.0.0.1:4677` by default).
+  Every page is read-only except `/board`, whose writes go through the board service;
+  `VISUALMCP_DASHBOARD=off` disables it.
 - **Writes its log** to `~/.claude/mcp-servers/VisualMCP/debug.log`.
 
 Network access happens only for the jobs listed under [Privacy](#privacy).
@@ -97,7 +98,8 @@ The server hosts a **read-only** web view of itself at **http://127.0.0.1:4677**
 A column fixed on the left of every page holds the navigation and the **commands invoked** — the most
 recent tool calls, newest first, each linking to that tool's own calls in the command log.
 
-There is no page that writes: every route is a `GET`. Table names are resolved against `sqlite_master`,
+Every page is a `GET` except the board page, whose writes go through the board service behind a
+same-origin JSON + `X-VisualMCP: 1` guard. Table names are resolved against `sqlite_master`,
 so a name in the URL cannot inject SQL. Response headers include a strict CSP and `no-store`, and blobs
 are summarised rather than served.
 
