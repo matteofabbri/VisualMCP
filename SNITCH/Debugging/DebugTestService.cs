@@ -71,6 +71,7 @@ public sealed class DebugTestService : IDebugTestService
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(project.FilePath!)!,
         };
+        Snitch.Execution.ProcessRunner.RemoveInheritedMsBuildEnv(start);
         start.ArgumentList.Add("test");
         start.ArgumentList.Add(project.FilePath!);
         if (!string.IsNullOrWhiteSpace(filter))

@@ -20,6 +20,12 @@ public static class ProcessRunner
             WorkingDirectory       = workingDir,
         };
 
+        // Children must not import the SDK targets an in-process MSBuild evaluation pinned into
+        // this process's environment: with MSBuildSDKsPath inherited, a dotnet build whose CLI
+        // resolves a different SDK via global.json loads that SDK's resolver against the wrong
+        // runtime and dies with MSB4237. See RemoveInheritedMsBuildEnv.
+        RemoveInheritedMsBuildEnv(psi);
+
         // The disk policy first, so an explicit per-call value still wins: a build started after
         // disk_usage action=guard writes its temp and restore caches on the drive the policy names.
         Platform.DiskPolicy.ApplyTo(psi);
@@ -64,6 +70,20 @@ public static class ProcessRunner
 
         var exitCode = timedOut ? -1 : SafeExitCode(proc);
         return (exitCode, timedOut, outStr, errStr, sw.Elapsed);
+    }
+
+    /// <summary>
+    /// Removes the MSBuild-internal variables an in-process evaluation leaves in the server's
+    /// environment for its whole lifetime (MSBuildSDKsPath, MSBuildExtensionsPath, MSBUILD_EXE_PATH),
+    /// so the child resolves its own SDK — global.json honored — instead of importing the pinned
+    /// SDK's targets and resolvers (MSB4237 on an SDK/runtime mismatch). Every child starts clean.
+    /// </summary>
+    public static void RemoveInheritedMsBuildEnv(ProcessStartInfo psi)
+    {
+        psi.Environment.Remove("MSBuildSDKsPath");
+        psi.Environment.Remove("MSBuildExtensionsPath");
+        psi.Environment.Remove("MSBuildToolsPath");
+        psi.Environment.Remove("MSBUILD_EXE_PATH");
     }
 
     public static string Truncate(string s, int max = 16_000) =>
