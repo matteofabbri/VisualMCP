@@ -247,7 +247,7 @@ See [Refactoring and style](guides/refactoring.md) for the workflow and guarante
 | `run_config` | ✎ preview Save and list the ways a project is launched — project, application arguments, configuration, environment variables — in `.visualMCP/run-configs.json`; `run_project configName=…` applies one |
 | `launch_settings` | ✎ preview `Properties/launchSettings.json` as data: list, add/update or remove profiles, preserving `$schema`, `iisSettings` and the profiles nobody touched |
 | `run_command` | Execute a shell command in PowerShell, pwsh, cmd or bash (PowerShell by default on Windows, bash elsewhere) — pipes, redirection, nested shells, long scripts; the process tree is killed at the timeout |
-| `run_tests` | Run `dotnet test` — the whole solution, or the test projects a `projectFilter` selects — and return pass/fail/skip counts, per-project results and the failing tests; the failures are recorded for `rerun_failed` |
+| `run_tests` | Run `dotnet test` — the whole solution, or the test projects a `projectFilter` selects — and return pass/fail/skip counts, per-project results and the failing tests; the failures are recorded for `rerun_failed`. The whole call is bounded by `timeoutSeconds` (default 600, shared by every target) and the `dotnet test` process tree is killed when it expires, so the answer is `outcome: TimedOut` instead of a run left alive |
 | `get_test_coverage_map` | Per-class and per-method line coverage, plus branch coverage (Cobertura `branch-rate`), for the named test project or the solution; requires `coverlet.collector` in the test projects |
 | `run_test` | Run one test or one class without hand-building `--filter`; structured TRX result (passed/failed, failure messages) and the failures are recorded |
 | `rerun_failed` | ✎ Re-run exactly the tests that failed in the last `run_test` or `run_tests`, from `.visualMCP/last-test-run.json` — per project, cleared by a green run |
@@ -506,7 +506,7 @@ Everything else changes the repository; the destructive cases require `confirm=t
 | `git_diff` | Working, staged or a ref/range diff; optionally a per-file stat |
 | `git_log` | Recent commits with hash, author, date, subject; filter by path |
 | `git_stage` | Stage paths or everything |
-| `git_commit` | Commit staged changes with a message; optionally stage all first; `conventional=true` refuses a message that breaks Conventional Commits |
+| `git_commit` | Commit staged changes with a message; staging is part of the call (`stageAll=true` for everything, `paths=[…]` for just those files, and `paths` wins), so stage-then-commit is one call; `conventional=true` refuses a message that breaks Conventional Commits |
 | `commit_lint` | Conventional Commits as data: lint a `message`, one `revision` (HEAD by default) or a `range` (`origin/main..HEAD`) and get the parsed type/scope/description/breaking/footers plus every violation with its rule id; merge and `git revert` messages are exempt |
 | `git_create_branch` | Create a branch and optionally switch to it |
 | `git_branch` | List, create, delete, rename or switch branches |
@@ -635,7 +635,7 @@ read-only unless `board_audit` is called with `close=true`; the other board tool
 | `board_forget` | Retire a topic; its versions stay as history but are no longer returned |
 | `board_add` | Create a kanban card with column, priority, labels and assignee; `steps` puts a checklist in its description |
 | `board_update` | Edit a card's fields; every change goes into its history |
-| `board_move` | Move a card across backlog → todo → in_progress → review → done; `note=` records the evidence as a comment |
+| `board_move` | Move a card across backlog → todo → in_progress → review → done; `note=` records the evidence as a comment. `ids=[…]` moves several cards to one column in a single transaction — closing a batch of finished cards is one call |
 | `board_comment` | Append a comment to a card |
 | `board_list` | Filter cards by column, priority, assignee, label or text |
 | `board_show` | One card with all comments and its full history |

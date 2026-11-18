@@ -59,6 +59,27 @@ public sealed class GitServiceTests
     }
 
     [Fact]
+    public async Task GitCommit_StagesTheGivenPathsAndCommitsThemInOneCall()
+    {
+        using var repo = new TestGitRepo();
+        repo.Write("a.txt", "1");
+        repo.Write("b.txt", "1");
+        repo.Commit("baseline");
+
+        repo.Write("a.txt", "2");
+        repo.Write("b.txt", "2");
+
+        var result = await repo.Service.CommitAsync("a only", stageAll: false, allowEmpty: false,
+            repo.Directory, paths: ["a.txt"]);
+        ResultAssert.Succeeded(result);
+
+        Assert.Equal("2", repo.Capture("show", "HEAD:a.txt").Trim());
+        // b.txt was never staged, so it is not in the commit and is still a working-tree change.
+        Assert.Equal("1", repo.Capture("show", "HEAD:b.txt").Trim());
+        Assert.Contains("b.txt", repo.Capture("status", "--porcelain"));
+    }
+
+    [Fact]
     public async Task GitBranch_CreatesRenamesListsAndDeletes()
     {
         using var repo = new TestGitRepo();

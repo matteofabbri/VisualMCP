@@ -195,7 +195,11 @@ public static class ConfigEditor
             ["type"] = "stdio",
             ["command"] = command,
             ["args"] = new JsonArray(),
-            ["timeoutMs"] = 60000,
+            // The client abandons a tool call after this. 60 s cut every long run mid-flight (a full
+            // suite, a benchmark, a mutation run) and left 'dotnet test' alive in the server, so it has
+            // to outlast the slowest server-side default: run_tests 600 s, mutation testing 1800 s is
+            // the one call that still needs a narrower scope or a raised value by hand.
+            ["timeoutMs"] = 900000,
         };
         if (!string.IsNullOrEmpty(argument)) entry["args"] = new JsonArray(argument);
         return entry;

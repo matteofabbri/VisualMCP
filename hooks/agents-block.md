@@ -24,10 +24,15 @@ In a .NET repository, use these tools instead of shell probes or reading files b
 | `ls -R`, `dir /s`, "walk down this tree to see the shape" | `read_tree{path, depth, pattern}` — one call instead of one `list_directory` per level |
 | opening a type to see its members | `get_type_members` / `get_symbol_info` |
 | guessing whether the code compiles | `get_diagnostics` / `build_project` |
-| `dotnet test` once per project | `run_tests{projectFilter, extraArgs}` |
+| run only the tests a change reaches | `run_affected_tests{baseRef}` — git diff → the tests that reference the changed symbols, run in one call (`test_impact_analysis` lists them without running) |
+| re-run exactly what failed in the last run | `rerun_failed` |
+| one test, one class, or a raw `dotnet test --filter` | `run_test{testName?, className?, filter?}` |
+| the whole suite (the pre-merge gate, slow) | `run_tests{projectFilter?, extraArgs?, timeoutSeconds?}` |
 | rename / extract / move / change signature | `apply_rename`, `extract_interface`, `extract_method_candidates`, `change_signature`, `move_type` |
+| stage and commit (everything, or just some files) | `git_commit{stageAll: true}` / `git_commit{paths: [...]}` — staging is part of the call, not a separate `git_stage` |
 | `python - <<PY` / `sed -i` / `cat > file <<EOF` rewriting or creating a file | `Edit` / `Write` (never heredoc edits) |
 | "what is missing / what's next / what do we implement" | `board_brief` — one compact call: counts, the card to pick up, every open card with its age and a stale flag. `board_audit` says which open cards this build already ships; `board_board` / `board_list` are the full and the filtered view |
+| move or close several cards | `board_move{ids: [...], status, note}` — one call, one transaction, the note on every card |
 | remember a fact, a decision or a constraint for the next session | `board_remember{topic, body, kind}` (pinned ones ride along in `board_brief`), read back with `board_recall{query}` — NOT a `MEMORY.md`, a note file or a chat message |
 
 Rules:
@@ -44,6 +49,10 @@ Rules:
 - Prefer `build_project` / `run_tests` / `git_status` / `git_diff` / `git_log` over piping
   `dotnet build`, `dotnet test` or `git` through `grep`/`tail`: the MCP tools return
   structured errors and results instead of a log tail you have to read again.
+- After changing code, run `run_affected_tests` first: it derives the tests from the diff, so
+  the suite you run is the one the change reaches. Use `rerun_failed` to repeat a failure,
+  `run_test` for one test or class, and `run_tests` for the whole suite — that is the pre-merge
+  gate, not the loop you run after every edit.
 - At the start of work on a solution, read `read_project_docs` (README/docs) before code.
 - The board is the source of truth for what is missing and what comes next. When the user asks
   what is missing, what comes next or what to implement, call `board_brief` first — it answers in

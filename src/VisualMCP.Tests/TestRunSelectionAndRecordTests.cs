@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Snitch.Languages.CSharp.Testing;
 using Xunit;
 
@@ -132,6 +133,60 @@ public sealed class TestRunSelectionAndRecordTests : IDisposable
         var result = ResultAssert.Json(await service.RerunFailedAsync(null, 10));
 
         Assert.Contains("No failed tests are recorded", result.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task The_impact_analysis_exposes_the_filter_run_affected_tests_executes()
+    {
+        using var workspace = FakeWorkspace.CreateProjects(
+            ("App", [("Calculator.cs", "namespace App; internal class Calculator { public int Divide(int a, int b) => a / b; }")]),
+            ("App.Tests", [("CalculatorTests.cs", """
+                namespace App.Tests;
+                internal class CalculatorTests
+                {
+                    [Fact]
+                    public void Divide_by_zero_throws() => new App.Calculator().Divide(1, 0);
+                }
+                """)]));
+
+        Git(workspace.RootDirectory, "init", "-q");
+        Git(workspace.RootDirectory, "config", "user.email", "tests@example.com");
+        Git(workspace.RootDirectory, "config", "user.name", "VisualMCP Tests");
+        Git(workspace.RootDirectory, "add", "-A");
+        Git(workspace.RootDirectory, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "baseline");
+
+        // Only the file on disk changes: the analysis takes the changed paths from git and the symbols
+        // from the solution, so the workspace snapshot staying at the baseline is what a real edit looks like.
+        File.WriteAllText(workspace.PathOf("Calculator.cs"),
+            "namespace App; internal class Calculator { public int Divide(int a, int b) => b == 0 ? 0 : a / b; }");
+
+        var impact = ResultAssert.Json(await new TestWorkflowService(workspace).ImpactAnalysisAsync());
+
+        Assert.Equal(1, impact.GetProperty("count").GetInt32());
+        Assert.Equal("FullyQualifiedName~Divide_by_zero_throws", impact.GetProperty("filter").GetString());
+        Assert.Equal("Divide_by_zero_throws",
+            impact.GetProperty("coveringTests")[0].GetProperty("test").GetString());
+    }
+
+    private static void Git(string directory, params string[] args)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = directory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var argument in args) start.ArgumentList.Add(argument);
+
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        Assert.True(process.ExitCode == 0, $"git {string.Join(' ', args)} failed: {stderr}{stdout}");
     }
 
     private void WriteProject(string name, bool testSdk) =>

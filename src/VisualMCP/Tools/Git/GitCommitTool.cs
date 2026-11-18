@@ -9,16 +9,18 @@ public static class GitCommitTool
 {
     [McpServerTool(Name = "git_commit"), Description(
         "Create a git commit from the staged changes in a repository, using the given message (multi-line " +
-        "allowed, no length limit — it is written via a temp file). Set stageAll=true to stage every change " +
-        "first. With conventional=true the message must follow Conventional Commits ('<type>(<scope>): " +
-        "<description>'; the same rules as commit_lint) or the commit is refused with the violations. " +
-        "Targets the loaded solution's repo unless repoPath is given. Returns the new commit hash. " +
-        "Does NOT push and does NOT amend. Fails if nothing is staged unless allowEmpty=true.")]
+        "allowed, no length limit — it is written via a temp file). Staging is part of the call: paths=[...] " +
+        "stages exactly those files and stageAll=true stages every change, so a stage-then-commit sequence is " +
+        "one call, not two (paths wins when both are given). With conventional=true the message must follow " +
+        "Conventional Commits ('<type>(<scope>): <description>'; the same rules as commit_lint) or the commit " +
+        "is refused with the violations. Targets the loaded solution's repo unless repoPath is given. Returns " +
+        "the new commit hash. Does NOT push and does NOT amend. Fails if nothing is staged unless allowEmpty=true.")]
     public static Task<object> GitCommit(
         IGitService git,
         ICommitConventionService conventions,
         [Description("The commit message. May span multiple lines; no length limit.")] string message,
         [Description("Stage all changes (git add -A) before committing. Default: false.")] bool stageAll = false,
+        [Description("Stage exactly these files (git add -- <paths>) before committing; wins over stageAll.")] string[]? paths = null,
         [Description("Allow creating a commit with no changes. Default: false.")] bool allowEmpty = false,
         [Description("Conventional Commits rule for the message: refuses the commit with the violations instead of writing it.")] bool conventional = false,
         [Description("Optional: path to the git repository. Defaults to the loaded solution's repo.")] string? repoPath = null)
@@ -36,6 +38,6 @@ public static class GitCommitTool
                 });
         }
 
-        return git.CommitAsync(message, stageAll, allowEmpty, repoPath);
+        return git.CommitAsync(message, stageAll, allowEmpty, repoPath, paths);
     }
 }
