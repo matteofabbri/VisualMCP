@@ -54,6 +54,14 @@ public interface IBoardService
         string[]? labels, string? assignee);
 
     Task<object> MoveAsync(int id, string status, int? position, string? note = null, string? author = null);
+
+    /// <summary>
+    /// Move several cards to one column in a single transaction: one save, one renumbering of the
+    /// destination column, and the same note recorded on each card. An id that does not exist is
+    /// reported in <c>missing</c> and the rest still move — a batch never fails halfway.
+    /// </summary>
+    Task<object> MoveManyAsync(IReadOnlyList<int> ids, string status, string? note = null, string? author = null);
+
     Task<object> CommentAsync(int id, string body, string? author);
     Task<object> DeleteAsync(int id);
     Task<object> ShowAsync(int id);
@@ -297,6 +305,86 @@ public sealed class BoardService : IBoardService
                 position = target,
                 note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
                 item = ReadItem(context, id),
+            };
+        });
+    }
+
+    public Task<object> MoveManyAsync(IReadOnlyList<int> ids, string status, string? note = null, string? author = null)
+    {
+        // The caller's order is the order the cards land in, so the batch reads as "these, in this order".
+        var wanted = ids.Where(id => id > 0).Distinct().ToList();
+        if (wanted.Count == 0) return Fail("At least one card id is required.");
+
+        var column = NormalizeStatus(status);
+        if (column is null) return Fail(StatusError(status));
+
+        return With(context =>
+        {
+            var byId = context.BoardItems
+                .Where(row => wanted.Contains(row.Id))
+                .ToDictionary(row => row.Id);
+
+            var missing = wanted.Where(id => !byId.ContainsKey(id)).ToList();
+            if (byId.Count == 0)
+                return (object)new { error = $"No board item with the id(s) {string.Join(", ", missing)}.", missing };
+
+            var now = DateTimeOffset.UtcNow;
+            var next = NextPosition(context, column!);
+            var moved = new List<(int Id, string? From, int Position)>();
+            var left = new HashSet<string>(StringComparer.Ordinal);
+
+            using var transaction = context.Database.BeginTransaction();
+
+            foreach (var id in wanted)
+            {
+                if (!byId.TryGetValue(id, out var item)) continue;
+
+                var from = item.Status;
+                var target = next++;
+                var statusChanged = !string.Equals(from, column, StringComparison.Ordinal);
+
+                item.Status = column!;
+                item.Position = target;
+                item.UpdatedAt = now;
+
+                if (statusChanged)
+                {
+                    Record(context, id, "status", from, column, now);
+                    if (from is not null) left.Add(from);
+                }
+                Record(context, id, "position", null, target.ToString(), now);
+
+                // The evidence is written once per card: the note describes the batch, the comment sits on each.
+                if (!string.IsNullOrWhiteSpace(note))
+                {
+                    context.BoardComments.Add(new BoardCommentRow
+                    {
+                        ItemId = id,
+                        Author = author ?? "agent",
+                        Body = $"moved to {column}: {note.Trim()}",
+                        CreatedAt = now,
+                    });
+                }
+
+                moved.Add((id, from, target));
+            }
+
+            context.SaveChanges();
+
+            Renumber(context, column!);
+            foreach (var from in left) Renumber(context, from);
+
+            context.SaveChanges();
+            transaction.Commit();
+
+            return new
+            {
+                moved = moved.Count,
+                to = column,
+                ids = moved.Select(entry => entry.Id).ToList(),
+                missing = missing.Count > 0 ? missing : null,
+                note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+                cards = moved.Select(entry => new { id = entry.Id, from = entry.From, position = entry.Position }).ToList(),
             };
         });
     }

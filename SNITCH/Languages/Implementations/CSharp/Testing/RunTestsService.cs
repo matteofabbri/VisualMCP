@@ -7,7 +7,7 @@ namespace Snitch.Languages.CSharp.Testing;
 
 public interface IRunTestsService
 {
-    Task<object> RunTests(string? projectFilter, string? extraArgs);
+    Task<object> RunTests(string? projectFilter, string? extraArgs, int timeoutSeconds);
 }
 
 public sealed class RunTestsService : IRunTestsService
@@ -17,7 +17,8 @@ public sealed class RunTestsService : IRunTestsService
 
     public async Task<object> RunTests(
         string? projectFilter = null,
-        string? extraArgs = null)
+        string? extraArgs = null,
+        int timeoutSeconds = 600)
     {
         var service  = _workspace;
         var solution = await service.EnsureSolutionLoadedAsync();
@@ -51,32 +52,55 @@ public sealed class RunTestsService : IRunTestsService
         {
             var runs = new List<object>();
             var outputs = new List<string>();
+            var notRun = new List<string>();
             long durationMs = 0;
             var succeeded = true;
+            var timedOut = false;
 
-            for (var index = 0; index < targets.Count; index++)
+            // One deadline for the whole call, not one per target: a projectFilter that selects three
+            // projects must not hold the client for three times the budget.
+            var budget = Math.Clamp(timeoutSeconds, 10, 3600);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(budget));
+
+            var next = 0;
+            for (; next < targets.Count; next++)
             {
+                if (deadline.IsCancellationRequested) break;
+
                 // One results folder per target, so two projects cannot overwrite each other's TRX.
-                var resultsDir = Path.Combine(tmpDir, $"run-{index}");
+                var resultsDir = Path.Combine(tmpDir, $"run-{next}");
                 Directory.CreateDirectory(resultsDir);
 
-                var args = BuildArgs(targets[index], resultsDir, extraArgs);
-                var (exitCode, stdout, stderr, elapsed) = await ExecAsync("dotnet", args);
+                var args = BuildArgs(targets[next], resultsDir, extraArgs);
+                var (exitCode, stdout, stderr, elapsed, killed) = await ExecAsync("dotnet", args, deadline.Token);
 
                 durationMs += (long)elapsed.TotalMilliseconds;
-                succeeded  &= exitCode == 0;
+                timedOut   |= killed;
+                succeeded  &= !killed && exitCode == 0;
 
                 outputs.Add($"$ dotnet {args}"
                             + Environment.NewLine + stdout
-                            + (string.IsNullOrWhiteSpace(stderr) ? string.Empty : Environment.NewLine + stderr));
+                            + (string.IsNullOrWhiteSpace(stderr) ? string.Empty : Environment.NewLine + stderr)
+                            + (killed ? Environment.NewLine + $"(timed out after {budget}s; the process tree was killed)" : string.Empty));
 
                 runs.Add(new
                 {
-                    target = targets[index],
+                    target = targets[next],
                     exitCode,
                     durationMs = (long)elapsed.TotalMilliseconds,
+                    timedOut = killed,
                 });
+
+                if (!killed) continue;
+
+                next++;
+                break;
             }
+
+            // The targets after the one that used the last of the budget are named instead of silently dropped,
+            // and a budget that expired between two targets is still a timeout.
+            if (next < targets.Count) timedOut = true;
+            for (; next < targets.Count; next++) notRun.Add(targets[next]);
 
             // Parse every .trx produced under tmpDir
             var trxFiles       = Directory.GetFiles(tmpDir, "*.trx", SearchOption.AllDirectories);
@@ -109,22 +133,29 @@ public sealed class RunTestsService : IRunTestsService
                 solutionPath,
                 testProjectsDetected = testProjects.Select(project => project.Name).ToList(),
                 targets,
+                timeoutSeconds = budget,
+                timedOut,
+                notRun,
                 summary = new
                 {
                     total    = totalTests,
                     passed   = totalPassed,
                     failed   = totalFailed,
                     skipped  = totalSkipped,
-                    outcome  = succeeded ? "Passed" : "Failed",
+                    outcome  = timedOut ? "TimedOut" : succeeded ? "Passed" : "Failed",
                     durationMs,
                 },
                 projectResults,
                 runs,
                 record = recordPath,
-                note = totalFailed > 0
-                    ? "The failed tests are recorded: rerun_failed re-runs exactly them."
-                    : "No test failed, so the record of the last run is empty.",
-                // The raw output is what explains a run that produced no TRX at all (a build error, a bad filter).
+                note = timedOut
+                    ? $"The run was stopped after {budget}s and the 'dotnet test' process tree was killed. " +
+                      (notRun.Count > 0 ? $"{notRun.Count} target(s) did not run. " : string.Empty) +
+                      "Narrow the run (run_test, run_affected_tests) or raise timeoutSeconds."
+                    : totalFailed > 0
+                        ? "The failed tests are recorded: rerun_failed re-runs exactly them."
+                        : "No test failed, so the record of the last run is empty.",
+                // The raw output is what explains a run that produced no TRX at all (a build error, a bad filter, a timeout).
                 rawOutput = trxFiles.Length == 0 ? outputs : null,
             };
         }
@@ -223,8 +254,13 @@ public sealed class RunTestsService : IRunTestsService
         return string.Join(" ", parts);
     }
 
-    private static async Task<(int exitCode, string stdout, string stderr, TimeSpan elapsed)> ExecAsync(
-        string exe, string args)
+    /// <summary>
+    /// One <c>dotnet test</c> target, bounded by the caller's deadline. The stream reads are started without
+    /// the token so the output written before the timeout survives the kill: a killed process closes its
+    /// pipes, and what it printed on the way there is the only thing that explains the run.
+    /// </summary>
+    private static async Task<(int exitCode, string stdout, string stderr, TimeSpan elapsed, bool timedOut)> ExecAsync(
+        string exe, string args, CancellationToken cancellationToken)
     {
         var psi = new ProcessStartInfo(exe, args)
         {
@@ -233,6 +269,7 @@ public sealed class RunTestsService : IRunTestsService
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
+        Snitch.Execution.ProcessRunner.RemoveInheritedMsBuildEnv(psi);
 
         var sw = Stopwatch.StartNew();
         using var proc = Process.Start(psi)!;
@@ -240,10 +277,26 @@ public sealed class RunTestsService : IRunTestsService
         var stdoutTask = proc.StandardOutput.ReadToEndAsync();
         var stderrTask = proc.StandardError.ReadToEndAsync();
 
-        await proc.WaitForExitAsync();
+        var timedOut = false;
+        try
+        {
+            await proc.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            timedOut = true;
+            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+        }
         sw.Stop();
 
-        return (proc.ExitCode, await stdoutTask, await stderrTask, sw.Elapsed);
+        return (timedOut ? -1 : proc.ExitCode, await Drain(stdoutTask), await Drain(stderrTask), sw.Elapsed, timedOut);
+    }
+
+    /// <summary>The output of a killed process, without letting a survivor hold the call.</summary>
+    private static async Task<string> Drain(Task<string> stream)
+    {
+        try { return await stream.WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch { return string.Empty; }
     }
 
     private static TrxProjectResult? ParseTrx(string trxPath)

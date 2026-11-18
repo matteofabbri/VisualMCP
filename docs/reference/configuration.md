@@ -73,7 +73,7 @@ server keeps is the workspace store.
         "type": "stdio",
         "command": "C:\\Users\\<you>\\.zcode\\mcp-servers\\VisualMCP\\app\\VisualMCP.exe",
         "args": [],
-        "timeoutMs": 60000
+        "timeoutMs": 900000
       }
     }
   }
@@ -82,6 +82,12 @@ server keeps is the workspace store.
 
 ZCode's schema is strict: an unknown key drops the server, and the JSON must be **BOM-free**. The install
 script writes it that way; hand-editing it is where most "server not found" problems start.
+
+`timeoutMs` is the client's per-call limit: when it expires the client abandons the call while the server
+keeps working. It is set to 15 minutes so it outlasts the slowest documented run — `run_tests` is bounded
+at 600 s, a build at 120 s by default — and the one call that can exceed it is `run_mutation_tests`, whose
+1800 s ceiling needs either a narrower scope or a larger value here. A client that ignores the key falls
+back to its own default; raise that default the same way if a long run is cut off.
 
 ### Claude Code / generic MCP client
 
@@ -160,11 +166,11 @@ immediately. FTS5 shadow tables are hidden.
 | `GET /api/board` | Every board column with its cards |
 | `GET /api/tables` | Every table: name, kind, rows, columns, title, area, description |
 | `GET /api/tables/{table}` | One page of rows plus the column list |
-| `POST /api/board/move` · `update` · `comment` · `add` · `delete` | The board's writes from the page; JSON body plus `X-VisualMCP: 1`, same origin |
+| `GET /api/board` | The board: five columns with their cards |
+| `POST /api/board/{add,update,move,comment,delete}` | One board write; same-origin `application/json` plus the `X-VisualMCP: 1` header, otherwise `403` |
 
-Blobs are summarised (`<blob N bytes>`), never served. The read endpoints are `GET`; the five board
-endpoints are the only writes, and they are refused without the header and content type (see
-[dashboard.md](../dashboard.md)).
+Blobs are summarised (`<blob N bytes>`), never served. The board `POST` endpoints are the only writes
+in the dashboard; every other route is a `GET`.
 
 ## The solution store
 

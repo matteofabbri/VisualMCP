@@ -17,9 +17,9 @@ The process does four things:
   frameworks, references and compiler diagnostics the way an IDE does.
 - **Keeps derived data** in `<workspace>/.visualMCP/visualmcp.db` — indexes, edit history, the board and
   cached reports. The source files on disk remain the only truth.
-- **Serves an optional web view** on a loopback port (`http://127.0.0.1:4677` by default): read-only
-  pages over the store and the process, plus an interactive board whose writes go through the board
-  service. `VISUALMCP_DASHBOARD=off` disables it.
+- **Serves an optional dashboard** on a loopback port (`http://127.0.0.1:4677` by default).
+  Every page is read-only except `/board`, whose writes go through the board service;
+  `VISUALMCP_DASHBOARD=off` disables it.
 - **Writes its log** to `~/.claude/mcp-servers/VisualMCP/debug.log`.
 
 Network access happens only for the jobs listed under [Privacy](#privacy).
@@ -117,10 +117,10 @@ board page is the one that edits.
 A column fixed on the left of every page holds the navigation and the **commands invoked** — the most
 recent tool calls, newest first, each linking to that tool's own calls in the command log.
 
-Only the board writes, and it does so through the same service the `board_*` tools call, from a
-same-origin JSON POST carrying an `X-VisualMCP: 1` header — so another site cannot drive it. Table names
-are resolved against `sqlite_master`, so a name in the URL cannot inject SQL. Response headers include a
-strict CSP and `no-store`, and blobs are summarised rather than served.
+Every page is a `GET` except the board page, whose writes go through the board service behind a
+same-origin JSON + `X-VisualMCP: 1` guard. Table names are resolved against `sqlite_master`,
+so a name in the URL cannot inject SQL. Response headers include a strict CSP and `no-store`, and blobs
+are summarised rather than served.
 
 Port selection is deterministic: **4677**, then the port of a dashboard instance that is no longer
 running (each keeps its own `dashboard.port.<pid>` row in the store), then an OS-assigned port. A port

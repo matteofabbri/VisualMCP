@@ -91,6 +91,9 @@ run_tests
   projectFilter – run only the test projects whose name (or file name) contains this string (optional;
                   omit to run the whole solution)
   extraArgs     – forwarded verbatim to dotnet test (e.g. "--no-build", "--configuration Release")
+  timeoutSeconds – budget for the whole call (default 600, clamped to 10..3600), shared by every target;
+                  on expiry the dotnet test process tree is killed and the summary reads outcome=TimedOut,
+                  with the targets that never started listed in notRun
 
 run_test(testName?, className?, projectName?, filter?, timeoutSeconds=300)
 rerun_failed(projectName?, timeoutSeconds=300)

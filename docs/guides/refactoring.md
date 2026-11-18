@@ -204,8 +204,10 @@ inspect_code    packs=all minSeverity=warning ids=RCS*,CA18*
 apply_code_fix  diagnosticId=RCS1060 filePath=Services/OrderService.cs line=42
 ```
 
-`inspect_code` runs six built-in packs — the VisualMCP **house** rules (`VMC0001`: one type per file),
-**Roslynator**, **.NET analyzers**, **AsyncFixer**, **Meziantou** and **StyleCop** — over every project.
+`inspect_code` runs seven built-in packs — the VisualMCP **house** rules (`VMC0001`: one type per file),
+**Roslynator**, **.NET analyzers**, **AsyncFixer**, **Meziantou**, **StyleCop** and the
+**predictive-coding** invariants (`PCN0001`–`PCN0004`, auto-selected when the solution or a project is
+named like a PCN) — over every project.
 No analyzer package needs to be referenced by your solution. Defaults are
 `house,roslynator,netanalyzers,asyncfixer` at `minSeverity=info` with dormant rules
 enabled (they arrive as `WEAK_WARNING`). Filter with `projectName`, `filePath`, `ids`, `excludeIds`,

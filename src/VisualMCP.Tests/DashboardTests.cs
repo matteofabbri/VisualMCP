@@ -244,7 +244,7 @@ public sealed class DashboardTests : IDisposable
         }
     }
 
-    // ── the board ────────────────────────────────────────────────────────────
+    // ── the board page ───────────────────────────────────────────────────────
 
     [Fact]
     public async Task The_board_page_renders_the_five_columns_and_the_card_detail()

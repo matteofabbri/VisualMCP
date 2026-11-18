@@ -166,7 +166,10 @@ static async Task RunServerAsync(string[] args, string? workspaceRoot)
         "confirm=true to delete), action=guard redirects TEMP/TMP/NUGET_PACKAGES/.NET CLI state to a root on " +
         "another drive and persists the policy for later starts. Use it BEFORE long build/test work on a " +
         "machine whose system drive is short of space.\n" +
-        "- Run the app or the tests -> run_project (launches 'dotnet run' with a timeout), run_tests.\n" +
+        "- Run the app, or the tests -> run_project (launches 'dotnet run' with a timeout). For tests, the " +
+        "change decides: run_affected_tests (git diff → the tests that reference the changed symbols, run in " +
+        "one call), run_test (one test or class), rerun_failed (exactly the failures of the last run), and " +
+        "run_tests for the whole suite — the pre-merge gate, bounded by timeoutSeconds.\n" +
         "- Debug a running program — a REAL debugger (DAP), not logging: install the adapter once -> debug_install " +
         "(debug_status says whether it is there; a few MB from the Samsung release); start a built .dll or a " +
         "project -> debug_launch (breakpoints can be set in the same call and the call waits for the first stop); " +
@@ -591,8 +594,8 @@ static async Task RunServerAsync(string[] args, string? workspaceRoot)
             services.AddSingleton<VisualMCP.Execution.IPlanExecutionService, VisualMCP.Execution.PlanExecutionService>();
 
             // The web dashboard (Dashboard/): a window on this process and the solution store, on
-            // http://127.0.0.1:4677 — or the port it last used, or a free one. Its pages read; the board
-            // page writes cards through the same board service the board_* tools call.
+            // http://127.0.0.1:4677 — or the port it last used, or a free one. Every page is read-only
+            // except /board, whose writes go through the same IBoardService the board tools use.
             services.AddSingleton(VisualMCP.Dashboard.DashboardOptions.FromEnvironment(logPath));
             services.AddSingleton<VisualMCP.Dashboard.DashboardDatabase>();
             services.AddSingleton<VisualMCP.Dashboard.DashboardBoard>();

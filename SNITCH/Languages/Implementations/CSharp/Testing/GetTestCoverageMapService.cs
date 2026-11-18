@@ -59,6 +59,7 @@ public sealed class GetTestCoverageMapService : IGetTestCoverageMapService
                 UseShellExecute        = false,
                 CreateNoWindow         = true,
             };
+            Snitch.Execution.ProcessRunner.RemoveInheritedMsBuildEnv(psi);
 
             using var proc = Process.Start(psi)!;
             var stdout = await proc.StandardOutput.ReadToEndAsync();

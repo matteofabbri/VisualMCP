@@ -135,6 +135,7 @@ public sealed class TestWorkflowService : ITestWorkflowService
                 CreateNoWindow = true,
                 WorkingDirectory = directory,
             };
+            Snitch.Execution.ProcessRunner.RemoveInheritedMsBuildEnv(start);
             foreach (var argument in arguments) start.ArgumentList.Add(argument);
 
             using var process = Process.Start(start)!;
@@ -596,6 +597,9 @@ public sealed class TestWorkflowService : ITestWorkflowService
             symbolsScanned = scannedSymbols,
             coveringTests = tests,
             count = tests.Count,
+            // The filter is the contract run_affected_tests executes: without it a non-empty change reads
+            // as "no test covers this", which is exactly the answer that must not be given for 11 tests.
+            filter = filter.Length == 0 ? null : filter,
             runCommand = filter.Length == 0 ? null : $"run_test(filter: \"{filter}\")",
             note = "Direct references only: a test that reaches the change through another method or " +
                    "reflection is not listed. Uncommitted work counts as changed against the reference.",

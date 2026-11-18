@@ -91,6 +91,10 @@ internal static class InspectionPackCatalog
             "ReSharper-shaped inspections implemented natively under ReSharper's ids: convert to const, loop " +
             "variable changed inside the loop, member can be static, redundant argument, empty constructor, " +
             "redundant if/else, always-true/false condition, redundant base() call."),
+        new InspectionPack("pcn", "VisualMCP", Array.Empty<string>(),
+            "Predictive-coding invariants (PCN0001–PCN0004): precision-weighted prediction errors, local " +
+            "Hebbian updates only, temporal continuity and softmax(-β·F) gating. Auto-selected when the " +
+            "solution or a project is named like a predictive-coding network."),
         new InspectionPack("roslynator", "Roslynator.Analyzers", new[] { "Roslynator." },
             "ReSharper-style inspections: redundant code, simplifications, language usage (RCS)."),
         new InspectionPack("netanalyzers", "Microsoft.CodeAnalysis.NetAnalyzers",
@@ -182,36 +186,46 @@ internal static class InspectionPackCatalog
 
         foreach (var definition in Definitions)
         {
-            // The house rules and the ReSharper-shaped inspections are compiled into this assembly;
-            // every other pack is an external analyzer package discovered on disk or in the NuGet cache.
-            if (definition.Id is "house" or "rider")
+            // The house rules, the ReSharper-shaped inspections and the predictive-coding invariants
+            // are compiled into this assembly; every other pack is an external analyzer package
+            // discovered on disk or in the NuGet cache.
+            if (definition.Id is "house" or "rider" or "pcn")
             {
-                var (packCsharp, packVisualBasic, packFixers) = definition.Id == "house"
-                    ? (ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer()),
-                       ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileVisualBasicAnalyzer()),
-                       ImmutableArray<CodeFixProvider>.Empty)
-                    : (ImmutableArray.Create<DiagnosticAnalyzer>(
-                           new Rider.ConvertToConstantLocalAnalyzer(),
-                           new Rider.LoopVariableChangedAnalyzer(),
-                           new Rider.MemberCanBeMadeStaticAnalyzer(),
-                           new Rider.RedundantArgumentAnalyzer(),
-                           new Rider.EmptyConstructorAnalyzer(),
-                           new Rider.RedundantIfElseAnalyzer(),
-                           new Rider.ConstantConditionAnalyzer(),
-                           new Rider.RedundantBaseConstructorCallAnalyzer(),
-                           new Rider.ConvertToCompoundAssignmentAnalyzer(),
-                           new Rider.RedundantLambdaSignatureParenthesesAnalyzer(),
-                           new Rider.UseNameofExpressionAnalyzer(),
-                           new Rider.StringLiteralAsInterpolationArgumentAnalyzer(),
-                           new Rider.RedundantCheckBeforeAssignmentAnalyzer(),
-                           new Rider.RedundantStringInterpolationAnalyzer(),
-                           new Rider.MethodOverloadWithOptionalParameterAnalyzer(),
-                           new Rider.ReplaceSequenceEqualWithConstantPatternAnalyzer(),
-                           new Rider.RedundantPatternParenthesesAnalyzer(),
-                           new Rider.MergeIntoPatternAnalyzer(),
-                           new Rider.ReplaceWithStringIsNullOrEmptyAnalyzer()),
-                       ImmutableArray<DiagnosticAnalyzer>.Empty,
-                       ImmutableArray.Create<CodeFixProvider>(new Rider.RiderCodeFixProvider()));
+                var (packCsharp, packVisualBasic, packFixers) = definition.Id switch
+                {
+                    "house" => (ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileAnalyzer()),
+                                ImmutableArray.Create<DiagnosticAnalyzer>(new OneTypePerFileVisualBasicAnalyzer()),
+                                ImmutableArray<CodeFixProvider>.Empty),
+                    "rider" => (ImmutableArray.Create<DiagnosticAnalyzer>(
+                                    new Rider.ConvertToConstantLocalAnalyzer(),
+                                    new Rider.LoopVariableChangedAnalyzer(),
+                                    new Rider.MemberCanBeMadeStaticAnalyzer(),
+                                    new Rider.RedundantArgumentAnalyzer(),
+                                    new Rider.EmptyConstructorAnalyzer(),
+                                    new Rider.RedundantIfElseAnalyzer(),
+                                    new Rider.ConstantConditionAnalyzer(),
+                                    new Rider.RedundantBaseConstructorCallAnalyzer(),
+                                    new Rider.ConvertToCompoundAssignmentAnalyzer(),
+                                    new Rider.RedundantLambdaSignatureParenthesesAnalyzer(),
+                                    new Rider.UseNameofExpressionAnalyzer(),
+                                    new Rider.StringLiteralAsInterpolationArgumentAnalyzer(),
+                                    new Rider.RedundantCheckBeforeAssignmentAnalyzer(),
+                                    new Rider.RedundantStringInterpolationAnalyzer(),
+                                    new Rider.MethodOverloadWithOptionalParameterAnalyzer(),
+                                    new Rider.ReplaceSequenceEqualWithConstantPatternAnalyzer(),
+                                    new Rider.RedundantPatternParenthesesAnalyzer(),
+                                    new Rider.MergeIntoPatternAnalyzer(),
+                                    new Rider.ReplaceWithStringIsNullOrEmptyAnalyzer()),
+                                ImmutableArray<DiagnosticAnalyzer>.Empty,
+                                ImmutableArray.Create<CodeFixProvider>(new Rider.RiderCodeFixProvider())),
+                    _ => (ImmutableArray.Create<DiagnosticAnalyzer>(
+                              new Pcn.PrecisionWeightedErrorAnalyzer(),
+                              new Pcn.LocalHebbianOnlyAnalyzer(),
+                              new Pcn.TemporalContinuityAnalyzer(),
+                              new Pcn.EnergyBasedGatingAnalyzer()),
+                          ImmutableArray<DiagnosticAnalyzer>.Empty,
+                          ImmutableArray<CodeFixProvider>.Empty),
+                };
 
                 packs.Add(new LoadedInspectionPack(
                     definition, packCsharp, packVisualBasic,

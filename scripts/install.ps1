@@ -140,7 +140,8 @@ function New-ServerEntry([string]$ExePath) {
         type      = 'stdio'
         command   = $ExePath
         args      = @()
-        timeoutMs = 60000
+        # The client's per-call limit; it has to outlast the slowest tool default (run_tests is 600 s).
+        timeoutMs = 900000
     }
 }
 

@@ -22,7 +22,13 @@ public interface IGitService
 
     // staging and history
     Task<object> StageAsync(string[]? paths, bool all, string? repoPath);
-    Task<object> CommitAsync(string message, bool stageAll, bool allowEmpty, string? repoPath);
+
+    /// <summary>
+    /// Commit the staged changes. <paramref name="paths"/> stages exactly those files first and
+    /// <paramref name="stageAll"/> stages everything first, so staging is never a separate call;
+    /// <paramref name="paths"/> wins when both are given. With neither, what is staged is what commits.
+    /// </summary>
+    Task<object> CommitAsync(string message, bool stageAll, bool allowEmpty, string? repoPath, string[]? paths = null);
     Task<object> SquashAsync(int count, string message, string? repoPath);
     Task<object> AmendAsync(string message, string? repoPath);
 
@@ -344,14 +350,23 @@ public sealed class GitService : IGitService
     }
 
     // ── commit / amend / squash ──────────────────────────────────────────────
-    public async Task<object> CommitAsync(string message, bool stageAll, bool allowEmpty, string? repoPath)
+    public async Task<object> CommitAsync(string message, bool stageAll, bool allowEmpty, string? repoPath,
+        string[]? paths = null)
     {
         if (string.IsNullOrWhiteSpace(message)) return new { error = "A commit message is required." };
 
         var (repoDir, error) = await ResolveAsync(repoPath);
         if (error is not null) return error;
 
-        if (stageAll)
+        var selected = paths?.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray() ?? [];
+        if (selected.Length > 0)
+        {
+            var addArgs = "add -- " + string.Join(" ", selected.Select(Q));
+            var (addExit, addTimedOut, _, addErr, _) = await GitCli.RunAsync(repoDir!, addArgs, 30);
+            if (addTimedOut) return new { error = "git add timed out." };
+            if (addExit != 0) return new { error = $"git add failed: {addErr.Trim()}", command = $"git {addArgs}" };
+        }
+        else if (stageAll)
         {
             var (addExit, _, _, addErr, _) = await GitCli.RunAsync(repoDir!, "add -A", 30);
             if (addExit != 0) return new { error = $"git add -A failed: {addErr.Trim()}" };
@@ -359,7 +374,10 @@ public sealed class GitService : IGitService
 
         var (stagedCheck, _, _, _, _) = await GitCli.RunAsync(repoDir!, "diff --cached --quiet", 30);
         if (stagedCheck == 0 && !allowEmpty)
-            return new { error = "Nothing staged to commit. Stage changes first, or set stageAll=true / allowEmpty=true." };
+            return new
+            {
+                error = "Nothing staged to commit. Stage changes first, or set paths=[...] / stageAll=true / allowEmpty=true.",
+            };
 
         return await CommitWithMessageAsync(repoDir!, message, allowEmpty, amend: false);
     }

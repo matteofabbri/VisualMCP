@@ -80,29 +80,30 @@ the first execution is the gate's.
 ## Web dashboard (2026-10-29)
 
 The server hosts a web view of itself and of the solution store, inside the same MCP process (no
-process to start), on **http://127.0.0.1:4677**. The store pages are read-only; the board page edits
-cards through the board service. The tool is NOT an MCP tool: it is a second, minimal ASP.NET
+process to start), on **http://127.0.0.1:4677**. The tool is NOT an MCP tool: it is a second, minimal ASP.NET
 Core instance next to the stdio transport, with the log providers zeroed because stdout belongs to the
-protocol.
+protocol. Every page is read-only except `/board`.
 
 | Aspect | State | Notes |
 |---|:---:|---|
 | Port | ✅ | 4677, otherwise a port kept by an instance that is no longer running (one `dashboard.port.<pid>` `context` row per process), otherwise one assigned by the system; each process writes only its own row, so two live servers on the same workspace do not overwrite each other |
 | A page per table | ✅ | Tables are read from `sqlite_master`, not from a fixed list: `command_log`, `applied_edit`, `context`, `board_*`, `si_*`, `ti_*`, `package_*`, `decompiled_artifact` and any future table; the FTS5 shadow tables are hidden |
+| Interactive board | ✅ | `/board`: five columns, draggable cards, a detail panel with fields, comments and history, and a New card form; writes go through the board service behind a same-origin JSON + `X-VisualMCP: 1` guard |
 | Filter, sort, pages | ✅ | Substring on every non-blob column, sortable headers, page size 25–1000, `CSV`/`JSON` |
 | Overview | ✅ | Process (pid, uptime, memory, runtime, transport), loaded solutions with projects/documents, counts, latest calls and latest changes |
 | Board | ✅ | Interactive kanban: five columns, drag and drop between them, a card panel (fields, move, comments, history, delete), a new-card form; every write goes through `IBoardService` and needs a same-origin JSON POST carrying `X-VisualMCP: 1` |
 | Tool catalogue | ✅ | The tools the process advertises, with description and arguments (type, required, description) and a filter |
 | Live log | ✅ | Tail of `debug.log` from the most recent, refresh every 2.5 s, text filter and filter by type (tool/requests/errors/warnings) |
 | Schema | ✅ | Columns of every table as SQLite reports them (type, not null, pk) |
-| JSON API | ✅ | `/api/health`, `/api/overview`, `/api/board`, `/api/tables`, `/api/tables/{table}`, and the five guarded `/api/board/*` writes |
-| Security | ✅ | Loopback only, every route a GET except the guarded board POSTs, restricted CSP, values always encoded, table names validated against `sqlite_master` |
+| JSON API | ✅ | `/api/health`, `/api/overview`, `/api/tables`, `/api/tables/{table}`, `/api/board`, and the guarded `POST /api/board/*` writes |
+| Security | ✅ | Loopback only, reads are GET, board writes need a same-origin JSON body plus `X-VisualMCP: 1`, restricted CSP, values always encoded, table names validated against `sqlite_master` |
 | A discovery probe does not start it | ✅ | Same decision as the eager load: a probe does not pay for opening the store |
 | Port busy | ✅ | Warning in the log, the MCP session is unaffected |
 
-Documentation: [docs/dashboard.md](docs/dashboard.md). Tests: `src/VisualMCP.Tests/DashboardTests.cs` (11 cases:
+Documentation: [docs/dashboard.md](docs/dashboard.md). Tests: `src/VisualMCP.Tests/DashboardTests.cs` —
 table discovery, filter/paging, injection refusal, blob exclusion, port policy, remembered port, a real
-listener serving every page, and the board page, its write guard and a move/add/comment/edit/delete round trip).
+listener serving every page, and the board page: rendered columns and detail, guarded writes, and a card
+added, commented, edited and deleted through the API.
 
 ---
 
@@ -338,7 +339,7 @@ instead of ignoring the id: they are layout, team choices or semantic changes, n
 | **Computational and spatial complexity (Big-O)** | ✅ | `analyze_complexity` — per-method estimate of time and memory: loop nesting and bounds, LINQ chains, sorting, linear lookups inside loops, recursion shape, allocation sites and methods called within the solution; evidence, confidence and optimization suggestions |
 | Code metrics (LOC, maintainability index, etc.) | ✅ | `get_metrics` |
 | Run Roslyn analyzers (StyleCop, Roslynator, etc.) | ✅ | `run_code_analysis` |
-| ReSharper-style inspections with Rider ids/severities | ✅ | `inspect_code` (packs: roslynator, netanalyzers, asyncfixer, meziantou, stylecop) |
+| ReSharper-style inspections with Rider ids/severities | ✅ | `inspect_code` (packs: roslynator, netanalyzers, asyncfixer, meziantou, stylecop, and `pcn` for predictive-coding invariants PCN0001–PCN0004) |
 | **Whole-solution audit in one call** | ✅ | `solution_audit` — inspections grouped by id, compiler errors/warnings, most complex methods, largest files, project graph + cycles, first moves |
 | **Apply an inspection's fix** | ✅ | `apply_code_fix` — runs the pack's CodeFixProvider (dry run by default), selected for the document's language: a `.vb` document gets the .NET analyzers' Visual Basic fixers |
 | Namespace coupling analysis | ✅ | `analyze_namespace_coupling` |
@@ -880,7 +881,7 @@ and formatting, the "create" family, the inspection baseline, seven analyses), t
 `launch_settings`, `publish_profile`, `nuget_sources`), the **10 of section 19** (`trace_data_flow`,
 `find_throw_sites`, `js_files`, `analyze_js`, `markup_files`, `analyze_markup`, `yaml_files`,
 `analyze_yaml`, `fsharp_files`, `analyze_fsharp`) or `commit_lint` (section 20), nor `disk_usage`
-(section 21), nor the board pair of section 22. The live count is `capability_report`: **420 tools**.
+(section 21), nor the board pair of section 22. The live count is `capability_report`: **429 tools**.
 
 ---
 

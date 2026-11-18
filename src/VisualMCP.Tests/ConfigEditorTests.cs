@@ -29,7 +29,7 @@ public sealed class ConfigEditorTests
         Assert.Equal("stdio", entry["type"]!.GetValue<string>());
         Assert.Equal("/opt/vmcp/VisualMCP", entry["command"]!.GetValue<string>());
         Assert.Empty(entry["args"]!.AsArray());
-        Assert.Equal(60000, entry["timeoutMs"]!.GetValue<int>());
+        Assert.Equal(900000, entry["timeoutMs"]!.GetValue<int>());
 
         // Two-space indentation, a final newline and no byte-order mark: the shape the Python editor wrote.
         var text = File.ReadAllText(config);

@@ -59,9 +59,22 @@ public sealed class BuildProjectService : IBuildProjectService
         if (!restore) parts.Add("--no-restore");
         if (noCopyOutput)
         {
-            parts.Add("/p:CopyBuildOutputToOutputDirectory=false");
-            parts.Add("/p:CopyOutputSymbolsToOutputDirectory=false");
-            parts.Add("/p:SkipCopyBuildProduct=true");
+            // Build into an isolated output tree instead of bin\: the previous global properties
+            // (CopyBuildOutputToOutputDirectory=false / SkipCopyBuildProduct=true) skipped the bin
+            // copy — so a referencing project could not resolve its dependency from a clean tree —
+            // and made incremental rebuilds delete outputs a previous build had produced (the
+            // obj/<tfm>/ref assembly and the bin\ copies), failing later calls with CS0006. A
+            // dedicated OutputPath leaves bin\ untouched (no lock while an app is running) and
+            // keeps every dependency resolvable, because each referenced project's TargetPath
+            // moves to the same isolated tree. The path is stable per project+configuration so
+            // successive calls stay incremental.
+            var buildId = Regex.Replace(
+                projectName is not null ? projectName : Path.GetFileName(solution?.FilePath ?? "solution"),
+                "[^A-Za-z0-9._-]", "_");
+            // Forward slash as the trailing separator: OutputPath needs one, and a backslash
+            // would escape the closing quote on the MSBuild command line.
+            var outDir = Path.Combine(Path.GetTempPath(), "vmcp-build", $"{buildId}-{configuration}") + "/";
+            parts.Add($"/p:OutputPath=\"{outDir}\"");
         }
 
         var argsStr = string.Join(" ", parts);

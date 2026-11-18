@@ -1262,6 +1262,7 @@ public sealed class DebuggerService : IDebuggerService
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(project)!,
             };
+            Snitch.Execution.ProcessRunner.RemoveInheritedMsBuildEnv(start);
             start.ArgumentList.Add("build");
             start.ArgumentList.Add(project);
             start.ArgumentList.Add("-c");

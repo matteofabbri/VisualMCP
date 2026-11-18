@@ -54,7 +54,7 @@ public sealed class CapabilityReportService : ICapabilityReportService
                 styleRewrites = $"{SimplifyCodeService.Rules.Select(rule => rule.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count()} C# ids + " +
                                 $"{VbSimplifyCodeService.Rules.Select(rule => rule.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count()} VB ids " +
                                 "(simplify_code / simplify_vb_code)",
-                inspections = "~800 ids from five analyzer packs (inspect_code)",
+                inspections = "~800 ids from the built-in analyzer packs (inspect_code)",
                 javascriptRules = new
                 {
                     count = Snitch.Languages.JavaScript.JavaScriptAnalyzer.Rules.Count,

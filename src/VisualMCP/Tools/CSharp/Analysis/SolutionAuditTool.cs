@@ -17,7 +17,7 @@ public static class SolutionAuditTool
         ISolutionAuditService audit,
         [Description("Optional: restrict to one project by name.")] string? project = null,
         [Description("Rows per section (complexity, largest files, top ids). Default 10, max 50.")] int maxPerCategory = 10,
-        [Description("Run the analyzer packs too (roslynator, netanalyzers, asyncfixer, meziantou). Default true.")] bool includePacks = true,
+        [Description("Run the analyzer packs too (roslynator, netanalyzers, asyncfixer, meziantou, and the predictive-coding pack when the solution is a PCN). Default true.")] bool includePacks = true,
         [Description("Minimum inspection severity: ERROR, WARNING, WEAK_WARNING, TYPO or ALL (default WARNING).")] string minSeverity = "WARNING")
         => audit.AuditAsync(project, maxPerCategory, includePacks, minSeverity);
 }

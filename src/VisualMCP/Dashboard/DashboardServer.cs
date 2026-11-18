@@ -16,9 +16,9 @@ namespace VisualMCP.Dashboard;
 
 /// <summary>
 /// The dashboard's HTTP host: a small ASP.NET Core application started next to the MCP stdio
-/// transport, bound to loopback. It is an observer — every route is a GET that reads the SQLite
-/// store and the process — so it can run at any time without touching the solution, and a
-/// failure to bind a port leaves the MCP server completely unaffected.
+/// transport, bound to loopback. Every page reads the SQLite store and the process, and the board
+/// page is the one surface that writes — through the same <see cref="Snitch.Planning.IBoardService"/>
+/// the board tools call. A failure to bind a port leaves the MCP server completely unaffected.
 /// </summary>
 /// <remarks>
 /// Port choice, in order: the preferred port (4677 by default), the ports remembered by instances
@@ -223,7 +223,8 @@ public sealed class DashboardServer : IAsyncDisposable
 
         app.MapGet("/t/{table}", (string table, HttpContext http) => Table(http, table));
 
-        app.MapGet("/api/board", async () => Results.Json(new { columns = await _board.SnapshotAsync() }, JsonOptions));
+        app.MapGet("/api/board", async () =>
+            Results.Json(new { columns = await _board.SnapshotAsync() }, JsonOptions));
 
         // The cast to Delegate matters: without it the lambda binds to the RequestDelegate overload,
         // which returns void, and the IResult a board write produces would be discarded.
@@ -427,13 +428,14 @@ public sealed class DashboardServer : IAsyncDisposable
             var selected = requested is null ? null : await _board.DetailAsync(requested.Value);
 
             return Results.Content(
-                _pages.BoardPage(_info, columns, selected, _database.Exists, requested), "text/html; charset=utf-8");
+                _pages.BoardPage(_info, columns, selected, _database.Exists, requested),
+                "text/html; charset=utf-8");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Web dashboard page failed: {Path}", http.Request.Path);
             return Results.Content(
-                Shell("Error", "<h1>500 — this page failed</h1>" +
+                Shell("Error", "<h1>500 - this page failed</h1>" +
                                "<p class=\"sub\">The dashboard caught the exception below; the MCP server keeps running.</p>" +
                                $"<pre class=\"full\">{Html.E(ex.ToString())}</pre>" +
                                "<p><a class=\"btn\" href=\"/board\">Back to the board</a></p>"),

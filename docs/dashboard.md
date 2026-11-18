@@ -1,20 +1,16 @@
 # Web interface (the dashboard)
 
-Every running VisualMCP server hosts a web view of itself and of the solution store it writes
-(`<workspace>/.visualMCP/visualmcp.db`) — read-only, except the board page, which edits cards. It runs
-**inside the MCP process** — there is no second process to launch, no port to forward by hand — and
-answers on loopback only:
+A web view of the running server and of the solution store it writes
+(`<solution>/.visualMCP/visualmcp.db`). It is hosted **inside the MCP process** — no separate
+process to launch — and answers on loopback only.
 
 ```
 http://127.0.0.1:4677
 ```
 
-It is an observer, with one deliberate exception: the **board page** edits cards. Every other route is a
-`GET` that reads SQLite and the live process; no page deletes a row or changes a setting. The board's
-writes go through the same service the `board_*` tools call — history, renumbering and all — and only
-through a same-origin JSON POST that the page itself sends (see [Safety](#safety)). That is why it can
-run at any time without touching the solution, and why a dashboard that cannot bind a port is a warning
-in the log rather than a failure of the MCP session.
+Every page is read-only except `/board`: the board page is the one surface that changes the store,
+and its writes go through the same `IBoardService` the `board_*` tools call. An unreachable port
+therefore cannot break the MCP session.
 
 This page is the full reference: lifecycle, port policy, every page and query parameter, the complete
 list of tables it can show, the JSON API, the response headers, troubleshooting and the limits.
@@ -92,10 +88,10 @@ configured, the log page says so and the rest of the dashboard keeps working.
 
 | Page | What it shows |
 |---|---|
-| `/` | The overview: process facts, the loaded solutions, the store's counts, the latest tool calls and edits, quick links by area |
-| `/board` | The project's board: five columns, a card dragged to move it, and the detail panel of one card (fields, move, comments, history, delete) |
-| `/tables` | Every table the store contains, grouped by area, with its row count, column count and a sentence describing a row |
-| `/t/{table}` | One page per table: filter across every non-blob column, sortable headers, paging, and CSV/JSON export |
+| `/` | Process facts (pid, uptime, working set, GC heap, runtime, transport, working directory, log path), the loaded solutions with their project/document counts, the counts of the most important tables, the latest tool calls and edits |
+| `/board` | The project's kanban: five columns, one draggable card per item, the detail panel of the card named by `?card=<id>` (fields, comments, history), and a New card form. The only page that writes |
+| `/tables` | Every table in the store, grouped by area, with its row count and column count |
+| `/t/{table}` | One page per table: substring filter over every non-blob column, sortable headers, paging, and `CSV` / `JSON` exports |
 | `/schema` | The columns of every table as SQLite reports them (`type`, `not null`, `primary key`) |
 | `/tools` | The tool catalogue this process advertises: name, read-only/destructive hint, description, and every argument with its type, whether it is required, and its description |
 | `/log` | The tail of `debug.log`, newest first, refreshed every 2.5 s without reloading the page; filter by text and by kind |
@@ -228,7 +224,28 @@ log. The list reads the same `command_log` rows the overview's card shows, so th
 while you read any other page. The process facts (pid, uptime, port) sit at its foot. On a window
 narrower than 900 px the column folds to the top of the page.
 
-## The tables it shows
+## The board page
+
+`/board` renders the same board the tools read: five columns (`backlog`, `todo`, `in_progress`,
+`review`, `done`), the cards in position order, and the detail panel of the card named by
+`?card=<id>` — title, description, priority, labels, assignee, comments and the full change history.
+
+- **Drag a card** onto another column to move it; the drop position is the card's new index.
+- **Open a card** (`/board?card=<id>`) to edit its fields, move it with a select, comment on it or
+  delete it.
+- **New card** creates one in the chosen column.
+
+Every write is a `POST` to `/api/board/*` and requires a same-origin `application/json` body with the
+`X-VisualMCP: 1` header; a plain form post, a cross-origin request or a POST without the header is
+answered with `403`. The write goes through the same service a `board_move` or `board_update` call
+uses, so the card's history records it identically.
+
+**One page per table, whatever the schema is.** Tables are discovered from `sqlite_master`, not
+from a hard-coded list, so a table added by a future feature gets a page immediately. The known
+tables carry a title, an area and a sentence describing what a row means
+(`DashboardCatalogue`); anything else appears under **Other** with a generic description.
+FTS5 shadow tables (`ti_line_data`, `_idx`, `_content`, `_docsize`, `_config`) are hidden: they
+are the index's storage, not something to browse.
 
 The dashboard discovers tables and views from `sqlite_master` and hides `sqlite_*` internals and the
 shadow tables of an FTS5 index (`ti_line_data`, `_idx`, `_content`, `_docsize`, `_config`). The known
@@ -314,16 +331,16 @@ and each one requires the header and content type described under [Safety](#safe
 
 | Endpoint | Answer |
 |---|---|
-| `GET /api/health` | `ok`, pid, port, url, status, started-at, uptime in seconds, database path. The fastest way to find the dashboard if the port moved. |
-| `GET /api/overview` | Process facts (`pid`, runtime, working directory, uptime), dashboard state (port, url, status), database path and size, and per-table row counts. |
-| `GET /api/board` | Every column with its cards: `{ columns: [{ status, count, cards: [...] }] }`, the same document the MCP board tools return. |
-| `GET /api/tables` | Every table: name, kind, rows, columns (name, type, primary key), title, area, description. |
-| `GET /api/tables/{table}` | One page of rows (`page`, `size`, `q`, `sort`, `dir`): `table`, `kind`, `total`, `page`, `pageSize`, `pageCount`, `sort`, `descending`, `search`, `columns`, and `rows` as an array of arrays. An unknown table is a 404 with `{"error": "No table called '…'."}`. |
-| `POST /api/board/move` | `{ id, status, position? }` — move a card; the position is omitted to append. Answers `{ ok, id }` or `{ ok: false, error }`. |
-| `POST /api/board/update` | `{ id, title?, description?, priority?, assignee?, labels? }` — edit the fields; only the fields present change. |
-| `POST /api/board/comment` | `{ id, body, author? }` — append a comment. |
-| `POST /api/board/add` | `{ title, description?, status?, priority?, assignee?, labels? }` — create a card; answers with its `id`. |
-| `POST /api/board/delete` | `{ id }` — delete the card with its comments and history. |
+| `GET /api/health` | `ok`, pid, port, url, status, started-at, uptime, database path |
+| `GET /api/overview` | Process facts, dashboard state, database path and size, per-table row counts |
+| `GET /api/tables` | Every table: name, kind, rows, columns, title, area, description |
+| `GET /api/tables/{table}` | One page of rows (`page`, `size`, `q`, `sort`, `dir`) as a column-name-free array plus the column list |
+| `GET /api/board` | The board: five columns with their cards |
+| `POST /api/board/add` | `{title, description?, status?, priority?, assignee?, labels?}` → `{ok, id}` |
+| `POST /api/board/update` | `{id, title?, description?, priority?, assignee?, labels?}`; an empty `labels` array clears the set |
+| `POST /api/board/move` | `{id, status, position?}` → `{ok}` |
+| `POST /api/board/comment` | `{id, body, author?}` → `{ok}` |
+| `POST /api/board/delete` | `{id}` → `{ok}` |
 
 A refused write answers a 400 with the board service's own message (an unknown id, a column that does not
 exist, an empty title); a call without the header, content type or same origin answers 403. Nothing is
@@ -349,16 +366,14 @@ written in either case.
   only (`connect-src 'self'`, `img-src data:`, `base-uri 'none'`, `form-action 'self'`). The server
   header is not sent and the request body is capped at 64 KB.
 - **Table names** come from `sqlite_master`: a name supplied in the URL is resolved against the
-  database and the *returned* name is what reaches the SQL; identifiers are quoted, the filter is a
-  parameter, and `%`/`_` in the user's text are escaped. A request cannot inject SQL.
-- **Everything read from the database is HTML-encoded** — the table pages, the log, tool descriptions —
-  and the pages are server-rendered from that escaped text. The escaped value is what the browser sees.
-- **Blobs are summarised** in HTML, JSON and CSV answers; a dashboard response never carries a file's
-  bytes.
-- **No stdout.** The MCP transport owns stdout; the dashboard's host clears every logging provider it
-  would otherwise install and logs through the same file logger as the rest of the server.
-- **A discovery probe skips the dashboard**, like it skips the eager solution load: a probe never pays
-  for opening the store.
+  database and the *returned* name is what reaches the SQL, so a request cannot inject SQL.
+- **Board writes are guarded**: a POST needs a same-origin `application/json` body and the
+  `X-VisualMCP: 1` header, which an HTML form cannot set and another origin cannot send without a
+  preflight this host never grants.
+- **A discovery probe skips the dashboard**, like it skips the eager solution load: a probe never
+  pays for opening the store.
+- The dashboard starts only after the client's first message, in the same background task that
+  opens the environment; the MCP host itself is never blocked by it.
 
 ## Troubleshooting
 
@@ -420,9 +435,10 @@ src/VisualMCP/Dashboard/
   DashboardDatabase.cs   ← read-only SQLite: tables, columns, rows, paging, search, export
   DashboardBoard.cs      ← the board through IBoardService, projected into the typed records the page renders
   DashboardCatalogue.cs  ← title/area/description of the known tables
+  DashboardBoard.cs      ← the board page's typed view over IBoardService, and the guarded writes
   DashboardPages.cs      ← the pages (overview, board, tables, one per table, schema, tools, log)
   Html.cs                ← document template, stylesheet, escaping, small components
-  DashboardServer.cs     ← the Kestrel host, routing, JSON/CSV endpoints, the guarded board writes, port persistence
+  DashboardServer.cs     ← the Kestrel host, routing, JSON/CSV endpoints, board API, port persistence
 ```
 
 The host is wired in `Program.cs` (the `Dashboard/` block near the MCP server registration): options
@@ -430,10 +446,7 @@ from the environment, the database reader, the server singleton, and the `Applic
 stops the listener. The project references the `Microsoft.AspNetCore.App` shared framework; the
 self-contained release bundles it and the framework-dependent publish adds no files.
 
-`src/VisualMCP.Tests/DashboardTests.cs` covers the data layer (discovery, filtering, paging, blob
-exclusion, injection refusal), the command list the sidebar reads, the port policy, the remembered port,
-a real listener that serves every page, the CSV export, the JSON API and the live-log fragment, and the
-board: the five columns and a card's detail panel, the guard on its writes (no header, a foreign origin,
-an invalid column), and a move/add/comment/edit/delete round trip — 11 cases, including an assertion
-that a `<script>` written into a tool argument comes back escaped and that the newest log line is
-rendered first.
+Tests: `src/VisualMCP.Tests/DashboardTests.cs` — the data layer (discovery, filtering, paging,
+blob exclusion, injection refusal), the command list the sidebar reads, the port policy, a real
+listener that serves every page, and the board page: the rendered columns and detail, the guarded
+writes, and a card added, commented, edited and deleted through the API.

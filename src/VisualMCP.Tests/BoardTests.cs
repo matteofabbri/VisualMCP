@@ -418,6 +418,53 @@ public sealed class BoardTests
     }
 
     [Fact]
+    public async Task BoardMove_ManyCardsInOneCallCarryTheNoteOnEach()
+    {
+        var (workspace, board) = NewBoard();
+        using var _ = workspace;
+
+        var ids = new List<int>();
+        foreach (var title in new[] { "A", "B", "C" })
+            ids.Add(ResultAssert.Json(await board.AddAsync(title, null, "review", null, null, null))
+                .GetProperty("id").GetInt32());
+
+        var moved = ResultAssert.Json(await board.MoveManyAsync(ids, "done", "verified: one batch", "agent"));
+
+        Assert.Equal(3, moved.GetProperty("moved").GetInt32());
+        Assert.Equal(ids, moved.GetProperty("ids").EnumerateArray().Select(id => id.GetInt32()).ToList());
+        Assert.Equal(JsonValueKind.Null, moved.GetProperty("missing").ValueKind);
+
+        // One comment per card, and the column is renumbered so the batch keeps the requested order.
+        var positions = new List<int>();
+        foreach (var id in ids)
+        {
+            var shown = ResultAssert.Json(await board.ShowAsync(id));
+            Assert.Equal("done", shown.GetProperty("item").GetProperty("status").GetString());
+            Assert.Contains("moved to done: verified: one batch",
+                shown.GetProperty("comments")[0].GetProperty("body").GetString());
+            positions.Add(shown.GetProperty("item").GetProperty("position").GetInt32());
+        }
+        Assert.Equal(positions.OrderBy(position => position), positions);
+    }
+
+    [Fact]
+    public async Task BoardMove_ManyCardsReportsAnIdThatDoesNotExistAndStillMovesTheRest()
+    {
+        var (workspace, board) = NewBoard();
+        using var _ = workspace;
+
+        var id = ResultAssert.Json(await board.AddAsync("Only card", null, "todo", null, null, null))
+            .GetProperty("id").GetInt32();
+
+        var moved = ResultAssert.Json(await board.MoveManyAsync([id, 9999], "done", null, null));
+
+        Assert.Equal(1, moved.GetProperty("moved").GetInt32());
+        Assert.Equal(new[] { 9999 }, moved.GetProperty("missing").EnumerateArray().Select(missing => missing.GetInt32()).ToList());
+        Assert.Equal("done",
+            ResultAssert.Json(await board.ShowAsync(id)).GetProperty("item").GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task BoardBrief_SummaryIsNullForAnEmptyBoard()
     {
         var (workspace, board) = NewBoard();

@@ -23,6 +23,14 @@ internal static class ProcessRunner
             WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
         };
 
+        // Children must resolve their own SDK: an in-process MSBuild evaluation leaves
+        // MSBuildSDKsPath and friends in this process's environment, and a dotnet child that
+        // resolves a different SDK via global.json then fails with MSB4237.
+        psi.Environment.Remove("MSBuildSDKsPath");
+        psi.Environment.Remove("MSBuildExtensionsPath");
+        psi.Environment.Remove("MSBuildToolsPath");
+        psi.Environment.Remove("MSBUILD_EXE_PATH");
+
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
 
