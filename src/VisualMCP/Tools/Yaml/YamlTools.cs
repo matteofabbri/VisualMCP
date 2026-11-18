@@ -26,7 +26,9 @@ public static class YamlTools
         "('key:value'), YAML0006 a value containing ': ' that a parser reads as a nested mapping, YAML0007 an " +
         "unbalanced [ ] or { } flow collection, YAML0008 an alias (*name) with no anchor (&name), YAML0009 a " +
         "Kubernetes manifest with kind but no apiVersion (or the reverse), YAML0010 a metadata block with no " +
-        "name, YAML0011 a container with no image, YAML0012 two containers in one list with the same name. It " +
+        "name, YAML0011 a container with no image, YAML0012 two containers in one list with the same name, " +
+        "YAML0013 a GitHub Actions job with neither runs-on nor uses, YAML0014 a compose service with neither " +
+        "image nor build, YAML0015 a workflow with jobs but no on trigger. It " +
         "masks comments, block scalars and quoted text first, so a 'key: value' inside them does not fire. An " +
         "indentation-aware line scan, not a YAML parser: the manifest rules are structural and it does not " +
         "validate a schema or a chart. Read-only.")]

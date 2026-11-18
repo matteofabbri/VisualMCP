@@ -139,9 +139,10 @@ public sealed class MarkupService : IMarkupService
         {
             notes.Add("CSS0009 resolves a selector against the tag/class/id/attribute index of the scanned pages " +
                       "(<style> blocks included): a compound part with its classes, id, attribute conditions and " +
-                      "structural pseudo-classes (:root, :first-child, :last-child, :only-child, :empty), joined " +
+                      "structural pseudo-classes (:root, :first-child, :last-child, :only-child, :empty, and the " +
+                      ":nth-child()/:nth-last-child()/:nth-of-type()/:nth-last-of-type() formulas), joined " +
                       "by descendant, child, adjacent-sibling and general-sibling combinators. A selector whose " +
-                      "meaning only a browser can decide (:hover, :checked, :nth-child(), :has()) is indexed but " +
+                      "meaning only a browser can decide (:hover, :checked, :has()) is indexed but " +
                       "never reported; CSS0010 resolves specificity and source order for a declaration that is " +
                       "overridden on every element it matches.");
 

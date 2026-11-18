@@ -15,7 +15,7 @@ The process does four things:
 
 - **Loads the solution** with Roslyn's `MSBuildWorkspace`, so tools see the project graph, target
   frameworks, references and compiler diagnostics the way an IDE does.
-- **Keeps derived data** in `<solution>/.visualMCP/visualmcp.db` — indexes, edit history, the board and
+- **Keeps derived data** in `<workspace>/.visualMCP/visualmcp.db` — indexes, edit history, the board and
   cached reports. The source files on disk remain the only truth.
 - **Serves an optional dashboard** on a loopback port (`http://127.0.0.1:4677` by default).
   Every page is read-only except `/board`, whose writes go through the board service;
@@ -34,8 +34,11 @@ is detected and skips the load entirely.
 - Tools **auto-discover** the solution in the working directory on first use. You normally do not need
   `load_solution`.
 - `list_solutions` scans a folder tree for `.sln`/`.slnx` files.
-- `load_solution` targets a specific solution by absolute path, or reloads one.
-- `check_solution` reports what is loaded right now: path, project count, and the C# / Visual Basic breakdown.
+- `load_solution` targets a specific solution by absolute path **inside the workspace**, or reloads one.
+  A path outside it is refused with the root to pass to `--root`: one process serves one workspace, and
+  another repository is another server with its own database and board.
+- `check_solution` reports what is loaded right now — path, project count, the C# / Visual Basic
+  breakdown — plus the workspace root, the store in use and the process id.
 
 Loading uses Roslyn's `MSBuildWorkspace`, with `MSBuildLocator` registering the installed .NET SDK. That
 means the server sees the solution as the compiler sees it: project references, target frameworks,
@@ -44,6 +47,19 @@ restore or evaluate will produce MSBuild diagnostics rather than silently degrad
 
 The workspace is a snapshot. VisualMCP keeps it in sync with its own writes; after large changes made
 outside it (an IDE, a branch switch), call `load_solution` again to refresh the semantic model.
+
+## One process, one workspace
+
+Your client starts a VisualMCP server per session, in the folder you opened. That folder is the
+**workspace**: it is fixed at startup (`--root` or `VISUALMCP_ROOT` for a host that cannot pass a
+folder), discovery and the store belong to it, and `load_solution` accepts only a `.sln`/`.slnx` beneath
+it. Another repository is another server, which the client already starts.
+
+The store is the workspace's **one** database, keyed on its primary solution — so activating a nested
+`.sln` does not fork a second one. Two sessions on the same workspace share that database: one
+background watcher is elected with a lease in the store, and each dashboard gets its own port. The
+model, its invariants and its failure modes are in the engineering note
+[The workspace, the store and multiple sessions](workspace-and-store.md).
 
 ## The tool surface
 
@@ -56,9 +72,10 @@ prefixed, e.g. `mcp__VisualMCP__find_references`.
 
 ## The solution store
 
-`<solution>/.visualMCP/visualmcp.db` is a SQLite database scoped to one solution. The rule for what
-goes in it: **only derived, reconstructible data, always stamped with the hash or timestamp of its
-inputs**. The source on disk remains the only truth.
+`<workspace>/.visualMCP/visualmcp.db` is a SQLite database scoped to one workspace, keyed on its
+primary (shallowest) solution and resolved once per process — activating a nested `.sln` does not move
+it. The rule for what goes in it: **only derived, reconstructible data, always stamped with the hash or
+timestamp of its inputs**. The source on disk remains the only truth.
 
 | Area | Tables | What a row means |
 |---|---|---|
@@ -87,9 +104,11 @@ Two consequences worth knowing:
 
 ## The dashboard
 
-The server hosts a **read-only** web view of itself at **http://127.0.0.1:4677**.
+The server hosts a web view of itself at **http://127.0.0.1:4677**. The store pages are read-only; the
+board page is the one that edits.
 
 - `/` — process facts, loaded solutions, table counts, latest calls and edits
+- `/board` — the project's board: drag a card to move it, open it to edit its fields, comment, move or delete it
 - `/tables` and `/t/{table}` — one page per table, with filtering, sorting, paging and CSV/JSON export
 - `/schema` — columns as SQLite reports them
 - `/tools` — the live tool catalogue with every argument
@@ -103,9 +122,10 @@ same-origin JSON + `X-VisualMCP: 1` guard. Table names are resolved against `sql
 so a name in the URL cannot inject SQL. Response headers include a strict CSP and `no-store`, and blobs
 are summarised rather than served.
 
-Port selection is deterministic: **4677**, then the port it last bound (kept as `dashboard.port` in the
-store), then an OS-assigned port. A port that cannot be bound is a warning in the log, never a failure
-of the MCP session.
+Port selection is deterministic: **4677**, then the port of a dashboard instance that is no longer
+running (each keeps its own `dashboard.port.<pid>` row in the store), then an OS-assigned port. A port
+that cannot be bound is a warning in the log, never a failure of the MCP session. The full reference — lifecycle, every page and query parameter, the store's tables
+one by one, the JSON API, troubleshooting — is [dashboard.md](dashboard.md).
 
 | Variable | Effect |
 |---|---|

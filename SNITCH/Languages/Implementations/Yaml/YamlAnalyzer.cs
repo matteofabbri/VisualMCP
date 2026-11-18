@@ -9,9 +9,10 @@ namespace Snitch.Languages.Yaml;
 /// silently: a tab in the indentation, a key declared twice, a colon glued to its key, the YAML 1.1
 /// booleans, an alias with no anchor, an unclosed flow collection. On top of the line rules it reads the
 /// identity of a Kubernetes manifest — kind, apiVersion, metadata.name — and the containers it declares,
-/// which is what `yaml_files` shows and what YAML0009–YAML0012 judge: an identity with one half missing,
-/// an unnamed object, a container with no image, two containers sharing a name. The judgement is still
-/// structural: no schema is fetched and no chart is rendered.
+/// which is what `yaml_files` shows and what YAML0009–YAML0015 judge: an identity with one half missing,
+/// an unnamed object, a container with no image, two containers sharing a name, and on a GitHub Actions
+/// workflow or a compose file, a job or service with nothing to run and a workflow with no trigger. The
+/// judgement is still structural: no schema is fetched and no chart is rendered.
 /// </summary>
 public static class YamlAnalyzer
 {
@@ -36,6 +37,9 @@ public static class YamlAnalyzer
         ["YAML0010"] = "A metadata block with no name",
         ["YAML0011"] = "A container with no image",
         ["YAML0012"] = "Two containers in one list with the same name",
+        ["YAML0013"] = "A GitHub Actions job with neither runs-on nor uses",
+        ["YAML0014"] = "A compose service with neither image nor build",
+        ["YAML0015"] = "A GitHub Actions workflow with jobs but no on trigger",
     };
 
     /// <summary>
@@ -104,6 +108,25 @@ public static class YamlAnalyzer
         string? containerName = null;
         var containerNameLine = 0;
         var containerNames = new HashSet<string>(StringComparer.Ordinal);
+
+        // A GitHub Actions workflow: a top-level jobs block, each job judged when it closes, and the
+        // on trigger that must exist for the workflow to run at all.
+        var jobsIndent = -1;
+        var jobsLine = 0;
+        var jobIndent = -1;
+        var jobOpen = false;
+        var jobStartLine = 0;
+        var jobHasRunner = false;
+        var documentOn = false;
+        var documentHasJobs = false;
+        var workflowLooksLikeOne = false;
+
+        // A compose file: a top-level services block, each service judged when it closes.
+        var servicesIndent = -1;
+        var serviceIndent = -1;
+        var serviceOpen = false;
+        var serviceStartLine = 0;
+        var serviceHasSource = false;
 
         var lines = text.Replace("\r\n", "\n").Split('\n');
 
@@ -225,6 +248,81 @@ public static class YamlAnalyzer
                 name ??= value;
             }
 
+            // A GitHub Actions workflow: `on` and `jobs` are top-level keys, and every job under `jobs` is
+            // a mapping key one level deeper. A job is judged when the next job (or the end) closes it.
+            if (key == "on" && keyIndent == 0 && !sequenceItem)
+                documentOn = true;
+
+            if (key == "jobs" && keyIndent == 0 && !sequenceItem && value.Length == 0)
+            {
+                CloseJobs();
+                jobsIndent = keyIndent;
+                jobsLine = line;
+                documentHasJobs = true;
+            }
+            else if (jobsIndent >= 0)
+            {
+                if (!sequenceItem && keyIndent <= jobsIndent)
+                {
+                    CloseJobs();
+                }
+                else if (!sequenceItem && keyIndent > jobsIndent)
+                {
+                    if (jobIndent < 0 || keyIndent == jobIndent)
+                    {
+                        CloseJob();
+                        jobOpen = true;
+                        jobStartLine = line;
+                        jobIndent = keyIndent;
+                        jobHasRunner = false;
+                    }
+                    else if (jobOpen && keyIndent > jobIndent)
+                    {
+                        if (key is "runs-on" or "uses")
+                        {
+                            // The key's presence is the runner decision; a `runs-on:` whose value is a
+                            // block sequence on the next lines is valid, so its empty scalar still counts.
+                            jobHasRunner = true;
+                            workflowLooksLikeOne = true;
+                        }
+                        else if (key == "steps")
+                        {
+                            workflowLooksLikeOne = true;
+                        }
+                    }
+                }
+            }
+
+            // A compose file: `services` is top-level and every service is a key one level deeper.
+            if (key == "services" && keyIndent == 0 && !sequenceItem && value.Length == 0)
+            {
+                CloseServices();
+                servicesIndent = keyIndent;
+            }
+            else if (servicesIndent >= 0)
+            {
+                if (!sequenceItem && keyIndent <= servicesIndent)
+                {
+                    CloseServices();
+                }
+                else if (!sequenceItem && keyIndent > servicesIndent)
+                {
+                    if (serviceIndent < 0 || keyIndent == serviceIndent)
+                    {
+                        CloseService();
+                        serviceOpen = true;
+                        serviceStartLine = line;
+                        serviceIndent = keyIndent;
+                        serviceHasSource = false;
+                    }
+                    else if (serviceOpen && keyIndent > serviceIndent)
+                    {
+                        if (key == "image" ? value.Length > 0 : key is "build" or "extends")
+                            serviceHasSource = true;
+                    }
+                }
+            }
+
             // A container list: the item keys sit at one indent, and anything at or above the list closes it.
             if (key == "containers" && !sequenceItem && value.Length == 0)
             {
@@ -338,6 +436,44 @@ public static class YamlAnalyzer
             containerNames.Clear();
         }
 
+        void CloseJob()
+        {
+            // Only a job in a workflow is judged: an `on` trigger or another job with steps/runs-on proves
+            // the document is one, so an unrelated top-level `jobs` mapping is left alone.
+            if (jobOpen && !jobHasRunner && (documentOn || workflowLooksLikeOne))
+                Add("YAML0013", "warning", "Correctness",
+                    "The job has neither runs-on nor uses, so GitHub Actions cannot choose a runner for it.",
+                    jobStartLine, 1, "Add runs-on: ubuntu-latest, or uses: for a reusable workflow.");
+
+            jobOpen = false;
+            jobIndent = -1;
+            jobHasRunner = false;
+        }
+
+        void CloseJobs()
+        {
+            CloseJob();
+            jobsIndent = -1;
+        }
+
+        void CloseService()
+        {
+            if (serviceOpen && !serviceHasSource)
+                Add("YAML0014", "warning", "Correctness",
+                    "The service has neither image nor build, so compose has nothing to run.",
+                    serviceStartLine, 1, "Add image: name:tag, or build: ./path.");
+
+            serviceOpen = false;
+            serviceIndent = -1;
+            serviceHasSource = false;
+        }
+
+        void CloseServices()
+        {
+            CloseService();
+            servicesIndent = -1;
+        }
+
         void CloseMetadata()
         {
             if (metadataIndent < 0) return;
@@ -357,6 +493,13 @@ public static class YamlAnalyzer
         {
             CloseContainers();
             CloseMetadata();
+            CloseJobs();
+            CloseServices();
+
+            if (documentHasJobs && !documentOn && workflowLooksLikeOne)
+                Add("YAML0015", "warning", "Correctness",
+                    "The workflow declares jobs but no on trigger, so it never runs.",
+                    jobsLine, 1, "Add on: push (or the events that should run it).");
 
             var manifest = documentApiVersion is not null || KnownKinds.Contains(documentKind ?? string.Empty);
             if (manifest)
@@ -382,6 +525,11 @@ public static class YamlAnalyzer
             documentApiVersionLine = 0;
             metadataMissingName = false;
             metadataMissingNameLine = 0;
+
+            documentOn = false;
+            documentHasJobs = false;
+            workflowLooksLikeOne = false;
+            jobsLine = 0;
         }
 
         void Add(string rule, string severity, string category, string message, int line, int column, string fix) =>

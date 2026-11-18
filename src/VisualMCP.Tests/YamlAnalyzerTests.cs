@@ -174,6 +174,78 @@ public sealed class YamlAnalyzerTests
     }
 
     [Fact]
+    public void AWorkflowJobWithoutARunnerOrAReusableWorkflowIsFlagged()
+    {
+        var analysis = Analyze("""
+            on: push
+            jobs:
+              build:
+                steps:
+                  - run: dotnet build
+            """);
+
+        Assert.Contains("YAML0013", Rules(analysis));
+
+        var withRunner = Analyze("""
+            on: push
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - run: dotnet build
+            """);
+
+        Assert.DoesNotContain("YAML0013", Rules(withRunner));
+        Assert.DoesNotContain("YAML0015", Rules(withRunner));
+
+        var withSequence = Analyze("""
+            on: push
+            jobs:
+              build:
+                runs-on:
+                  - self-hosted
+                  - linux
+                steps:
+                  - run: dotnet build
+            """);
+
+        Assert.DoesNotContain("YAML0013", Rules(withSequence));
+    }
+
+    [Fact]
+    public void AWorkflowWithJobsButNoTriggerIsFlagged()
+    {
+        var analysis = Analyze("""
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+            """);
+
+        Assert.Contains("YAML0015", Rules(analysis));
+    }
+
+    [Fact]
+    public void AComposeServiceWithoutImageOrBuildIsFlagged()
+    {
+        var analysis = Analyze("""
+            services:
+              api:
+                ports:
+                  - "8080:80"
+            """);
+
+        Assert.Contains("YAML0014", Rules(analysis));
+
+        var withImage = Analyze("""
+            services:
+              api:
+                image: example/api:1.0
+            """);
+
+        Assert.DoesNotContain("YAML0014", Rules(withImage));
+    }
+
+    [Fact]
     public void ABlockScalarIsNotReadAsKeys()
     {
         var analysis = Analyze("""

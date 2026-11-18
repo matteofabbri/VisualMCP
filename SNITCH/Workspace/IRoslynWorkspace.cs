@@ -18,6 +18,12 @@ public interface IRoslynWorkspace : IDisposable
     string? LoadedSolutionPath { get; }
 
     /// <summary>
+    /// The directory this process serves. Discovery starts here, the store and the dashboard live
+    /// here, and a solution outside it is refused: one VisualMCP process is one workspace.
+    /// </summary>
+    string WorkspaceRoot { get; }
+
+    /// <summary>
     /// Returns the active solution, opening the environment from the working directory if
     /// nothing is loaded yet. Returns null when no unambiguous solution can be found.
     /// </summary>

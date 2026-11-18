@@ -12,8 +12,12 @@ namespace VisualMCP.Dashboard;
 /// </remarks>
 public sealed class DashboardOptions
 {
-    /// <summary>The <c>context</c> row that remembers the last port the dashboard bound.</summary>
-    public const string PortKey = "dashboard.port";
+    /// <summary>
+    /// Prefix of the <c>context</c> rows that remember a dashboard's port: one row per instance,
+    /// <c>dashboard.port.&lt;pid&gt;</c>. Per instance, because two servers can share a workspace and
+    /// a single last-writer-wins row made each restart land wherever the other one happened to be.
+    /// </summary>
+    public const string PortKeyPrefix = "dashboard.port.";
 
     /// <summary>The port asked for first, before the remembered one and a random one.</summary>
     public const int DefaultPort = 4677;
@@ -60,16 +64,20 @@ public sealed class DashboardOptions
     }
 
     /// <summary>
-    /// The ports to try, in order, before falling back to an OS-assigned one: the preferred
-    /// port, then the port the dashboard last bound successfully (kept in the solution store).
-    /// The stored port is what makes a second instance land on a different but stable port
-    /// instead of jumping around on every start.
+    /// The ports to try, in order, before falling back to an OS-assigned one: the preferred port,
+    /// then the ports remembered by instances that are no longer running (so a restart reuses its
+    /// own port even when a sibling session holds the preferred one). Newest first, each once.
     /// </summary>
-    public static IReadOnlyList<int> Candidates(int preferred, int? stored)
+    public static IReadOnlyList<int> Candidates(int preferred, IEnumerable<int> remembered)
     {
-        var ports = new List<int>(2);
+        var ports = new List<int>(4);
         if (preferred is > 0 and <= 65535) ports.Add(preferred);
-        if (stored is > 0 and <= 65535 && !ports.Contains(stored.Value)) ports.Add(stored.Value);
+
+        foreach (var stored in remembered)
+        {
+            if (stored is > 0 and <= 65535 && !ports.Contains(stored)) ports.Add(stored);
+        }
+
         return ports;
     }
 }

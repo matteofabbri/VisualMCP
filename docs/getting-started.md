@@ -138,8 +138,10 @@ powershell -ExecutionPolicy Bypass -File install.ps1 `
 check_solution
 ```
 
-The answer reports whether a solution is loaded, its path, project count, and whether it contains C#.
-If no solution is found, pass an explicit path to `load_solution`.
+The answer reports whether a solution is loaded, its path, project count, whether it contains C#, and
+the workspace root and store in use. If no solution is found, pass an explicit path to `load_solution`
+(inside the workspace) — or start the server with `--root <repo>` when the client launched it
+somewhere else.
 
 You can also call `list_solutions` with a root folder to see what is discoverable.
 

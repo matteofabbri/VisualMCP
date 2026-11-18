@@ -57,7 +57,8 @@ These are load-bearing, not style:
 ## Dashboard
 
 `Dashboard/DashboardServer` hosts a minimal ASP.NET Core app in a second, in-process host on
-**http://127.0.0.1:4677** (else the last port in the store, else an OS-assigned one). It serves
+**http://127.0.0.1:4677** (else a port kept by an instance that is no longer running, else an
+OS-assigned one). It serves
 the process state, the tool catalogue, the `debug.log` tail and one page per table found in
 `sqlite_master`, so new store tables appear without code changes. The `/board` page is the one
 writing surface: it renders the kanban and edits it through `DashboardBoard`, which calls the same

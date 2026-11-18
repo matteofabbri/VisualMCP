@@ -117,20 +117,23 @@ public sealed class DashboardTests : IDisposable
     [Fact]
     public void The_port_policy_is_preferred_then_remembered_then_random()
     {
-        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, stored: null));
-        Assert.Equal(new[] { 4677, 5123 }, DashboardOptions.Candidates(4677, 5123));
-        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, 4677));
-        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, stored: 0));
-        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, stored: 70_000));
-        Assert.Empty(DashboardOptions.Candidates(0, stored: null));
+        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, Array.Empty<int>()));
+        Assert.Equal(new[] { 4677, 5123 }, DashboardOptions.Candidates(4677, new[] { 5123 }));
+        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, new[] { 4677 }));
+        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, new[] { 0 }));
+        Assert.Equal(new[] { 4677 }, DashboardOptions.Candidates(4677, new[] { 70_000 }));
+        Assert.Empty(DashboardOptions.Candidates(0, Array.Empty<int>()));
     }
 
     [Fact]
-    public void A_bound_port_is_remembered_in_the_store()
+    public void A_bound_port_is_remembered_per_instance()
     {
         _database.RememberPort(5123);
 
-        Assert.Equal(5123, new DashboardDatabase(_store).StoredPort());
+        var stored = Assert.Single(new DashboardDatabase(_store).StoredPorts());
+        Assert.Equal(5123, stored.Port);
+        Assert.Equal(Environment.ProcessId, stored.Pid);
+        Assert.True(stored.IsAlive());
     }
 
     [Fact]

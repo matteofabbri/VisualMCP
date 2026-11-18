@@ -55,6 +55,8 @@ public sealed class CheckSolutionTests
 
         public string? LoadedSolutionPath => "VbOnly.sln";
 
+        public string WorkspaceRoot => Directory.GetCurrentDirectory();
+
         public Task<Solution?> EnsureSolutionLoadedAsync(CancellationToken ct = default) =>
             Task.FromResult<Solution?>(_solution);
 

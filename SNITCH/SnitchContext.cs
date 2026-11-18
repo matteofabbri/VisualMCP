@@ -25,6 +25,7 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
     private string? _docsRoot;
     private readonly object _docsLock = new();
     private SnitchSolution? _activeSolution;
+    private string? _pinnedRoot;
     private bool _disposed;
 
     public SnitchContext(SnitchOptions options) => Options = options;
@@ -54,6 +55,9 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
 
     /// <inheritdoc/>
     public string? LoadedSolutionPath => _activeSolution?.Path;
+
+    /// <inheritdoc/>
+    public string WorkspaceRoot => _workingDirectory;
 
     /// <inheritdoc/>
     public async Task<Solution?> EnsureSolutionLoadedAsync(CancellationToken ct = default)
@@ -141,9 +145,37 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
     }
 
     /// <summary>
-    /// Directory that work is rooted in. Defaults to the process working directory;
-    /// a host or tool may repoint it. Reassigning it invalidates the cached
-    /// <see cref="Solutions"/> and <see cref="Docs"/> so the next access rescans the new root.
+    /// Fixes the workspace root for the life of the process. A server serves one workspace: the
+    /// client already starts one process per session with the project as the working directory, and
+    /// pinning it is what stops a later <c>load_solution</c> (or a host that repoints the context)
+    /// from moving the whole process — active solution, database, board, edit history — to another
+    /// repository. Calling it once is enough; a second, different root is refused.
+    /// </summary>
+    public void PinWorkspace(string? root = null)
+    {
+        var target = Path.GetFullPath(string.IsNullOrWhiteSpace(root) ? _workingDirectory : root);
+        if (!Directory.Exists(target))
+            throw new DirectoryNotFoundException($"The workspace root '{target}' does not exist.");
+
+        if (_pinnedRoot is not null)
+        {
+            if (string.Equals(_pinnedRoot, target, StringComparison.OrdinalIgnoreCase)) return;
+
+            throw new InvalidOperationException(
+                $"The workspace root is pinned to '{_pinnedRoot}'. One VisualMCP process serves one workspace; " +
+                $"start a server with --root \"{target}\" for the other one.");
+        }
+
+        // The setter is still free here: it refuses changes only once _pinnedRoot is set.
+        WorkingDirectory = target;
+        _pinnedRoot = target;
+    }
+
+    /// <summary>
+    /// Directory that work is rooted in. Defaults to the process working directory. Once
+    /// <see cref="PinWorkspace"/> has run it can no longer be repointed: the process serves one
+    /// workspace, and a second root is a second server. Reassigning it (before pinning) invalidates
+    /// the cached <see cref="Solutions"/> and <see cref="Docs"/> so the next access rescans the new root.
     /// </summary>
     public string WorkingDirectory
     {
@@ -152,6 +184,13 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
         {
             if (string.Equals(_workingDirectory, value, StringComparison.OrdinalIgnoreCase))
                 return;
+            if (_pinnedRoot is not null)
+            {
+                throw new InvalidOperationException(
+                    $"The workspace root is pinned to '{_pinnedRoot}'. One VisualMCP process serves one workspace; " +
+                    $"start a server with --root \"{value}\" for the other one.");
+            }
+
             DisposeSolutionWorkspaces();   // drop solutions loaded from the old root
             _workingDirectory = value;
             _solutions = null;
@@ -310,6 +349,16 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
     private async Task<SnitchSolution> ActivateSolutionCoreAsync(string path, CancellationToken ct)
     {
         var full = Path.GetFullPath(path);
+
+        // The boundary the process was started with. A solution outside it belongs to another
+        // repository, another database and another board: it is a second server, not a switch.
+        if (!WorkspacePath.IsWithin(_workingDirectory, full))
+        {
+            throw new InvalidOperationException(
+                $"'{full}' is outside this server's workspace '{_workingDirectory}'. One VisualMCP process " +
+                $"serves one workspace; start a server with --root \"{Path.GetDirectoryName(full)}\" for that solution.");
+        }
+
         var solutions = _solutions ??= DiscoverSolutions();
 
         var solution = solutions.FirstOrDefault(

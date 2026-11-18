@@ -141,6 +141,9 @@ public sealed class JavaScriptService : IJavaScriptService
         var (root, files, truncated) = Discover(path, maxFiles);
         var findings = new List<JsFinding>();
         var analyzed = 0;
+        var scanned = files.Select(file => Path.GetFullPath(file)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var edges = new List<(string From, string To)>();
+        var anchors = new List<(string From, string To, string File, int Line, int Column)>();
 
         foreach (var file in files)
         {
@@ -148,11 +151,47 @@ public sealed class JavaScriptService : IJavaScriptService
             if (analysis is null) continue;
             analyzed++;
 
+            var importing = JavaScriptPaths.Relative(root, file);
+            foreach (var reference in analysis.ImportReferences)
+            {
+                var target = JavaScriptPaths.Resolve(file, reference.Module);
+                if (target is null || !scanned.Contains(target)) continue;
+
+                var imported = JavaScriptPaths.Relative(root, target);
+                edges.Add((importing, imported));
+                anchors.Add((importing, imported, file, reference.Line, reference.Column));
+            }
+
             foreach (var finding in analysis.Findings)
             {
                 if (Rank(finding.Severity) < Rank(severity)) continue;
                 if (ruleId is not null && finding.RuleId != ruleId) continue;
                 findings.Add(finding with { File = JavaScriptPaths.Relative(root, file) });
+            }
+        }
+
+        // JS0018 is a property of the module graph, not of a line: one finding per strongly connected
+        // group, anchored at the first import (in path order) that points into the group.
+        if ((ruleId is null or "JS0018") && Rank("warning") >= Rank(severity))
+        {
+            var (cycles, _) = FindCycles(edges.Distinct().ToList());
+            foreach (var cycle in cycles)
+            {
+                var members = new HashSet<string>(cycle, StringComparer.OrdinalIgnoreCase);
+                var anchor = anchors
+                    .Where(candidate => members.Contains(candidate.From) && members.Contains(candidate.To))
+                    .OrderBy(candidate => candidate.From, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(candidate => candidate.Line)
+                    .ThenBy(candidate => candidate.Column)
+                    .FirstOrDefault();
+                if (anchor.File is null) continue;
+
+                findings.Add(new JsFinding(
+                    "JS0018", "warning", "Maintainability",
+                    $"Imports form a cycle among {cycle.Count} module(s): {string.Join(", ", cycle)}.",
+                    JavaScriptPaths.Relative(root, anchor.File), anchor.Line, anchor.Column,
+                    await SnippetAtAsync(anchor.File, anchor.Line),
+                    "Break the cycle: move the shared code into a module both sides import, or invert one dependency."));
             }
         }
 
@@ -177,12 +216,21 @@ public sealed class JavaScriptService : IJavaScriptService
             findings = shown,
             truncated = findings.Count > shown.Count,
             note = "A pattern scan over masked source, not a parser: it proves the shape of a line, never that a " +
-                   "module resolves or a type holds. JS0017 resolves a relative import against the file system " +
-                   "(the path itself, a source extension, or an index file); an alias or a package specifier is " +
-                   "not a defect here — js_files and js_symbols resolve those for the module graph. " +
-                   "Template literals are masked whole, so a rule inside `${…}` does not fire; regular-expression " +
-                   "literals are not detected and a rule may fire inside one.",
+                   "type holds. JS0017 resolves a relative import against the file system (the path itself, a " +
+                   "source extension, or an index file); an alias or a package specifier is not a defect there. " +
+                   "JS0018 follows every specifier js_files follows — a relative path, a tsconfig alias, a " +
+                   "package in node_modules — and reports each strongly connected group of scanned modules as " +
+                   "one import cycle; a cycle through a module outside the scan is not seen. Template literals " +
+                   "are masked whole, so a rule inside `${…}` does not fire; regular-expression literals are not " +
+                   "detected and a rule may fire inside one.",
         };
+    }
+
+    private static async Task<string> SnippetAtAsync(string file, int line)
+    {
+        try { return JavaScriptPaths.SnippetAt(await File.ReadAllTextAsync(file), line); }
+        catch (IOException) { return string.Empty; }
+        catch (UnauthorizedAccessException) { return string.Empty; }
     }
 
     private async Task<JsAnalysis?> AnalyzeFileAsync(string file)

@@ -26,16 +26,20 @@ public static class MarkupTools
         "id, HTML0005 <label> attached to nothing, HTML0006 nested <form>, HTML0007 deprecated element, HTML0008 " +
         "inline event handler, HTML0009 target=_blank without rel, HTML0010 empty href, HTML0011 <button> without " +
         "type, HTML0012 form control without name, HTML0013 subresource over http://, HTML0014 unclosed or " +
-        "mismatched tag, HTML0015 a class used in markup that no scanned stylesheet defines. CSS rules: CSS0001 " +
+        "mismatched tag, HTML0015 a class used in markup that no scanned stylesheet defines, HTML0016 an attribute " +
+        "written twice on one element. CSS rules: CSS0001 " +
         "!important, CSS0002 ID selector, CSS0003 empty rule, CSS0004 @import, CSS0005 a selector declared twice, " +
-        "CSS0006 unbalanced braces, CSS0007 javascript: URL, CSS0008 expression(), CSS0009 a simple selector that " +
-        "matches no element in the scanned pages. It reads tags with a quote-aware scanner and both languages with " +
+        "CSS0006 unbalanced braces, CSS0007 javascript: URL, CSS0008 expression(), CSS0009 a selector that " +
+        "matches no element in the scanned pages, CSS0010 a declaration overridden on every element it matches. " +
+        "It reads tags with a quote-aware scanner and both languages with " +
         "comments masked, the CSS rules also run on the content of <style> blocks (a finding there is reported " +
         "on the page's line), and an inline style attribute is checked for !important, a javascript: URL and " +
-        "expression(). Selector matching is lexical: only tag, .class, #id and tag.class are resolved " +
-        "against the tag/class/id index of the scanned pages, <style> blocks included — no specificity, " +
-        "pseudo-classes, combinators or cascade, CSS created in JavaScript is outside, and it does not render the " +
-        "page. Read-only.")]
+        "expression(). The selector engine matches a compound part (tag, classes, id, attribute conditions, " +
+        ":root/:first-child/:last-child/:only-child/:empty and the :nth-child()/:nth-last-child()/" +
+        ":nth-of-type()/:nth-last-of-type() formulas) joined by descendant, child and sibling combinators " +
+        "against the page index, with specificity and source order for CSS0010; a dynamic pseudo-class " +
+        "(:hover, :checked) and :has() are indexed but never reported, CSS created in JavaScript is outside, " +
+        "and it does not render the page. Read-only.")]
     public static Task<object> AnalyzeMarkup(
         IMarkupService svc,
         [Description("A file or a directory (default: the solution directory).")] string? path = null,

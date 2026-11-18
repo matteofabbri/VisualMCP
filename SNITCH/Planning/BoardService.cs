@@ -151,7 +151,7 @@ public sealed class BoardService : IBoardService
     /// <summary>The refusal every board operation returns when the workspace has no store.</summary>
     private const string NoStoreError =
         "No solution is loaded (or its folder is not writable), so there is no board database. " +
-        "Start the server in a folder that contains a .sln/.slnx, so the workspace has a store.";
+        "Start the server in a folder that contains a .sln/.slnx (or pass --root), so the workspace has a store.";
 
     private readonly IVisualMcpStore _store;
 

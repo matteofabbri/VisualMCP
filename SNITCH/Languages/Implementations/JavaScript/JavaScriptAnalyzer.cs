@@ -49,6 +49,7 @@ public static class JavaScriptAnalyzer
         ["JS0015"] = "Explicit any in a TypeScript annotation",
         ["JS0016"] = "setTimeout / setInterval given a string",
         ["JS0017"] = "A relative import that does not resolve to a file",
+        ["JS0018"] = "An import cycle: the modules reach each other through their imports",
     };
 
     private static readonly Regex Eval = new(@"\beval\s*\(", Options);

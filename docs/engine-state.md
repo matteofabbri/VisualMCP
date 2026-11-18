@@ -156,7 +156,10 @@ implemented.
 
 ## 4. The solution store
 
-The database is `<solution>/.visualMCP/visualmcp.db`, SQLite, scoped per solution. Project rule: **only
+The database is `<workspace>/.visualMCP/visualmcp.db`, SQLite, scoped per workspace (its primary
+solution), resolved once per process. The process model behind the file — one store per workspace, two
+sessions sharing it, the background lease, the per-instance dashboard ports — is in
+[workspace-and-store.md](workspace-and-store.md). Project rule: **only
 what is derived and rebuildable goes in, stamped with the hash of its inputs**; the code on disk remains the
 only truth. A datum without a freshness hash produces stale analysis, and stale analysis is worse than
 slowness because it is silent.

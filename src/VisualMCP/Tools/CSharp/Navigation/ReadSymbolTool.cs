@@ -39,7 +39,7 @@ public static class ReadSymbolTool
         if (solution is null)
             return ToolText.Fail(
                 "No C# solution could be auto-located from the working directory. " +
-                "Call load_solution with an explicit .sln/.slnx first.");
+                "Call load_solution with an explicit .sln/.slnx inside this workspace, or start the server with --root.");
 
         var matches = partialMatch
             ? await SymbolFinder.FindSourceDeclarationsAsync(

@@ -23,10 +23,25 @@ tools, the client that launched the old process still has the old list.
 
 ### "No solution could be located"
 
-- The server auto-discovers solutions under the **working directory** the client launched it in. If that
-  is not the repository root, discovery can fail.
-- Call `list_solutions` to see what is visible, then `load_solution` with an absolute `.sln`/`.slnx` path.
-- `check_solution` reports what is loaded right now.
+- The server auto-discovers solutions under the **workspace root** — the directory the client launched
+  it in, or the one given with `--root` / `VISUALMCP_ROOT`. If that is not the repository root,
+  discovery can fail; start the server from the repo, or point it at the repo with `--root`.
+- Call `list_solutions` to see what is visible, then `load_solution` with an absolute `.sln`/`.slnx` path
+  **inside the workspace**. A path outside it is refused: start a second server for that repository.
+- `check_solution` reports what is loaded right now, the workspace root, the store in use and the pid.
+
+### `load_solution` says the path is outside this server's workspace
+
+The server serves the folder it was started in. A solution in another repository needs its own server:
+restart it with `--root "<that repo>"` (or set `VISUALMCP_ROOT`), or start the client in that folder.
+`list_solutions` still scans whatever directory you give it, so you can confirm the path before
+restarting.
+
+### The board says there is no board database
+
+The workspace has no `.sln`/`.slnx` (or its folder is not writable), so there is no store for the cards
+to live in. Start the server in the folder that holds the solution, or pass `--root`. Every tool that
+does not need the store still works.
 
 ### The first call is slow
 
@@ -121,8 +136,18 @@ To remove the guard entirely: `scripts\install-hooks.ps1 -Uninstall`.
 ### The dashboard is unreachable
 
 The URL is in the log (`Web dashboard on http://127.0.0.1:<port>`) and in `GET /api/health`. If 4677 is
-taken, the server falls back to the last port it used, then to an OS-assigned one. Set
-`VISUALMCP_DASHBOARD_PORT` to prefer another port, or `VISUALMCP_DASHBOARD=off` to disable it.
+taken, the server reuses the port of a dashboard instance that is no longer running, then falls back to
+an OS-assigned one — each instance keeps its own `dashboard.port.<pid>` row, so two live servers do not
+overwrite each other. Set `VISUALMCP_DASHBOARD_PORT` to prefer another port, or `VISUALMCP_DASHBOARD=off`
+to disable it.
+
+### Two sessions on the same workspace
+
+That is two server processes sharing one store: the board, the command log and the history are shared;
+each dashboard has its own port (find it in `debug.log` or `GET /api/health`); and only one process runs
+the metacode watcher at a time — it holds a lease in the store, and the other takes over within 30
+seconds if it stops. Expect a second, incremental warm-up at startup. Details:
+[The workspace, the store and multiple sessions](workspace-and-store.md).
 
 ### Coverage is empty
 
@@ -172,21 +197,21 @@ async/performance, complexity, metrics, clones, Big-O), the refactorings that ar
 `context_action` (33 of its 41 ids
 have a VB spelling; the C#-only ones are refused with the reason), `simplify_vb_code` (41 ids) and the
 language-neutral build/test/diagnostic tools all read `.vb`. What stays C#-only is named in the
-[Visual Basic row of the language map](gaps.md#1-language-and-platform-scope).
+[refactoring coverage](resharper-codemaid-coverage.md#refactorings).
 Razor and Blazor markup have a dedicated scanner. XAML/WPF/WinUI/MAUI/Avalonia has a markup layer
 (`xaml_pages`, `analyze_xaml`, `xaml_navigate`) with the code-behind resolved through Roslyn, and EF
 Core migrations run through `ef_migrations`. SQL has a scanned layer (`sql_files`, `analyze_sql` with
-SQL0001–SQL0012), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0017 — masked
+SQL0001–SQL0012), JavaScript/TypeScript another (`js_files`, `analyze_js`, JS0001–JS0018 — masked
 source, specifiers resolved through relative paths, tsconfig `baseUrl`/`paths` and `node_modules` into a
-module graph with its cycles, no type model), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
+module graph with its cycles, reported as JS0018, no type model), HTML/CSS another (`markup_files`, `analyze_markup`), YAML another
 (`yaml_files`, `analyze_yaml`, which also reads a Kubernetes manifest's identity and applies
-YAML0009–YAML0012 to it) and F# another
+YAML0009–YAML0012 to it, and checks the structure of a GitHub Actions workflow or a compose file) and F# another
 (`fsharp_files`, `analyze_fsharp`, the declaration index F# has no symbol tool for; the compiler's own
 diagnostics still come through `build_project`). The JavaScript/TypeScript toolchain also runs through
 the project's own npm/pnpm/yarn (`node_info`, `node_install`, `node_script`), and
 `node_typecheck`/`node_lint` interpret `tsc` and `eslint`; Kubernetes and Helm go through `k8s_*`.
 None of these layers replaces a compiler: a scanner proves the shape of a line, never a binding, a type
-or a schema. The full table is [the language map](gaps.md#1-language-and-platform-scope). C#,
+or a schema. The full table is [other languages and file kinds](resharper-codemaid-coverage.md#other-languages-and-file-kinds). C#,
 Razor, decompiled assemblies and Ghidra snapshots are all inputs to metacode.
 
 **Do I need Visual Studio?**

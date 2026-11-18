@@ -28,10 +28,13 @@ public static class JavaScriptTools
         "JS0006 document.write, JS0007 loose equality, JS0008 var, JS0009 console, JS0010 debugger, JS0011 empty " +
         "catch, JS0012 @ts-ignore/@ts-nocheck, JS0013 target=_blank without rel=noopener, JS0014 JSX <img> without " +
         "alt, JS0015 explicit any (TypeScript only), JS0016 setTimeout/setInterval given a string, JS0017 a " +
-        "relative import that points at no file (a package specifier is not a defect here). It masks comments, " +
+        "relative import that points at no file (a package specifier is not a defect here), JS0018 an import " +
+        "cycle among the scanned modules (one finding per strongly connected group, at the import that reaches " +
+        "into it). It masks comments, " +
         "strings and template literals first, so a " +
         "keyword inside them does not fire. A pattern scanner, not a parser: JS0017 resolves a relative import " +
-        "against the file system and js_files/js_symbols resolve every specifier, but a type is never resolved. " +
+        "against the file system, JS0018 resolves every specifier the way js_files does, and js_files/js_symbols " +
+        "resolve the module graph, but a type is never resolved. " +
         "Read-only.")]
     public static Task<object> AnalyzeJs(
         IJavaScriptService svc,

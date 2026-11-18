@@ -19,7 +19,7 @@ public static class CommandLogTool
         [Description("Only rows whose arguments contain this text (case-insensitive).")] string? contains = null)
     {
         if (store.DatabasePath is null && store.EnsureDatabase() is null)
-            return new { error = "No solution is loaded, so there is no command log database. Call load_solution first." };
+            return new { error = "No solution is loaded, so there is no command log database. Start the server in a folder that contains a .sln/.slnx (or pass --root); load_solution only accepts a solution inside that workspace." };
 
         var entries = store.RecentCommands(limit, tool);
         if (!string.IsNullOrWhiteSpace(contains))

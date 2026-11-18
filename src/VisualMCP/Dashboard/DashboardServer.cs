@@ -21,10 +21,10 @@ namespace VisualMCP.Dashboard;
 /// the board tools call. A failure to bind a port leaves the MCP server completely unaffected.
 /// </summary>
 /// <remarks>
-/// Port choice, in order: the preferred port (4677 by default), the port the dashboard last
-/// bound (kept in the store's <c>context</c> table as <c>dashboard.port</c>), then an
-/// OS-assigned port. The remembered port is what makes a second instance — two MCP clients on
-/// the same solution — land on a stable port of its own instead of hopping on every start.
+/// Port choice, in order: the preferred port (4677 by default), the ports remembered by instances
+/// that are no longer running (each keeps its own <c>dashboard.port.&lt;pid&gt;</c> row in the store's
+/// <c>context</c> table), then an OS-assigned port. Per-instance rows are what let two live servers
+/// on the same workspace keep separate ports instead of overwriting one shared value.
 /// </remarks>
 public sealed class DashboardServer : IAsyncDisposable
 {
@@ -83,7 +83,12 @@ public sealed class DashboardServer : IAsyncDisposable
             return false;
         }
 
-        foreach (var port in DashboardOptions.Candidates(_options.PreferredPort, _database.StoredPort()))
+        // Only a dead instance's port is free to reuse: a live sibling on this workspace keeps its own.
+        var reusable = _database.StoredPorts()
+            .Where(entry => !entry.IsAlive())
+            .Select(entry => entry.Port);
+
+        foreach (var port in DashboardOptions.Candidates(_options.PreferredPort, reusable))
         {
             if (await TryStartAsync(port, cancellationToken)) return true;
         }

@@ -254,7 +254,7 @@ own convention, so you rarely need it.
   file, `history`/`diff` walk and compare them, `restore` writes one back (the replaced text is
   snapshotted first).
 
-These read the solution store, so they are per solution, not global.
+These read the workspace store, so they are per workspace, not global.
 
 ---
 
