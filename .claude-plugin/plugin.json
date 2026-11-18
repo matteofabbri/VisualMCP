@@ -1,0 +1,32 @@
+{
+  "name": "visualmcp",
+  "version": "1.0.0",
+  "description": "Roslyn-based C#/.NET analysis, builds, tests, refactoring, decompilation, profiling and the planning board, as MCP tools for coding agents.",
+  "author": {
+    "name": "Matteo Fabbri",
+    "url": "https://github.com/matteofabbri"
+  },
+  "homepage": "https://github.com/matteofabbri/VisualMCP",
+  "repository": "https://github.com/matteofabbri/VisualMCP",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "keywords": [
+    "dotnet",
+    "csharp",
+    "roslyn",
+    "code-analysis",
+    "mcp-server"
+  ],
+  "skills": "./skills",
+  "mcpServers": {
+    "VisualMCP": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/plugin-mcp-launcher.ps1"
+      ]
+    }
+  }
+}

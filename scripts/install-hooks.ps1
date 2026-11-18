@@ -2,11 +2,12 @@
 <#
 .SYNOPSIS
     Installs VisualMCP's routing guard: the PreToolUse hook that keeps read-only
-    shell probes on .NET repositories inside the MCP tools, plus the AGENTS.md
-    block that tells the model the same thing up front.
+    shell probes on .NET repositories inside the MCP tools, the AGENTS.md block
+    that tells the model the same thing up front, and the visualmcp skill that
+    carries the routing plus the connect-the-server-itself ladder.
 
 .DESCRIPTION
-    Two independent pieces, both idempotent (re-running replaces, never duplicates):
+    Three independent pieces, all idempotent (re-running replaces, never duplicates):
 
       1. Hook - copies hooks\pre-tool-use.ps1 next to the installed server and
          registers it as a PreToolUse hook for the Bash tool:
@@ -20,9 +21,15 @@
          loaded in every workspace). Claude Code already receives the server's
          own `instructions`, so its CLAUDE.md is never touched.
 
+      3. Skill - copies skills\visualmcp\ (SKILL.md + references\) into
+         %USERPROFILE%\.zcode\skills\visualmcp\ and
+         %USERPROFILE%\.claude\skills\visualmcp\. The skill carries the same
+         routing plus the connection ladder: a client whose server is not
+         registered yet runs the installer itself, then restarts.
+
     This script does not publish or register the server; scripts\install.ps1 does
-    that and calls this one at the end. Run it alone to refresh the guard after
-    editing the hook or the block.
+    that and calls this one at the end. Run it alone to refresh the guard, the
+    block or the skill after editing any of them.
 
 .PARAMETER Scope
     all     - ZCode + Claude Code (default)
@@ -31,7 +38,8 @@
     project, local - skipped: hooks and AGENTS.md are machine-level
 
 .PARAMETER Uninstall
-    Remove the hook registration, the copied script and the AGENTS.md block.
+    Remove the hook registration, the copied script, the AGENTS.md block and the
+    copied skill.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\install-hooks.ps1
@@ -50,15 +58,18 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot         = Split-Path -Parent $PSScriptRoot
 $HookSource       = Join-Path $RepoRoot 'hooks\pre-tool-use.ps1'
 $BlockSource      = Join-Path $RepoRoot 'hooks\agents-block.md'
+$SkillSource      = Join-Path $RepoRoot 'skills\visualmcp'
 
 $ZCodeConfigFile  = Join-Path $env:USERPROFILE '.zcode\cli\config.json'
 $ZCodeHookDir     = Join-Path $env:USERPROFILE '.zcode\mcp-servers\VisualMCP\hooks'
 $ZCodeHookPath    = Join-Path $ZCodeHookDir 'pre-tool-use.ps1'
 $ZCodeAgentsFile  = Join-Path $env:USERPROFILE '.zcode\AGENTS.md'
+$ZCodeSkillDir    = Join-Path $env:USERPROFILE '.zcode\skills\visualmcp'
 
 $ClaudeSettings   = Join-Path $env:USERPROFILE '.claude\settings.json'
 $ClaudeHookDir    = Join-Path $env:USERPROFILE '.claude\mcp-servers\VisualMCP\hooks'
 $ClaudeHookPath   = Join-Path $ClaudeHookDir 'pre-tool-use.ps1'
+$ClaudeSkillDir   = Join-Path $env:USERPROFILE '.claude\skills\visualmcp'
 
 $wantsZCode     = $Scope -in @('all', 'zcode')
 $wantsClaude    = $Scope -in @('all', 'user')
@@ -289,6 +300,38 @@ function Remove-AgentsBlock() {
     }
 }
 
+# --- The visualmcp skill (ZCode and Claude Code user skills folders) --------
+function Copy-Skill([string]$Destination) {
+    if (-not (Test-Path (Join-Path $SkillSource 'SKILL.md'))) { throw "Skill not found: $SkillSource" }
+    if (Test-Path $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Copy-Item -Path (Join-Path $SkillSource '*') -Destination $Destination -Recurse -Force
+}
+
+function Set-Skill() {
+    if ($wantsZCode -and (Test-Path (Split-Path -Parent (Split-Path -Parent $ZCodeSkillDir)))) {
+        Copy-Skill $ZCodeSkillDir
+        Write-Ok "ZCode   -> $ZCodeSkillDir (skill)"
+    } elseif ($wantsZCode) {
+        Write-Skip "ZCode not found ($ZCodeSkillDir): skill skipped"
+    }
+    if ($wantsClaude -and (Test-Path (Split-Path -Parent (Split-Path -Parent $ClaudeSkillDir)))) {
+        Copy-Skill $ClaudeSkillDir
+        Write-Ok "Claude  -> $ClaudeSkillDir (skill)"
+    } elseif ($wantsClaude) {
+        Write-Skip "Claude Code not found ($ClaudeSkillDir): skill skipped"
+    }
+}
+
+function Remove-Skill() {
+    foreach ($dir in @($ZCodeSkillDir, $ClaudeSkillDir)) {
+        if (Test-Path $dir) {
+            Remove-Item -LiteralPath $dir -Recurse -Force
+            Write-Ok "        <- removed $dir"
+        }
+    }
+}
+
 # --- Main ------------------------------------------------------------------
 if ($scopeSkipped) {
     Write-Skip "Scope '$Scope' is a Claude Code project registration: hooks and AGENTS.md are machine-level, nothing to do here."
@@ -299,6 +342,7 @@ if ($Uninstall) {
     Write-Step "Removing VisualMCP routing guard ($Scope)..."
     if ($wantsZCode)  { Remove-ZCodeHook;  Remove-AgentsBlock }
     if ($wantsClaude) { Remove-ClaudeHook }
+    Remove-Skill
     Write-Host "`nDone. Restart ZCode / Claude Code to apply." -ForegroundColor Green
     return
 }
@@ -306,6 +350,7 @@ if ($Uninstall) {
 Write-Step "Installing VisualMCP routing guard ($Scope)..."
 if ($wantsZCode)  { Set-ZCodeHook;  Set-AgentsBlock }
 if ($wantsClaude) { Set-ClaudeHook }
+Set-Skill
 
 Write-Host "`nHook denies read-only shell probes on .NET repos, writes into a memory store, a new .md at the repository root that is not a published document, and a plan-like .md in docs/ - and names the MCP tool (or board call) instead." -ForegroundColor Green
 Write-Host "Escape hatch: include 'vmcp-allow' in a command to keep Bash deliberately." -ForegroundColor DarkYellow

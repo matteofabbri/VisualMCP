@@ -3,9 +3,10 @@ obj/
 *.user
 .vs/
 
-# Local agent, editor and CI folders (not part of the published tree)
+# Local agent, editor and CI folders (not part of the published tree).
+# .claude-plugin/ is NOT here: plugin.json + marketplace.json are the published
+# packaging a client install reads, like .github and the skills folder.
 .claude/
-.claude-plugin/
 .github/
 .idea/
 .visualMCP/

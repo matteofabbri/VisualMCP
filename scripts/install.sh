@@ -43,8 +43,8 @@ Usage: scripts/install.sh [options]
   -p, --project-dir DIR For project/local scope, the folder to attach to (default: .)
   -u, --uninstall       Remove the registration at this scope
       --stop-running    Stop running VisualMCP instances before publishing
-      --no-hooks        Skip the routing guard (hook + AGENTS.md block)
-      --hooks-only      Refresh the routing guard without publishing
+      --no-hooks        Skip the routing guard (hook + AGENTS.md block + skill)
+      --hooks-only      Refresh the routing guard and the skill without publishing
   -h, --help            This text
 
 After installing, RESTART ZCode / Claude Code so it reloads the configuration.
@@ -73,6 +73,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(dirname -- "$SCRIPT_DIR")
 CSPROJ="$REPO_ROOT/src/VisualMCP/VisualMCP.csproj"
 BLOCK_SOURCE="$REPO_ROOT/hooks/agents-block.md"
+SKILL_SOURCE="$REPO_ROOT/skills/visualmcp"
 
 HOME_DIR=${HOME:?HOME is not set}
 ZCODE_APP="$HOME_DIR/.zcode/mcp-servers/VisualMCP/app"
@@ -83,6 +84,8 @@ ZCODE_AGENTS="$HOME_DIR/.zcode/AGENTS.md"
 ZCODE_HOOK_DIR="$HOME_DIR/.zcode/mcp-servers/VisualMCP/hooks"
 CLAUDE_SETTINGS="$HOME_DIR/.claude/settings.json"
 CLAUDE_HOOK_DIR="$HOME_DIR/.claude/mcp-servers/VisualMCP/hooks"
+ZCODE_SKILL="$HOME_DIR/.zcode/skills/visualmcp"
+CLAUDE_SKILL="$HOME_DIR/.claude/skills/visualmcp"
 
 if [ "$(uname -s 2>/dev/null || echo unknown)" = "Darwin" ]; then
     DESKTOP_CONFIG="$HOME_DIR/Library/Application Support/Claude/claude_desktop_config.json"
@@ -197,6 +200,41 @@ hook_command() {
 
 resolve_setup || true
 
+# --- The visualmcp skill ----------------------------------------------------
+# Pure file copies: no binary, no JSON edit. --no-hooks skips it with the rest of
+# the guard; --hooks-only and --uninstall always reach it.
+install_skill() {
+    if [ "$WANTS_ZCODE" -eq 1 ] && [ -d "$ZCODE_CONFIG_DIR" ]; then
+        if [ -f "$SKILL_SOURCE/SKILL.md" ]; then
+            rm -rf "$ZCODE_SKILL"
+            mkdir -p "$ZCODE_SKILL"
+            cp -R "$SKILL_SOURCE"/. "$ZCODE_SKILL"/
+            ok "ZCode   -> $ZCODE_SKILL (skill)"
+        else
+            skip "skill ~ skipped: $SKILL_SOURCE not found"
+        fi
+    elif [ "$WANTS_ZCODE" -eq 1 ]; then
+        skip "ZCode   ~ not found ($ZCODE_CONFIG_DIR): skill skipped"
+    fi
+    if [ "$WANTS_CLAUDE" -eq 1 ] && [ -d "$HOME_DIR/.claude" ]; then
+        if [ -f "$SKILL_SOURCE/SKILL.md" ]; then
+            rm -rf "$CLAUDE_SKILL"
+            mkdir -p "$CLAUDE_SKILL"
+            cp -R "$SKILL_SOURCE"/. "$CLAUDE_SKILL"/
+            ok "Claude  -> $CLAUDE_SKILL (skill)"
+        fi
+    fi
+}
+
+remove_skill() {
+    for dir in "$ZCODE_SKILL" "$CLAUDE_SKILL"; do
+        if [ -d "$dir" ]; then
+            rm -rf "$dir"
+            ok "        <- removed $dir"
+        fi
+    done
+}
+
 # --- Routing guard ----------------------------------------------------------
 install_hooks() {
     [ "$NO_HOOKS" -eq 1 ] && { skip "hooks ~ skipped (--no-hooks)"; return 0; }
@@ -204,6 +242,7 @@ install_hooks() {
         skip "hooks ~ skipped: hooks and AGENTS.md are machine-level"
         return 0
     }
+    install_skill
     if [ -z "$SETUP_COMMAND" ] || ! supports_install_modes; then
         skip "hooks ~ skipped: no installed binary with the built-in guard (run the installer without --hooks-only)"
         return 0
@@ -242,6 +281,7 @@ install_hooks() {
 }
 
 remove_hooks() {
+    remove_skill
     # An install from before the guard moved into the binary left a script copy here.
     if [ -f "$ZCODE_HOOK_DIR/pre-tool-use.py" ]; then
         rm -f "$ZCODE_HOOK_DIR/pre-tool-use.py"

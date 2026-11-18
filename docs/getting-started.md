@@ -26,7 +26,14 @@ profiler pick their platform's tools. Both installers take the same scopes and w
 
 ## Install
 
-From a checkout of the repository:
+Two doors, same destination:
+
+- **Install the skill, let the agent connect the server** (the REA-style flow): copy
+  `skills/visualmcp/` into `~/.zcode/skills/` (ZCode) or `~/.claude/skills/` (Claude Code) —
+  or run the installer once, which does the copy. The skill carries the routing rules and the
+  connection ladder: a session whose tools are absent runs the installer itself, restarts the
+  client, then uses the tools. Everything below is that ladder, spelled out.
+- **Run the installer yourself.** From a checkout of the repository:
 
 ```powershell
 # Windows: ZCode + Claude Code (default)
@@ -76,7 +83,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Scope project -Pro
 2. Copies it to `~/.zcode/mcp-servers/VisualMCP/app/` for ZCode and
    `~/.claude/mcp-servers/VisualMCP/app/` for Claude Code (one build, copied).
 3. Registers the server in the configuration files of the chosen scope.
-4. Installs the **routing guard** (see below); skip it with `-NoHooks` / `--no-hooks`.
+4. Installs the **routing guard** — the hook, the AGENTS.md block and the `visualmcp` skill
+   (see below); skip all three with `-NoHooks` / `--no-hooks`.
 5. Does **not** restart your client — MCP configuration is read at session start, so restart it yourself.
 
 > **ZCode specifics:** ZCode reads `mcp.servers` from `~/.zcode/cli/config.json` (user) or
@@ -98,6 +106,7 @@ that close that gap:
 |---|---|---|
 | `hooks\pre-tool-use.ps1` (Windows) / `VisualMCP --hook pre-tool-use` (Linux/macOS) | Denies read-only shell probes (`grep`, `rg`, `sed -n`, `cat`, `head`, `tail`, `ls`, `find`, `Select-String`, `Get-Content`, `Get-ChildItem`) and shell file writes in a folder with a visible `.sln`/`.slnx`. Replies with the tool to use instead. | ZCode `hooks.events.PreToolUse`; Claude Code `hooks.PreToolUse` |
 | `hooks\agents-block.md` | States the routing rules up front, and why C# semantics need Roslyn rather than text matching. | `~/.zcode/AGENTS.md` (user scope) |
+| `skills\visualmcp\` | The `visualmcp` skill: the same routing plus the connection ladder — when the tools are absent, the session runs the installer itself, restarts the client, then proceeds. | `~/.zcode/skills/visualmcp/` and `~/.claude/skills/visualmcp/` |
 
 The POSIX guard is a mode of the server binary (`src/VisualMCP/Install/RoutingGuard.cs`), so it reads the
 JSON payload with no interpreter of its own. Build, test, git and non-.NET trees are never touched. Two escape hatches
@@ -126,6 +135,16 @@ powershell -ExecutionPolicy Bypass -File install.ps1 `
   -SetupProject C:\REPOSITORY\MyApp `
   -SolutionPath C:\REPOSITORY\MyApp\MyApp.sln
 ```
+
+### Install as a plugin
+
+`.claude-plugin/plugin.json` packages VisualMCP the way a marketplace plugin ships: it
+bundles the `visualmcp` skill and declares its own `VisualMCP` MCP server through
+`scripts/plugin-mcp-launcher.ps1` (POSIX: `.sh`), which launches the build the script
+installer published. A plugin install registers both pieces in one move; the launcher
+exits with a repair message when the published build is missing — run the script installer
+once, then disable and re-enable the plugin. To add it from a marketplace, point the client
+at `.claude-plugin/marketplace.json` in this repository.
 
 ## Verify the connection
 

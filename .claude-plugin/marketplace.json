@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "visualmcp",
+  "description": "Roslyn-based C#/.NET analysis, builds, tests, refactoring, decompilation, profiling and the planning board, as MCP tools for coding agents.",
+  "owner": {
+    "name": "Matteo Fabbri",
+    "url": "https://github.com/matteofabbri"
+  },
+  "plugins": [
+    {
+      "name": "visualmcp",
+      "description": "Roslyn-based C#/.NET analysis, builds, tests, refactoring, decompilation, profiling and the planning board, as MCP tools for coding agents.",
+      "source": {
+        "source": "github",
+        "repo": "matteofabbri/VisualMCP"
+      },
+      "category": "development"
+    }
+  ]
+}

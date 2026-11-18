@@ -29,6 +29,12 @@ Restart your client, open any folder with a `.sln`, and say:
 
 > **Audit this solution and tell me where to start.**
 
+One installer run installs the server **and** the `visualmcp` skill (plus the routing hook and the
+AGENTS.md block). The skill is the product's front door, the way REA ships: it carries the routing
+rules and the connection ladder, so on a machine where only the skill is present the agent connects
+the MCP server itself — run the installer, restart, use the tools. A marketplace plugin
+(`.claude-plugin/plugin.json`) bundles the same skill with the server registration in one move.
+
 ## What it does
 
 `solution_audit` reads the solution once and answers with the compiler's own diagnostics, the methods

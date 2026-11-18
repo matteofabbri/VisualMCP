@@ -5,10 +5,11 @@ Python analysers. Nothing here runs as part of the server; they are developer an
 
 | Script | What it does |
 |---|---|
-| `install.ps1` | Windows: builds a Release binary, publishes it under the user profile and registers the server in ZCode and/or Claude Code at the chosen scope. Also installs the routing guard unless `-NoHooks` |
-| `install.sh` | The same for Linux and macOS (POSIX sh): publish, register, routing guard; `--hooks-only` refreshes the guard without publishing |
+| `install.ps1` | Windows: builds a Release binary, publishes it under the user profile and registers the server in ZCode and/or Claude Code at the chosen scope. Also installs the routing guard — hook, AGENTS.md block and the `visualmcp` skill — unless `-NoHooks` |
+| `install.sh` | The same for Linux and macOS (POSIX sh): publish, register, routing guard and skill; `--hooks-only` refreshes the guard and the skill without publishing |
 | `install-global.ps1` | One-line wrapper for `install.ps1 -Scope all` |
-| `install-hooks.ps1` | Windows: installs or removes the `PreToolUse` guard and the `AGENTS.md` block — see [`../hooks/README.md`](../hooks/README.md) |
+| `install-hooks.ps1` | Windows: installs or removes the `PreToolUse` guard, the `AGENTS.md` block and the `visualmcp` skill — see [`../hooks/README.md`](../hooks/README.md) |
+| `plugin-mcp-launcher.ps1` / `.sh` | What a plugin install's `mcpServers` entry runs: launches the build the installer published (the plugin ships sources, not the build), or exits 1 with the repair message. See [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json) |
 | `reload.ps1` | Stops every running server, rebuilds Debug and republishes Release, so the next tool call spawns the new build |
 | `audit-mcp-usage.py` | Reads ZCode's `model-io-*.jsonl` and lists the turns where C# work used Read/Grep/Bash while VisualMCP was never called |
 | `analyze-tool-sequences.py` | Measures call bursts in a session store: which calls chain and which could have been one call |
