@@ -1,5 +1,5 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text;
 
 namespace Snitch.Profiling.Internal;
 
@@ -31,12 +31,12 @@ internal static class ProcessRunner
         psi.Environment.Remove("MSBuildToolsPath");
         psi.Environment.Remove("MSBUILD_EXE_PATH");
 
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
+        var stdout = new ConcurrentQueue<string>();
+        var stderr = new ConcurrentQueue<string>();
 
         using var process = new Process { StartInfo = psi };
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (stdout) stdout.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (stderr) stderr.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.Enqueue(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.Enqueue(e.Data); };
 
         var sw = Stopwatch.StartNew();
         process.Start();
@@ -59,9 +59,8 @@ internal static class ProcessRunner
         }
         sw.Stop();
 
-        string outText, errText;
-        lock (stdout) outText = stdout.ToString();
-        lock (stderr) errText = stderr.ToString();
+        var outText = JoinLines(stdout);
+        var errText = JoinLines(stderr);
 
         var exitCode = timedOut ? -1 : SafeExitCode(process);
         return (exitCode, timedOut, outText, errText, sw.Elapsed);
@@ -70,5 +69,12 @@ internal static class ProcessRunner
     private static int SafeExitCode(Process process)
     {
         try { return process.ExitCode; } catch { return -1; }
+    }
+
+    /// <summary>The lines as the process printed them: one newline per line, trailing newline kept.</summary>
+    private static string JoinLines(ConcurrentQueue<string> lines)
+    {
+        if (lines.IsEmpty) return string.Empty;
+        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
     }
 }

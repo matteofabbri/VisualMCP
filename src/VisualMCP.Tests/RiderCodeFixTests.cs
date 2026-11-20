@@ -277,4 +277,27 @@ public sealed class RiderCodeFixTests
         var fixedText = await FixAsync(source, new RedundantArgumentAnalyzer(), "RedundantArgument");
         Assert.Contains("M();", fixedText);
     }
+
+    [Fact]
+    public async Task UseDiscardAssignment_replaces_the_var_declaration_with_the_discard()
+    {
+        const string source = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M()
+                {
+                    var _ = Compute();
+                    return 1;
+                }
+
+                private int Compute() => 42;
+            }
+            """;
+
+        var fixedText = await FixAsync(source, new UseDiscardAssignmentAnalyzer(), "UseDiscardAssignment");
+        Assert.Contains("_ = Compute();", fixedText);
+        Assert.DoesNotContain("var _ = Compute();", fixedText);
+    }
 }

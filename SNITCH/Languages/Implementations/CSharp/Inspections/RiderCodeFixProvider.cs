@@ -33,6 +33,7 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
         "RedundantPatternParentheses",
         "MergeIntoPattern",
         "ReplaceWithStringIsNullOrEmpty",
+        "UseDiscardAssignment",
     ];
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -77,6 +78,7 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
         "RedundantPatternParentheses" => "Remove the redundant parentheses",
         "MergeIntoPattern" => "Merge the checks into one pattern",
         "ReplaceWithStringIsNullOrEmpty" => "Use string.IsNullOrEmpty",
+        "UseDiscardAssignment" => "Use a discard assignment",
         _ => null,
     };
 
@@ -113,6 +115,7 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
             "RedundantPatternParentheses" => RemovePatternParenthesesAsync(document, root, node, cancellationToken),
             "MergeIntoPattern" => MergeIntoPatternAsync(document, root, node, cancellationToken),
             "ReplaceWithStringIsNullOrEmpty" => ReplaceWithIsNullOrEmptyAsync(document, root, node, cancellationToken),
+            "UseDiscardAssignment" => UseDiscardAsync(document, root, node, cancellationToken),
             _ => Task.FromResult(document),
         });
     }
@@ -377,6 +380,32 @@ public sealed class RiderCodeFixProvider : CodeFixProvider
         => original is null
             ? Task.FromResult(document)
             : WithNodeAsync(document, root, original, update(original), cancellationToken);
+
+    /// <summary>
+    /// <c>var _ = expression;</c> becomes <c>_ = expression;</c> — the statement keeps its trivia, the
+    /// initializer keeps its own. Any attributes and modifiers are dropped: a discard assignment cannot
+    /// carry them.
+    /// </summary>
+    private static Task<Document> UseDiscardAsync(
+        Document document, SyntaxNode root, SyntaxNode node, CancellationToken cancellationToken)
+    {
+        var declaration = node.AncestorsAndSelf().OfType<VariableDeclarationSyntax>().LastOrDefault();
+        if (declaration?.Variables.Count != 1) return Task.FromResult(document);
+
+        var variable = declaration.Variables[0];
+        if (variable.Initializer is null) return Task.FromResult(document);
+        if (declaration.Parent is not LocalDeclarationStatementSyntax statement) return Task.FromResult(document);
+
+        var assignment = SyntaxFactory.ExpressionStatement(
+            SyntaxFactory.AssignmentExpression(
+                SyntaxKind.SimpleAssignmentExpression,
+                SyntaxFactory.IdentifierName("_"),
+                variable.Initializer.Value.WithoutTrivia()));
+
+        return WithNodeAsync(document, root, statement, assignment
+            .WithLeadingTrivia(statement.GetLeadingTrivia())
+            .WithTrailingTrivia(statement.GetTrailingTrivia()), cancellationToken);
+    }
 
     private static Task<Document> WithNodeAsync(
         Document document, SyntaxNode root, SyntaxNode original, SyntaxNode replacement,

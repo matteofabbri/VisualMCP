@@ -65,14 +65,16 @@ public sealed class InspectCodeService : IInspectCodeService
     /// <summary>Upper bound on collected findings, so a rule storm cannot exhaust memory.</summary>
     private const int CollectionLimit = 50_000;
 
-    private static readonly object CacheLock = new();
-
     /// <summary>
     /// Last report, keyed by the request and by the <see cref="Solution"/> *instance*. The engine
     /// replaces that instance whenever a document changes (load, or a refactoring write through
-    /// TryUpdateDocument), so identity is an exact invalidation signal — no TTL guesswork.
+    /// TryUpdateDocument), so identity is an exact invalidation signal — no TTL guesswork. A single
+    /// immutable holder swapped by reference: a reader sees either the old or the new cache, never
+    /// a torn one, and a stale reader recomputes instead of blocking.
     /// </summary>
-    private (Solution Solution, string Key, InspectionReport Report)? _cached;
+    private volatile CachedReport? _cached;
+
+    private sealed record CachedReport(Solution Solution, string Key, InspectionReport Report);
 
     private readonly IRoslynWorkspace _workspace;
 
@@ -104,18 +106,15 @@ public sealed class InspectCodeService : IInspectCodeService
                 "No C# solution could be auto-located from the working directory. Provide an explicit path to the .sln/.slnx.");
 
         var cacheKey = string.Join('|', projectName, filePath, packs, minSeverity, ids, excludeIds, enableAll, maxResults);
-        lock (CacheLock)
-        {
-            if (_cached is { } cached && ReferenceEquals(cached.Solution, solution) && cached.Key == cacheKey)
-                return cached.Report;
-        }
+        if (_cached is { } cached && ReferenceEquals(cached.Solution, solution) && cached.Key == cacheKey)
+            return cached.Report;
 
         // Same report, but from a previous process: reuse it when no file changed on disk.
         var stamp = SolutionStamp(solution);
         var storeKey = "inspection:" + cacheKey;
         if (TryReadStoredReport(storeKey, stamp) is { } stored)
         {
-            lock (CacheLock) _cached = (solution, cacheKey, stored);
+            _cached = new CachedReport(solution, cacheKey, stored);
             return stored;
         }
 
@@ -262,7 +261,7 @@ public sealed class InspectCodeService : IInspectCodeService
                   "Restrict with projectName/filePath, raise timeoutSeconds, or narrow the packs."
                 : null);
 
-        lock (CacheLock) _cached = (solution, cacheKey, report);
+        _cached = new CachedReport(solution, cacheKey, report);
         Store(report, storeKey, stamp);
         return report;
     }

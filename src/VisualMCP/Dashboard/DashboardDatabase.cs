@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Snitch.Storage;
+using Snitch.Storage.Schema;
 
 namespace VisualMCP.Dashboard;
 
@@ -44,10 +45,12 @@ public sealed record DashboardRows(
 }
 
 /// <summary>
-/// Read-only access to the solution store (<c>&lt;solution&gt;/.visualMCP/visualmcp.db</c>) for
-/// the dashboard. It opens its own connection per query, so it never competes with the store,
-/// the board or the indexes for a long-lived handle, and every table name it executes comes
-/// from <c>sqlite_master</c> rather than from the request.
+/// Read-only access to the solution store for the dashboard. The store is split per domain —
+/// <c>visualmcp.db</c>, <c>board.db</c> and <c>metacode.db</c> under <c>&lt;solution&gt;/.visualMCP/</c> —
+/// and every query is opened against the database that owns its table, so the dashboard reads the
+/// same files the services write. It opens its own connection per query, so it never competes with
+/// the store, the board or the indexes for a long-lived handle, and every table name it executes
+/// comes from <c>sqlite_master</c> rather than from the request.
 /// </summary>
 public sealed class DashboardDatabase
 {
@@ -88,33 +91,58 @@ public sealed class DashboardDatabase
         }
     }
 
+    /// <summary>
+    /// The bytes of every store file that exists right now — the main store plus whichever domain
+    /// databases have been prepared. With the store split per domain this, not the main file alone,
+    /// is what the store costs on disk.
+    /// </summary>
     public long SizeBytes
     {
         get
         {
-            var path = DatabasePath;
-            try { return path is not null && File.Exists(path) ? new FileInfo(path).Length : 0; }
-            catch (IOException) { return 0; }
+            try
+            {
+                long total = 0;
+                foreach (var path in DomainFiles())
+                {
+                    total += new FileInfo(path).Length;
+                    var wal = path + "-wal";
+                    if (File.Exists(wal)) total += new FileInfo(wal).Length;
+                }
+
+                return total;
+            }
+            catch (IOException)
+            {
+                return 0;
+            }
         }
     }
 
-    /// <summary>Every browsable table and view, shadow tables of the FTS index excluded.</summary>
+    /// <summary>Every browsable table and view across the store's databases, shadow tables excluded.</summary>
     public IReadOnlyList<DashboardTable> Tables()
     {
-        using var connection = Open();
-        return connection is null ? [] : ReadTables(connection);
+        var tables = new List<DashboardTable>();
+        foreach (var path in DomainFiles())
+        {
+            using var connection = OpenAt(path);
+            if (connection is not null) tables.AddRange(ReadTables(connection));
+        }
+
+        return tables.OrderBy(table => table.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>One table with its row count and columns, or null when it does not exist.</summary>
     public DashboardTableInfo? Info(string? tableName)
     {
-        using var connection = Open();
+        var path = PathOf(tableName);
+        using var connection = OpenAt(path);
         if (connection is null) return null;
 
         var table = FindTable(connection, tableName);
         if (table is null) return null;
 
-        return new DashboardTableInfo(table, Count(connection, table.Name), Columns(connection, table.Name));
+        return new DashboardTableInfo(table, Count(connection, path ?? string.Empty, table.Name), Columns(connection, table.Name));
     }
 
     /// <summary>
@@ -124,7 +152,8 @@ public sealed class DashboardDatabase
     public DashboardRows? Read(
         string? tableName, int page, int pageSize, string? sort, bool descending, string? search)
     {
-        using var connection = Open();
+        var path = PathOf(tableName);
+        using var connection = OpenAt(path);
         if (connection is null) return null;
 
         var table = FindTable(connection, tableName);
@@ -144,7 +173,7 @@ public sealed class DashboardDatabase
         var sortColumn = columns.FirstOrDefault(c => string.Equals(c.Name, sort, StringComparison.OrdinalIgnoreCase))?.Name;
         var orderBy = sortColumn is not null
             ? $"ORDER BY {Quote(sortColumn)} {(descending ? "DESC" : "ASC")}"
-            : HasRowId(connection, table.Name)
+            : HasRowId(connection, path ?? string.Empty, table.Name)
                 ? "ORDER BY rowid DESC"      // newest row first: an id column is the rowid of these tables
                 : $"ORDER BY {Quote(columns[0].Name)} ASC";
 
@@ -179,7 +208,8 @@ public sealed class DashboardDatabase
     /// <summary>The filtered rows of a table for a CSV export, capped at <see cref="ExportLimit"/>.</summary>
     public IReadOnlyList<object?[]> Export(string? tableName, string? search, int limit = ExportLimit)
     {
-        using var connection = Open();
+        var path = PathOf(tableName);
+        using var connection = OpenAt(path);
         if (connection is null) return [];
 
         var table = FindTable(connection, tableName);
@@ -192,7 +222,7 @@ public sealed class DashboardDatabase
         using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT * FROM {Quote(table.Name)} {filter}
-            {(HasRowId(connection, table.Name) ? "ORDER BY rowid DESC" : "")} LIMIT $limit;
+            {(HasRowId(connection, path ?? string.Empty, table.Name) ? "ORDER BY rowid DESC" : "")} LIMIT $limit;
             """;
         if (pattern is not null) command.Parameters.AddWithValue("$q", pattern);
         command.Parameters.AddWithValue("$limit", cap);
@@ -217,16 +247,20 @@ public sealed class DashboardDatabase
         return rows;
     }
 
-    /// <summary>Every table with its row count and columns — one connection for the whole scan.</summary>
+    /// <summary>Every table with its row count and columns, across all of the store's databases.</summary>
     public IReadOnlyList<DashboardTableInfo> Catalogue()
     {
-        using var connection = Open();
-        if (connection is null) return [];
-
         var infos = new List<DashboardTableInfo>();
-        foreach (var table in ReadTables(connection))
-            infos.Add(new DashboardTableInfo(table, Count(connection, table.Name), Columns(connection, table.Name)));
-        return infos;
+        foreach (var path in DomainFiles())
+        {
+            using var connection = OpenAt(path);
+            if (connection is null) continue;
+
+            foreach (var table in ReadTables(connection))
+                infos.Add(new DashboardTableInfo(table, Count(connection, path, table.Name), Columns(connection, table.Name)));
+        }
+
+        return infos.OrderBy(info => info.Table.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>
@@ -236,7 +270,8 @@ public sealed class DashboardDatabase
     /// </summary>
     public DashboardCommandTrail RecentCommands(int limit = 14)
     {
-        using var connection = Open();
+        var mainPath = DatabasePath;
+        using var connection = OpenAt(mainPath);
         if (connection is null) return new DashboardCommandTrail(0, []);
 
         var table = FindTable(connection, "command_log");
@@ -259,7 +294,7 @@ public sealed class DashboardDatabase
             return new DashboardCommandTrail(0, []);
         }
 
-        return new DashboardCommandTrail(Count(connection, table.Name), commands);
+        return new DashboardCommandTrail(Count(connection, mainPath ?? string.Empty, table.Name), commands);
     }
 
     /// <summary>
@@ -306,9 +341,68 @@ public sealed class DashboardDatabase
 
     // ── SQLite plumbing ──────────────────────────────────────────────────────
 
-    private SqliteConnection? Open()
+    /// <summary>
+    /// The database file that owns a table: the board's tables live in <c>board.db</c> and the
+    /// indexes' in <c>metacode.db</c>, everything else (including the FTS shadow tables) in the
+    /// main store. The domain names come from the schema itself, so a table that moves domain
+    /// moves its dashboard queries with it. Null when that domain has no database yet.
+    /// </summary>
+    private string? PathOf(string? tableName)
     {
-        var path = DatabasePath;
+        if (tableName is null) return DatabasePath;
+
+        foreach (var table in VisualMcpSchema.BoardTables)
+            if (string.Equals(table, tableName, StringComparison.OrdinalIgnoreCase))
+                return BoardPath();
+
+        foreach (var table in VisualMcpSchema.MetacodeTables)
+            if (string.Equals(table, tableName, StringComparison.OrdinalIgnoreCase))
+                return MetacodePath();
+
+        return DatabasePath;
+    }
+
+    /// <summary>Every store file that exists on disk right now, main first, no duplicates.</summary>
+    private List<string> DomainFiles()
+    {
+        var paths = new List<string>(3);
+
+        void Add(string? path)
+        {
+            if (!string.IsNullOrEmpty(path)
+                && File.Exists(path)
+                && !paths.Contains(path, StringComparer.OrdinalIgnoreCase))
+            {
+                paths.Add(path);
+            }
+        }
+
+        Add(DatabasePath);
+        Add(BoardPath());
+        Add(MetacodePath());
+        return paths;
+    }
+
+    private string? BoardPath()
+    {
+        try { return _store.EnsureBoardDatabase(); }
+        catch { return null; }
+    }
+
+    private string? MetacodePath()
+    {
+        try { return _store.EnsureMetacodeDatabase(); }
+        catch { return null; }
+    }
+
+    /// <summary>The main store's connection, for its own tables and the remembered ports.</summary>
+    private SqliteConnection? Open() => OpenAt(DatabasePath);
+
+    /// <summary>The connection of the database that owns a table, or null when that file is missing.</summary>
+    private SqliteConnection? Open(string? tableName) => OpenAt(PathOf(tableName));
+
+    private SqliteConnection? OpenAt(string? path)
+    {
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
 
         try
@@ -424,10 +518,11 @@ public sealed class DashboardDatabase
         return columns;
     }
 
-    /// <summary>The row count, memoized for a few seconds so the overview is not nine COUNT scans.</summary>
-    private long Count(SqliteConnection connection, string table)
+    /// <summary>The row count, memoized for a few seconds so the overview is not a COUNT scan storm.
+    /// The scope is the owning database's path, since a table name names one row of only one file.</summary>
+    private long Count(SqliteConnection connection, string scope, string table)
     {
-        var key = (DatabasePath ?? string.Empty) + "|" + table;
+        var key = scope + "|" + table;
         if (_counts.TryGetValue(key, out var cached) && DateTimeOffset.UtcNow - cached.At < CountLifetime)
             return cached.Rows;
 
@@ -437,9 +532,9 @@ public sealed class DashboardDatabase
     }
 
     /// <summary>SQLite's implicit <c>rowid</c>, which every non-WITHOUT-ROWID table has.</summary>
-    private bool HasRowId(SqliteConnection connection, string table)
+    private bool HasRowId(SqliteConnection connection, string scope, string table)
     {
-        var key = (DatabasePath ?? string.Empty) + "|" + table;
+        var key = scope + "|" + table;
         if (_hasRowId.TryGetValue(key, out var known)) return known;
 
         var supported = true;

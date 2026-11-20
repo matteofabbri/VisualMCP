@@ -22,7 +22,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 using var transaction = context.Database.BeginTransaction();
@@ -61,7 +61,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var query = context.PackageFacts.AsNoTracking().AsQueryable();
@@ -90,7 +90,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 return context.PackageFacts.Count();
@@ -110,7 +110,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 using var transaction = context.Database.BeginTransaction();
@@ -162,7 +162,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var query = context.PackageDependencies.AsNoTracking().AsQueryable();
@@ -203,7 +203,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var row = context.DecompiledArtifacts.FirstOrDefault(item => item.Mvid == artifact.Mvid);
@@ -244,7 +244,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var artifact = context.DecompiledArtifacts
@@ -276,7 +276,7 @@ public sealed partial class VisualMcpStore
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
 

@@ -7,16 +7,17 @@ public static class GitCli
 {
     /// <summary>
     /// Resolves the git repository root: from <paramref name="repoPath"/> if given, else from
-    /// the active solution's directory (<paramref name="activeSolutionPath"/>), else the cwd.
+    /// the active solution's directory (<paramref name="activeSolutionPath"/>), else the cwd. The
+    /// error is a typed <see cref="GitError"/> the typed results hand up as their own refusal.
     /// </summary>
-    public static async Task<(string? repoDir, object? error)> ResolveRepoAsync(
+    public static async Task<(string? repoDir, GitError? error)> ResolveRepoAsync(
         string? repoPath = null, string? activeSolutionPath = null)
     {
         string startDir;
         if (!string.IsNullOrWhiteSpace(repoPath))
         {
             if (!Directory.Exists(repoPath))
-                return (null, new { error = $"Repository path not found: {repoPath}" });
+                return (null, new GitError($"Repository path not found: {repoPath}"));
             startDir = Path.GetFullPath(repoPath);
         }
         else
@@ -30,9 +31,9 @@ public static class GitCli
             await ProcessRunner.RunAsync("git", $"-C \"{startDir}\" rev-parse --show-toplevel", startDir, 20);
 
         if (timedOut)
-            return (null, new { error = "git timed out resolving the repository root." });
+            return (null, new GitError("git timed out resolving the repository root."));
         if (exitCode != 0)
-            return (null, new { error = $"Not inside a git repository (start dir: {startDir}). {stderr.Trim()}".Trim() });
+            return (null, new GitError($"Not inside a git repository (start dir: {startDir}). {stderr.Trim()}".Trim()));
 
         var top = stdout.Trim();
         return (string.IsNullOrEmpty(top) ? startDir : top, null);

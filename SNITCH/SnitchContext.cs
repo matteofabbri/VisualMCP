@@ -21,12 +21,13 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string _workingDirectory = Directory.GetCurrentDirectory();
     private List<SnitchSolution>? _solutions;
-    private List<SnitchDoc>? _docs;
-    private string? _docsRoot;
-    private readonly object _docsLock = new();
+    private volatile DocsCache? _docsCache;
     private SnitchSolution? _activeSolution;
     private string? _pinnedRoot;
     private bool _disposed;
+
+    /// <summary>The docs cache as one immutable holder, swapped by reference (root + index together).</summary>
+    private sealed record DocsCache(string Root, IReadOnlyList<SnitchDoc> Docs);
 
     public SnitchContext(SnitchOptions options) => Options = options;
 
@@ -223,18 +224,23 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
     /// <see cref="SnitchDoc"/>. Build-output, VCS and package folders are pruned. Indexed on first
     /// access and cached per root; call <see cref="RefreshDocs"/> to re-index.
     /// </summary>
+    /// <remarks>
+    /// The cache is one immutable holder (root + list) swapped by reference: a reader sees either
+    /// the old or the new index, never a torn one, and two concurrent first accesses both index and
+    /// the last swap wins — indexing twice is cheaper than a monitor.
+    /// </remarks>
     public IReadOnlyList<SnitchDoc> Docs
     {
         get
         {
             var root = WorkingDirectory;
-            lock (_docsLock)
-            {
-                if (_docs is not null && string.Equals(_docsRoot, root, StringComparison.OrdinalIgnoreCase))
-                    return _docs;
-                _docsRoot = root;
-                return _docs = IndexDocs(root);
-            }
+            var cached = _docsCache;
+            if (cached is not null && string.Equals(cached.Root, root, StringComparison.OrdinalIgnoreCase))
+                return cached.Docs;
+
+            var docs = IndexDocs(root);
+            _docsCache = new DocsCache(root, docs);
+            return docs;
         }
     }
 
@@ -242,11 +248,9 @@ public sealed class SnitchContext : IAsyncDisposable, IRoslynWorkspace
     public IReadOnlyList<SnitchDoc> RefreshDocs()
     {
         var root = WorkingDirectory;
-        lock (_docsLock)
-        {
-            _docsRoot = root;
-            return _docs = IndexDocs(root);
-        }
+        var docs = IndexDocs(root);
+        _docsCache = new DocsCache(root, docs);
+        return docs;
     }
 
     /// <summary>Indexes the documentation on a background thread; safe to call on every load.</summary>

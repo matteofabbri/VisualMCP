@@ -13,9 +13,10 @@ The short version:
   the client launched the server in. Nothing can repoint it.
 - `load_solution` accepts only solutions **under that root**. Another repository is another server,
   which the client already starts per session.
-- The SQLite store is **one file per workspace**, keyed on the workspace's *primary* solution and
-  resolved once. Activating a nested `.sln` does not fork a second database.
-- Every server a client starts on the same workspace shares that one file. One metacode watcher is
+- The SQLite store is **one folder per workspace** — `<primary solution>/.visualMCP/` — with one file
+  per domain: `visualmcp.db` (facts, logs, history, packages, text index), `board.db` (the plan) and
+  `metacode.db` (the indexes). A writer in one domain never serializes on a writer in another.
+- Every server a client starts on the same workspace shares that folder. One metacode watcher is
   elected with a **lease in the store**; every dashboard gets its **own port**.
 
 ## 1. The unit of state
@@ -104,37 +105,54 @@ Two consequences are worth stating plainly:
 
 ## 4. The store
 
-`<primary solution directory>/.visualMCP/visualmcp.db` — SQLite. The directory is computed once and
-cached; `VisualMcpStore.Connection` never reopens it somewhere else. When the workspace has no solution,
-the store is null and every operation degrades to a no-op instead of failing a tool.
+`<primary solution directory>/.visualMCP/` — SQLite, **split per domain into three files**, so the
+board's writes, the indexes' writes and the facts' writes never queue behind each other. The directory
+is computed once and cached; `VisualMcpStore.Connection` never reopens it somewhere else. When the
+workspace has no solution, the store is null and every operation degrades to a no-op instead of
+failing a tool.
 
-What lives there, and what survives deleting the file:
-
-| Kind | Tables | If you delete the file |
+| File | Domain | Tables |
 |---|---|---|
-| Board and notes | `board_item`, `board_comment`, `board_history`, `board_memory` | **lost** — deliberate project data |
-| Edit and local history | `applied_edit` (with the pre-write text), `file_snapshot` | **lost** — the audit trail and `revert_edit` |
-| Command log | `command_log` | **lost** — the audit of what was called and when |
-| Metacode, symbols, full text | `mc_*`, `si_*`, `ti_*` | rebuilt on demand or at the next start |
-| Packages, artifacts, native | `package_*`, `decompiled_artifact`, `native_*` | rebuilt from `project.assets.json` and the binaries |
+| `visualmcp.db` | the main store | `context` (facts + leases), `command_log`, `applied_edit`, `file_snapshot`, `package_*`, `decompiled_artifact`, `ti_*` |
+| `board.db` | the plan | `board_item`, `board_comment`, `board_history`, `board_memory` |
+| `metacode.db` | the indexes | `mc_*`, `source_document`, `si_*`, `native_*` |
+
+What survives deleting a file:
+
+| Kind | File | If you delete the file |
+|---|---|---|
+| Board and notes | `board.db` | **lost** — deliberate project data |
+| Edit and local history, command log | `visualmcp.db` | **lost** — the audit trail and `revert_edit` |
+| Metacode, symbols | `metacode.db` | rebuilt on demand or at the next start |
+| Full text | `visualmcp.db` | rebuilt on demand |
+| Packages, artifacts, native | `visualmcp.db` / `metacode.db` | rebuilt from `project.assets.json` and the binaries |
 
 The store is therefore a cache for most of its content and the only home of some of it. The
 user-facing wording "the store is a cache, not a backup" is true for the indexes; the board, the
 history and the command log are not rebuildable.
 
+**The migration.** A store written by an older build holds all three domains in `visualmcp.db`. The
+first `EnsureBoardDatabase()` / `EnsureMetacodeDatabase()` call builds the domain file under a staging
+name — the domain's schema created first, then the legacy tables copied **column by name** through an
+`ATTACH` (an older model may hold a table's columns in a different order than today's; a positional
+copy would land values in the wrong columns), every row count verified, the transaction committed —
+and only then moved into place. After a verified copy the legacy tables are dropped from
+`visualmcp.db`. A failure at any point leaves either nothing or a complete copy behind, and the next
+call retries from scratch.
+
 Writers and locks:
 
-- Six owners write the file on their own connections — the store, the board, the text index, the
-  metacode index, the symbol index and the native store. Each sets `PRAGMA busy_timeout=5000`, so a
-  concurrent write waits instead of failing. The dashboard reads on a seventh connection with
-  `busy_timeout=4000`; it opens the file read-write only so SQLite can roll back a hot journal, and
-  issues nothing but `SELECT`s.
-- The full-text index additionally sets `PRAGMA journal_mode=WAL` when it opens. Journal mode is a
-  property of the file, so after the first text-index open readers do not block the writer.
-- The schema is an EF Core model and is **create-only**: `VisualMcpSchema.Ensure` adds missing tables
-  and columns to an older file and never drops or rewrites what is there. One column,
-  `applied_edit.before_text`, is added in place because the history learned to keep the text after
-  the first schema shipped.
+- Per domain, each owner writes on its own connection and sets `PRAGMA busy_timeout=5000`, so a
+  concurrent write waits instead of failing: `visualmcp.db` is written by the store and the text
+  index, `board.db` by the board, `metacode.db` by the metacode index, the symbol index and the
+  native store. The dashboard reads all three on its own connections with `busy_timeout=4000`; it
+  opens read-write only so SQLite can roll back a hot journal, and issues nothing but `SELECT`s.
+- The main store additionally sets `PRAGMA journal_mode=WAL` when it opens. Journal mode is a
+  property of the file, so after the first open readers do not block the writer.
+- The schema of each file is an EF Core model and is **create-only**: `VisualMcpSchema.Ensure`,
+  `EnsureBoard` and `EnsureMetacode` add missing tables and columns to an older file and never drop or
+  rewrite what is there. One column, `applied_edit.before_text`, is added in place because the history
+  learned to keep the text after the first schema shipped.
 
 Two failure modes are deliberate:
 

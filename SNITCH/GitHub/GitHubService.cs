@@ -13,7 +13,7 @@ namespace Snitch.GitHub;
 /// </summary>
 public interface IGitHubService
 {
-    Task<object> RunAsync(string args, string? workingDirectory, int timeoutSeconds);
+    Task<GitHubCommandResult> RunAsync(string args, string? workingDirectory, int timeoutSeconds);
     Task<object> RepoAsync(string action, string? name, string? description, string? visibility, bool confirm, string? repo, string? directory, bool push);
     Task<object> PullRequestAsync(string action, int? number, string? title, string? body, string? baseBranch, string? headBranch, string? mergeMethod, bool deleteBranch, bool confirm, string? repo, string? commentsJson = null, string? reviewEvent = null);
     Task<object> IssueAsync(string action, int? number, string? title, string? body, string? labels, bool confirm, string? repo);
@@ -22,7 +22,7 @@ public interface IGitHubService
     Task<object> SecretsAsync(string action, string? name, string? value, bool confirm, string? repo);
 
     /// <summary>Branch protection as GitHub reports it: rules, required status checks, rulesets.</summary>
-    Task<object> BranchProtectionAsync(string action, string? branch, string? repo);
+    Task<GitHubBranchProtectionResult> BranchProtectionAsync(string action, string? branch, string? repo);
 }
 
 public sealed class GitHubService : IGitHubService
@@ -32,10 +32,10 @@ public sealed class GitHubService : IGitHubService
     public GitHubService(IRoslynWorkspace workspace) => _workspace = workspace;
 
     // ── raw escape hatch ─────────────────────────────────────────────────────
-    public async Task<object> RunAsync(string args, string? workingDirectory, int timeoutSeconds)
+    public async Task<GitHubCommandResult> RunAsync(string args, string? workingDirectory, int timeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(args))
-            return new { error = "Provide gh arguments, e.g. 'repo view' or 'pr list'." };
+            return new GitHubCommandResult { Error = "Provide gh arguments, e.g. 'repo view' or 'pr list'." };
 
         return await ExecuteAsync(args, workingDirectory, timeoutSeconds, json: false);
     }
@@ -93,7 +93,7 @@ public sealed class GitHubService : IGitHubService
 
             case "delete":
                 if (string.IsNullOrWhiteSpace(repo)) return new { error = "The repository is required (owner/name)." };
-                if (!confirm) return new { error = "Deleting a repository is irreversible. Pass confirm=true to proceed.", repo };
+                if (!confirm) return new GitHubGateResult { Error = "Deleting a repository is irreversible. Pass confirm=true to proceed.", Repo = repo };
                 return await ExecuteAsync($"repo delete {repo} --yes", null, 120, json: false);
 
             default:
@@ -135,7 +135,7 @@ public sealed class GitHubService : IGitHubService
             case "merge":
             {
                 if (number is null) return new { error = "A pull request number is required." };
-                if (!confirm) return new { error = "Merging is visible to others. Pass confirm=true to proceed.", number };
+                if (!confirm) return new GitHubGateResult { Error = "Merging is visible to others. Pass confirm=true to proceed.", Number = number };
                 var method = (mergeMethod ?? "merge").Trim().ToLowerInvariant() switch
                 {
                     "merge" => "--merge",
@@ -151,7 +151,7 @@ public sealed class GitHubService : IGitHubService
             case "close":
             case "reopen":
                 if (number is null) return new { error = "A pull request number is required." };
-                if (!confirm) return new { error = $"Pass confirm=true to {verb} pull request #{number}.", number };
+                if (!confirm) return new GitHubGateResult { Error = $"Pass confirm=true to {verb} pull request #{number}.", Number = number };
                 return await ExecuteAsync($"pr {verb} {number}{target}", null, 120, json: false);
 
             case "comment":
@@ -162,10 +162,10 @@ public sealed class GitHubService : IGitHubService
             case "review":
             {
                 if (number is null) return new { error = "A pull request number is required." };
-                if (!confirm) return new { error = "Posting a review is visible to others. Pass confirm=true to proceed.", number };
+                if (!confirm) return new GitHubGateResult { Error = "Posting a review is visible to others. Pass confirm=true to proceed.", Number = number };
 
                 var (payload, payloadError) = BuildReviewPayload(body, reviewEvent, commentsJson);
-                if (payloadError is not null) return new { error = payloadError };
+                if (payloadError is not null) return new GitHubGateResult { Error = payloadError };
 
                 var file = Path.Combine(Path.GetTempPath(), $"vmcp-review-{Guid.NewGuid():N}.json");
                 await File.WriteAllTextAsync(file, payload);
@@ -283,11 +283,11 @@ public sealed class GitHubService : IGitHubService
     }
 
     // ── branch protection ────────────────────────────────────────────────────
-    public async Task<object> BranchProtectionAsync(string action, string? branch, string? repo)
+    public async Task<GitHubBranchProtectionResult> BranchProtectionAsync(string action, string? branch, string? repo)
     {
         var verb = (action ?? "get").Trim().ToLowerInvariant();
         if (verb is not ("get" or "checks" or "rules"))
-            return new { error = $"Unknown action '{action}'. Use get, checks or rules." };
+            return new GitHubBranchProtectionResult { Error = $"Unknown action '{action}'. Use get, checks or rules." };
 
         var target = RepoPath(repo);
         var resolved = branch;
@@ -300,7 +300,7 @@ public sealed class GitHubService : IGitHubService
                 ? name.GetString()
                 : null;
             if (string.IsNullOrWhiteSpace(resolved))
-                return new { error = "Could not read the default branch of the repository: pass branch." };
+                return new GitHubBranchProtectionResult { Error = "Could not read the default branch of the repository: pass branch." };
         }
 
         var encoded = Uri.EscapeDataString(resolved!);
@@ -311,12 +311,12 @@ public sealed class GitHubService : IGitHubService
             if (rules.ExitCode != 0) return ApiFailure(rules, $"the rules for branch '{resolved}'");
 
             var count = rules.Data is { ValueKind: JsonValueKind.Array } array ? array.GetArrayLength() : 0;
-            return new
+            return new GitHubBranchProtectionResult
             {
-                branch = resolved,
-                rulesetCount = count,
-                rules = rules.Data,
-                note = count == 0 ? "No repository ruleset applies to this branch." : null,
+                Branch = resolved,
+                RulesetCount = count,
+                Rules = rules.Data,
+                Note = count == 0 ? "No repository ruleset applies to this branch." : null,
             };
         }
 
@@ -331,53 +331,53 @@ public sealed class GitHubService : IGitHubService
         {
             var checks = await ApiAsync($"repos/{target}/branches/{encoded}/protection/required_status_checks", 60);
             if (checks.ExitCode != 0)
-                return new
+                return new GitHubBranchProtectionResult
                 {
-                    branch = resolved,
-                    protectedBranch = isProtected,
-                    configured = false,
-                    error = ApiFailure(checks, "the required status checks"),
-                    hint = isProtected ? "Reading the protection rules needs a token with admin access to the repository." : "The branch is not protected.",
+                    Branch = resolved,
+                    ProtectedBranch = isProtected,
+                    Configured = false,
+                    Error = ApiFailureMessage(checks, "the required status checks"),
+                    Hint = isProtected ? "Reading the protection rules needs a token with admin access to the repository." : "The branch is not protected.",
                 };
 
-            return new
+            return new GitHubBranchProtectionResult
             {
-                branch = resolved,
-                protectedBranch = isProtected,
-                configured = true,
-                strict = checks.Data is { } d && d.TryGetProperty("strict", out var strict) && strict.ValueKind == JsonValueKind.True,
-                contexts = ArrayOfStrings(checks.Data, "contexts"),
-                checks = checks.Data is { } detail && detail.TryGetProperty("checks", out var checkArray) ? checkArray : (JsonElement?)null,
-                data = checks.Data,
+                Branch = resolved,
+                ProtectedBranch = isProtected,
+                Configured = true,
+                Strict = checks.Data is { } d && d.TryGetProperty("strict", out var strict) && strict.ValueKind == JsonValueKind.True,
+                Contexts = ArrayOfStrings(checks.Data, "contexts"),
+                Checks = checks.Data is { } detail && detail.TryGetProperty("checks", out var checkArray) ? checkArray : null,
+                Data = checks.Data,
             };
         }
 
         if (!isProtected)
-            return new
+            return new GitHubBranchProtectionResult
             {
-                branch = resolved,
-                @protected = false,
-                note = "This branch has no branch protection rules; action=rules shows repository rulesets that may still apply.",
+                Branch = resolved,
+                Protected = false,
+                Note = "This branch has no branch protection rules; action=rules shows repository rulesets that may still apply.",
             };
 
         var protection = await ApiAsync($"repos/{target}/branches/{encoded}/protection", 60);
         return protection.ExitCode == 0
-            ? new
+            ? new GitHubBranchProtectionResult
             {
-                branch = resolved,
-                @protected = true,
-                requiredStatusChecks = protection.Data is { } p && p.TryGetProperty("required_status_checks", out var rsc) ? rsc : (JsonElement?)null,
-                pullRequestReviews = protection.Data is { } p2 && p2.TryGetProperty("required_pull_request_reviews", out var rpr) ? rpr : (JsonElement?)null,
-                enforceAdmins = protection.Data is { } p3 && p3.TryGetProperty("enforce_admins", out var ea) ? ea : (JsonElement?)null,
-                restrictions = protection.Data is { } p4 && p4.TryGetProperty("restrictions", out var re) ? re : (JsonElement?)null,
-                data = protection.Data,
+                Branch = resolved,
+                Protected = true,
+                RequiredStatusChecks = protection.Data is { } p && p.TryGetProperty("required_status_checks", out var rsc) ? rsc : null,
+                PullRequestReviews = protection.Data is { } p2 && p2.TryGetProperty("required_pull_request_reviews", out var rpr) ? rpr : null,
+                EnforceAdmins = protection.Data is { } p3 && p3.TryGetProperty("enforce_admins", out var ea) ? ea : null,
+                Restrictions = protection.Data is { } p4 && p4.TryGetProperty("restrictions", out var re) ? re : null,
+                Data = protection.Data,
             }
-            : new
+            : new GitHubBranchProtectionResult
             {
-                branch = resolved,
-                @protected = true,
-                error = ApiFailure(protection, "the protection rules"),
-                hint = "GitHub returns the protection detail only to a token with admin access to the repository.",
+                Branch = resolved,
+                Protected = true,
+                Error = ApiFailureMessage(protection, "the protection rules"),
+                Hint = "GitHub returns the protection detail only to a token with admin access to the repository.",
             };
     }
 
@@ -412,7 +412,7 @@ public sealed class GitHubService : IGitHubService
             case "close":
             case "reopen":
                 if (number is null) return new { error = "An issue number is required." };
-                if (!confirm) return new { error = $"Pass confirm=true to {verb} issue #{number}.", number };
+                if (!confirm) return new GitHubGateResult { Error = $"Pass confirm=true to {verb} issue #{number}.", Number = number };
                 return await ExecuteAsync($"issue {verb} {number}{target}", null, 120, json: false);
 
             case "comment":
@@ -462,7 +462,7 @@ public sealed class GitHubService : IGitHubService
 
             case "delete":
                 if (string.IsNullOrWhiteSpace(tag)) return new { error = "A tag is required." };
-                if (!confirm) return new { error = "Deleting a release is irreversible. Pass confirm=true to proceed.", tag };
+                if (!confirm) return new GitHubGateResult { Error = "Deleting a release is irreversible. Pass confirm=true to proceed.", Tag = tag };
                 return await ExecuteAsync($"release delete {tag} --yes{target}", null, 120, json: false);
 
             default:
@@ -498,12 +498,12 @@ public sealed class GitHubService : IGitHubService
 
             case "rerun":
                 if (string.IsNullOrWhiteSpace(runId)) return new { error = "A run id is required (see action=list)." };
-                if (!confirm) return new { error = "Rerunning a workflow is visible to others. Pass confirm=true to proceed.", runId };
+                if (!confirm) return new GitHubGateResult { Error = "Rerunning a workflow is visible to others. Pass confirm=true to proceed.", RunId = runId };
                 return await ExecuteAsync($"run rerun {runId}{(failedOnly ? " --failed" : string.Empty)}{target}", null, 120, json: false);
 
             case "cancel":
                 if (string.IsNullOrWhiteSpace(runId)) return new { error = "A run id is required (see action=list)." };
-                if (!confirm) return new { error = "Cancelling a run is visible to others. Pass confirm=true to proceed.", runId };
+                if (!confirm) return new GitHubGateResult { Error = "Cancelling a run is visible to others. Pass confirm=true to proceed.", RunId = runId };
                 return await ExecuteAsync($"run cancel {runId}{target}", null, 120, json: false);
 
             case "workflows":
@@ -512,7 +512,7 @@ public sealed class GitHubService : IGitHubService
             case "dispatch":
             {
                 if (string.IsNullOrWhiteSpace(workflow)) return new { error = "A workflow (name or file) is required." };
-                if (!confirm) return new { error = "Dispatching a workflow is visible to others. Pass confirm=true to proceed.", workflow };
+                if (!confirm) return new GitHubGateResult { Error = "Dispatching a workflow is visible to others. Pass confirm=true to proceed.", Workflow = workflow };
                 var args = $"workflow run {Q(workflow!)}";
                 if (!string.IsNullOrWhiteSpace(branch)) args += $" --ref {Q(branch!)}";
                 return await ExecuteAsync(args + target, null, 120, json: false);
@@ -537,13 +537,13 @@ public sealed class GitHubService : IGitHubService
             case "set":
                 if (string.IsNullOrWhiteSpace(name)) return new { error = "A secret name is required." };
                 if (string.IsNullOrWhiteSpace(value)) return new { error = "A secret value is required." };
-                if (!confirm) return new { error = "Writing a repository secret changes remote configuration. Pass confirm=true to proceed.", name };
+                if (!confirm) return new GitHubGateResult { Error = "Writing a repository secret changes remote configuration. Pass confirm=true to proceed.", Name = name };
                 // The value travels on the command line and is never echoed in the result.
                 return await ExecuteAsync($"secret set {name} --body {Q(value!)}{target}", null, 120, json: false);
 
             case "delete":
                 if (string.IsNullOrWhiteSpace(name)) return new { error = "A secret name is required." };
-                if (!confirm) return new { error = "Deleting a secret is irreversible. Pass confirm=true to proceed.", name };
+                if (!confirm) return new GitHubGateResult { Error = "Deleting a secret is irreversible. Pass confirm=true to proceed.", Name = name };
                 return await ExecuteAsync($"secret delete {name}{target}", null, 120, json: false);
 
             default:
@@ -552,7 +552,7 @@ public sealed class GitHubService : IGitHubService
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────────
-    private async Task<object> ExecuteAsync(string args, string? workingDirectory, int timeoutSeconds, bool json)
+    private async Task<GitHubCommandResult> ExecuteAsync(string args, string? workingDirectory, int timeoutSeconds, bool json)
     {
         if (timeoutSeconds < 1) timeoutSeconds = 1;
         if (timeoutSeconds > 900) timeoutSeconds = 900;
@@ -560,16 +560,16 @@ public sealed class GitHubService : IGitHubService
         string dir;
         if (!string.IsNullOrWhiteSpace(workingDirectory))
         {
-            if (!Directory.Exists(workingDirectory)) return new { error = $"Working directory not found: {workingDirectory}" };
+            if (!Directory.Exists(workingDirectory)) return new GitHubCommandResult { Error = $"Working directory not found: {workingDirectory}" };
             dir = Path.GetFullPath(workingDirectory);
         }
         else dir = WorkingDirectory();
 
         var (exitCode, timedOut, stdout, stderr, elapsed) = await ProcessRunner.RunAsync("gh", args, dir, timeoutSeconds);
 
-        if (timedOut) return new { error = $"gh timed out after {timeoutSeconds}s.", command = $"gh {args}" };
+        if (timedOut) return new GitHubCommandResult { Error = $"gh timed out after {timeoutSeconds}s.", Command = $"gh {args}" };
 
-        object? data = null;
+        JsonElement? data = null;
         if (json && exitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
         {
             try
@@ -580,17 +580,17 @@ public sealed class GitHubService : IGitHubService
             catch (JsonException) { /* fall back to the raw text */ }
         }
 
-        return new
+        return new GitHubCommandResult
         {
-            command = $"gh {args}",
-            workingDirectory = dir,
-            exitCode,
-            succeeded = exitCode == 0,
-            elapsedMs = (int)elapsed.TotalMilliseconds,
-            data,
-            stdout = ProcessRunner.Truncate(stdout, 24_000),
-            stderr = ProcessRunner.Truncate(stderr, 8_000),
-            note = exitCode != 0 && (stderr + stdout).Contains("not found", StringComparison.OrdinalIgnoreCase)
+            Command = $"gh {args}",
+            WorkingDirectory = dir,
+            ExitCode = exitCode,
+            Succeeded = exitCode == 0,
+            ElapsedMs = (int)elapsed.TotalMilliseconds,
+            Data = data,
+            Stdout = ProcessRunner.Truncate(stdout, 24_000),
+            Stderr = ProcessRunner.Truncate(stderr, 8_000),
+            Note = exitCode != 0 && (stderr + stdout).Contains("not found", StringComparison.OrdinalIgnoreCase)
                 ? "If gh is not installed or not authenticated, run 'gh auth login' once in a terminal."
                 : null,
         };
@@ -624,17 +624,21 @@ public sealed class GitHubService : IGitHubService
         return (exitCode, data, stdout, stderr);
     }
 
-    private static object ApiFailure((int ExitCode, JsonElement? Data, string Stdout, string Stderr) response, string what)
+    private static string ApiFailureMessage((int ExitCode, JsonElement? Data, string Stdout, string Stderr) response, string what)
     {
         var detail = string.IsNullOrWhiteSpace(response.Stderr) ? response.Stdout.Trim() : response.Stderr.Trim();
-        return new
+        return $"gh api could not read {what}: {ProcessRunner.Truncate(detail, 2000)}";
+    }
+
+    private static GitHubBranchProtectionResult ApiFailure(
+        (int ExitCode, JsonElement? Data, string Stdout, string Stderr) response, string what) =>
+        new()
         {
-            error = $"gh api could not read {what}: {ProcessRunner.Truncate(detail, 2000)}",
-            hint = response.Stderr.Contains("403", StringComparison.Ordinal)
+            Error = ApiFailureMessage(response, what),
+            Hint = response.Stderr.Contains("403", StringComparison.Ordinal)
                 ? "The branch protection detail needs a token with admin access to the repository."
                 : response.Stderr.Contains("404", StringComparison.Ordinal) ? "Check the branch name and the repository." : null,
         };
-    }
 
     private static string? StringProperty(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

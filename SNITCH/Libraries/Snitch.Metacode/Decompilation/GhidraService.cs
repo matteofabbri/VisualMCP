@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -307,10 +308,10 @@ public sealed class GhidraService : IGhidraService
             }
         }
 
-        var output = new StringBuilder();
+        var output = new ConcurrentQueue<string>();
         using var process = new Process { StartInfo = info };
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (output) output.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) output.Enqueue(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) output.Enqueue(e.Data); };
 
         try
         {
@@ -346,8 +347,7 @@ public sealed class GhidraService : IGhidraService
 
         try { process.WaitForExit(1000); } catch { /* best effort */ }
 
-        string text;
-        lock (output) text = output.ToString();
+        var text = output.IsEmpty ? string.Empty : string.Join(Environment.NewLine, output) + Environment.NewLine;
 
         var exitCode = timedOut ? -1 : SafeExitCode(process);
         return new RunResult(exitCode, timedOut, text);

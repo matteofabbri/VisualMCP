@@ -86,7 +86,7 @@ public sealed class NativeCodeStoreTests
             Assert.Equal("12.2", artifact.Ghidra);
             Assert.Equal("x86:LE:64:default", artifact.Language);
             Assert.Equal("1800010f0", artifact.Entry);
-            Assert.Equal(Path.Combine(workspace.RootDirectory, ".visualMCP", "visualmcp.db"), artifact.Database);
+            Assert.Equal(Path.Combine(workspace.RootDirectory, ".visualMCP", "metacode.db"), artifact.Database);
 
             Assert.Equal(2, native.FunctionCount(artifact.Id));
 

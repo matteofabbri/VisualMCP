@@ -174,7 +174,7 @@ public sealed class MetacodeAstTests
         Assert.True(tree.Nodes > 5);
         Assert.True(tree.MaxDepth > 2);
 
-        using var connection = Open(store.DatabasePath!);
+        using var connection = Open(store.EnsureMetacodeDatabase()!);
 
         // The rows are the tree: every non-root node names a parent that is in the same declaration.
         Assert.Equal(0, Scalar(connection, """
@@ -243,7 +243,7 @@ public sealed class MetacodeAstTests
         var second = await service.BuildAsync(force: true);
         Assert.Equal(0, second.Failed);
 
-        using var connection = Open(store.DatabasePath!);
+        using var connection = Open(store.EnsureMetacodeDatabase()!);
         Assert.Equal(0, Scalar(connection,
             "SELECT COUNT(*) FROM mc_node WHERE declaration_key = 'method:Demo.Basket.Total(1)';"));
         Assert.True(second.Nodes < first.Nodes, "the method's nodes should be gone with the method");
@@ -262,7 +262,7 @@ public sealed class MetacodeAstTests
 
         await service.BuildAsync();
 
-        using (var connection = Open(store.DatabasePath!))
+        using (var connection = Open(store.EnsureMetacodeDatabase()!))
         {
             using var command = connection.CreateCommand();
             command.CommandText = "DELETE FROM mc_node;";

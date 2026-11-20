@@ -15,7 +15,7 @@ public static class GitHubBranchProtectionTool
         "that apply to the branch, which the public API exposes without admin access. branch defaults to the " +
         "repository's default branch; repo is owner/name for another repository. Use this INSTEAD OF shell " +
         "'gh api repos/{owner}/{repo}/branches/…/protection'.")]
-    public static Task<object> GitHubBranchProtection(
+    public static Task<GitHubBranchProtectionResult> GitHubBranchProtection(
         IGitHubService github,
         [Description("get | checks | rules")] string action = "get",
         [Description("The branch to inspect (default: the repository's default branch).")] string? branch = null,

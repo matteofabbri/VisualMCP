@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Etlx;
 using Microsoft.Diagnostics.Tracing.EventPipe;
@@ -76,8 +77,7 @@ public sealed class TraceStackReader : ITraceStackReader
     private const int CacheCapacity = 2;
 
     private readonly SourceMapResolver _sourceMap;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     public TraceStackReader(ProfilingOptions options) => _sourceMap = new SourceMapResolver(options);
 
@@ -89,25 +89,21 @@ public sealed class TraceStackReader : ITraceStackReader
         var key = $"{Path.GetFullPath(tracePath)}|{resolveSource}";
         var info = new FileInfo(tracePath);
 
-        lock (_gate)
-        {
-            if (_cache.TryGetValue(key, out var cached) &&
-                cached.Length == info.Length &&
-                cached.LastWriteUtc == info.LastWriteTimeUtc)
-                return cached.Model;
-        }
+        if (_cache.TryGetValue(key, out var cached) &&
+            cached.Length == info.Length &&
+            cached.LastWriteUtc == info.LastWriteTimeUtc)
+            return cached.Model;
 
         var model = ReadCore(tracePath, resolveSource);
 
-        lock (_gate)
+        // A tiny per-file cache: under the oldest entry out when full. Races are benign — the
+        // worst case is one conversion thrown away, never a torn read.
+        if (_cache.Count >= CacheCapacity)
         {
-            if (_cache.Count >= CacheCapacity)
-            {
-                var oldest = _cache.OrderBy(kv => kv.Value.CreatedUtc).First().Key;
-                _cache.Remove(oldest);
-            }
-            _cache[key] = new CacheEntry(model, info.Length, info.LastWriteTimeUtc);
+            var oldest = _cache.ToArray().OrderBy(pair => pair.Value.CreatedUtc).First();
+            _cache.TryRemove(oldest.Key, out _);
         }
+        _cache[key] = new CacheEntry(model, info.Length, info.LastWriteTimeUtc);
 
         return model;
     }

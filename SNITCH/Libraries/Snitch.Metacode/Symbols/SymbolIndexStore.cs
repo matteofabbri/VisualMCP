@@ -58,13 +58,13 @@ public sealed class SymbolIndexStore : IDisposable
 
                 using (var pragma = connection.CreateCommand())
                 {
-                    // Other owners of the same file (the store, the board) write too: wait for them
-                    // instead of failing the query.
+                    // Other owners of the metacode database (the metacode index) write too: wait for
+                    // them instead of failing the query.
                     pragma.CommandText = "PRAGMA busy_timeout=5000;";
                     pragma.ExecuteNonQuery();
                 }
 
-                VisualMcpSchema.Ensure(connection);
+                VisualMcpSchema.EnsureMetacode(connection);
 
                 _connection = connection;
                 _path = databasePath;
@@ -92,7 +92,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var documents = context.SymbolDocuments
                 .AsNoTracking()
                 .Select(document => new { document.Path, document.Hash })
@@ -122,7 +122,7 @@ public sealed class SymbolIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             using var transaction = context.Database.BeginTransaction();
 
             context.Symbols.Where(row => row.Path == facts.Path).ExecuteDelete();
@@ -270,7 +270,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var query = context.SymbolUsages.AsNoTracking().Where(row => row.SymbolKey == symbolKey);
             if (kind is not null) query = query.Where(row => row.Kind == kind);
 
@@ -304,7 +304,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var rows = context.SymbolUsages
                 .AsNoTracking()
                 .Where(row => row.SymbolKey == symbolKey && row.Kind != "override" && row.Kind != "implement")
@@ -339,7 +339,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var rows = context.SymbolUsages
                 .AsNoTracking()
                 .Where(row => row.ContainerKey == containerKey && row.Kind != "override")
@@ -375,7 +375,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return context.SymbolUsages
                 .AsNoTracking()
                 .Where(row => row.SymbolKey == symbolKey)
@@ -409,7 +409,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var rows = context.SymbolUsages
                 .AsNoTracking()
                 .Where(row =>
@@ -446,7 +446,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             if (incoming)
             {
@@ -501,7 +501,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var nonPublic = new[] { "private", "internal", "protected", "private protected", "protected internal" };
 
             var query = context.Symbols
@@ -542,7 +542,7 @@ public sealed class SymbolIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var paths = context.SymbolDocuments
                 .AsNoTracking()
                 .Select(document => document.Path)
@@ -583,7 +583,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             var documents = context.SymbolDocuments.Count();
             var symbols = context.Symbols.Select(row => row.SymbolKey).Distinct().Count();
@@ -621,7 +621,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             context.SymbolUsages.ExecuteDelete();
             context.SymbolMetacode.ExecuteDelete();
             context.Symbols.ExecuteDelete();
@@ -678,7 +678,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return order(context.Symbols.AsNoTracking().Where(where))
                 .Take(Clamp(limit))
                 .ToList()
@@ -707,7 +707,7 @@ public sealed class SymbolIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return shape(context.SymbolMetacode.AsNoTracking())
                 .Take(Clamp(limit))
                 .ToList()

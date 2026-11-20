@@ -12,13 +12,13 @@ namespace Snitch.Git;
 public interface IGitService
 {
     // reads
-    Task<object> StatusAsync(string? repoPath);
-    Task<object> LogAsync(int maxCount, string? path, string? repoPath);
-    Task<object> DiffAsync(string target, string? path, bool summaryOnly, string? repoPath);
-    Task<object> ShowAsync(string rev, string? path, string? repoPath);
-    Task<object> BlameAsync(string path, int? fromLine, int? toLine, string? repoPath);
-    Task<object> BranchesAsync(string? repoPath);
-    Task<object> RemotesAsync(string? repoPath);
+    Task<GitStatusResult> StatusAsync(string? repoPath);
+    Task<GitLogResult> LogAsync(int maxCount, string? path, string? repoPath);
+    Task<GitDiffResult> DiffAsync(string target, string? path, bool summaryOnly, string? repoPath);
+    Task<GitShowResult> ShowAsync(string rev, string? path, string? repoPath);
+    Task<GitBlameResult> BlameAsync(string path, int? fromLine, int? toLine, string? repoPath);
+    Task<GitBranchesResult> BranchesAsync(string? repoPath);
+    Task<GitRemotesResult> RemotesAsync(string? repoPath);
 
     // staging and history
     Task<object> StageAsync(string[]? paths, bool all, string? repoPath);
@@ -79,23 +79,23 @@ public sealed class GitService : IGitService
     }
 
     // ── status ───────────────────────────────────────────────────────────────
-    public async Task<object> StatusAsync(string? repoPath)
+    public async Task<GitStatusResult> StatusAsync(string? repoPath)
     {
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitStatusResult.FromError(error.Message);
 
         var (exitCode, timedOut, stdout, stderr, _) =
             await GitCli.RunAsync(repoDir!, "status --porcelain=v1 --branch", 30);
 
-        if (timedOut) return new { error = "git status timed out." };
-        if (exitCode != 0) return new { error = $"git status failed: {stderr.Trim()}" };
+        if (timedOut) return GitStatusResult.FromError("git status timed out.");
+        if (exitCode != 0) return GitStatusResult.FromError($"git status failed: {stderr.Trim()}");
 
         string? branch = null, upstream = null;
         int? ahead = null, behind = null;
-        var staged     = new List<object>();
-        var modified   = new List<object>();
+        var staged     = new List<GitChange>();
+        var modified   = new List<GitChange>();
         var untracked  = new List<string>();
-        var conflicted = new List<object>();
+        var conflicted = new List<GitConflict>();
 
         foreach (var raw in stdout.Split('\n'))
         {
@@ -115,20 +115,21 @@ public sealed class GitService : IGitService
             if (x == '!' && y == '!') continue;
 
             if (x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D'))
-            { conflicted.Add(new { path, code = $"{x}{y}" }); continue; }
+            { conflicted.Add(new GitConflict(path, $"{x}{y}")); continue; }
 
-            if (x != ' ' && x != '?') staged.Add(new { path, change = DescribeCode(x) });
-            if (y != ' ' && y != '?') modified.Add(new { path, change = DescribeCode(y) });
+            if (x != ' ' && x != '?') staged.Add(new GitChange(path, DescribeCode(x)));
+            if (y != ' ' && y != '?') modified.Add(new GitChange(path, DescribeCode(y)));
         }
 
         var clean = staged.Count == 0 && modified.Count == 0 && untracked.Count == 0 && conflicted.Count == 0;
 
-        return new
+        return new GitStatusResult
         {
-            repoDir, branch, upstream, ahead, behind, clean,
-            stagedCount = staged.Count, modifiedCount = modified.Count,
-            untrackedCount = untracked.Count, conflictedCount = conflicted.Count,
-            staged, modified, untracked, conflicted,
+            RepoDir = repoDir, Branch = branch, Upstream = upstream, Ahead = ahead, Behind = behind,
+            Clean = clean,
+            StagedCount = staged.Count, ModifiedCount = modified.Count,
+            UntrackedCount = untracked.Count, ConflictedCount = conflicted.Count,
+            Staged = staged, Modified = modified, Untracked = untracked, Conflicted = conflicted,
         };
     }
 
@@ -161,65 +162,65 @@ public sealed class GitService : IGitService
     private const char RecordSep = (char)0x1e;
     private const char UnitSep   = (char)0x1f;
 
-    public async Task<object> LogAsync(int maxCount, string? path, string? repoPath)
+    public async Task<GitLogResult> LogAsync(int maxCount, string? path, string? repoPath)
     {
         if (maxCount < 1) maxCount = 1;
         if (maxCount > 200) maxCount = 200;
 
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitLogResult.FromError(error.Message);
 
         const string fmt = "%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e";
         var pathArg = string.IsNullOrWhiteSpace(path) ? "" : $" -- {Q(path!)}";
         var args = $"log -n {maxCount} --date=iso --pretty=format:{fmt}{pathArg}";
 
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 30);
-        if (timedOut) return new { error = "git log timed out." };
-        if (exitCode != 0) return new { error = $"git log failed: {stderr.Trim()}" };
+        if (timedOut) return GitLogResult.FromError("git log timed out.");
+        if (exitCode != 0) return GitLogResult.FromError($"git log failed: {stderr.Trim()}");
 
-        var commits = new List<object>();
+        var commits = new List<GitCommit>();
         foreach (var record in stdout.Split(RecordSep, StringSplitOptions.RemoveEmptyEntries))
         {
             var fields = record.Trim('\r', '\n').Split(UnitSep);
             if (fields.Length < 5) continue;
-            commits.Add(new { hash = fields[0], shortHash = fields[1], author = fields[2], date = fields[3], subject = fields[4] });
+            commits.Add(new GitCommit(fields[0], fields[1], fields[2], fields[3], fields[4]));
         }
 
-        return new { repoDir, pathFilter = path, count = commits.Count, commits };
+        return new GitLogResult { RepoDir = repoDir, PathFilter = path, Count = commits.Count, Commits = commits };
     }
 
-    public async Task<object> ShowAsync(string rev, string? path, string? repoPath)
+    public async Task<GitShowResult> ShowAsync(string rev, string? path, string? repoPath)
     {
-        if (string.IsNullOrWhiteSpace(rev)) return new { error = "A revision is required (e.g. HEAD, a hash, a tag)." };
-        if (LooksLikeFlag(rev)) return new { error = $"'{rev}' is not a revision." };
+        if (string.IsNullOrWhiteSpace(rev)) return GitShowResult.FromError("A revision is required (e.g. HEAD, a hash, a tag).");
+        if (LooksLikeFlag(rev)) return GitShowResult.FromError($"'{rev}' is not a revision.");
 
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitShowResult.FromError(error.Message);
 
         var args = $"show --stat --format=\"%H%n%an%n%ad%n%n%B\" {rev}";
         if (!string.IsNullOrWhiteSpace(path)) args += $" -- {Q(path!)}";
 
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 45);
-        if (timedOut) return new { error = "git show timed out." };
-        if (exitCode != 0) return new { error = $"git show failed: {stderr.Trim()}", rev };
+        if (timedOut) return GitShowResult.FromError("git show timed out.");
+        if (exitCode != 0) return new GitShowResult { Error = $"git show failed: {stderr.Trim()}", Rev = rev };
 
         var lines = stdout.Replace("\r\n", "\n").Split('\n');
-        return new
+        return new GitShowResult
         {
-            rev,
-            hash = lines.ElementAtOrDefault(0),
-            author = lines.ElementAtOrDefault(1),
-            date = lines.ElementAtOrDefault(2),
-            body = ProcessRunner.Truncate(string.Join('\n', lines.Skip(3)).TrimStart('\n'), 24_000),
+            Rev = rev,
+            Hash = lines.ElementAtOrDefault(0),
+            Author = lines.ElementAtOrDefault(1),
+            Date = lines.ElementAtOrDefault(2),
+            Body = ProcessRunner.Truncate(string.Join('\n', lines.Skip(3)).TrimStart('\n'), 24_000),
         };
     }
 
-    public async Task<object> BlameAsync(string path, int? fromLine, int? toLine, string? repoPath)
+    public async Task<GitBlameResult> BlameAsync(string path, int? fromLine, int? toLine, string? repoPath)
     {
-        if (string.IsNullOrWhiteSpace(path)) return new { error = "A file path is required." };
+        if (string.IsNullOrWhiteSpace(path)) return GitBlameResult.FromError("A file path is required.");
 
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitBlameResult.FromError(error.Message);
 
         var args = "blame --date=short";
         if (fromLine is { } from)
@@ -233,31 +234,31 @@ public sealed class GitService : IGitService
         args += $" -- {Q(path)}";
 
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 60);
-        if (timedOut) return new { error = "git blame timed out." };
-        if (exitCode != 0) return new { error = $"git blame failed: {stderr.Trim()}", path };
+        if (timedOut) return GitBlameResult.FromError("git blame timed out.");
+        if (exitCode != 0) return new GitBlameResult { Error = $"git blame failed: {stderr.Trim()}", Path = path };
 
-        return new
+        return new GitBlameResult
         {
-            repoDir,
-            path,
-            range = fromLine is null ? null : $"{fromLine}-{toLine ?? fromLine}",
-            text = ProcessRunner.Truncate(stdout.TrimEnd(), 24_000),
+            RepoDir = repoDir,
+            Path = path,
+            Range = fromLine is null ? null : $"{fromLine}-{toLine ?? fromLine}",
+            Text = ProcessRunner.Truncate(stdout.TrimEnd(), 24_000),
         };
     }
 
-    public async Task<object> BranchesAsync(string? repoPath)
+    public async Task<GitBranchesResult> BranchesAsync(string? repoPath)
     {
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitBranchesResult.FromError(error.Message);
 
         // %1f is the ref-filter spelling of the unit separator (--pretty wants %x1f instead);
         // it keeps the fields apart even when a subject contains spaces or a tab.
         const string format = "--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(committerdate:short)%1f%(subject)";
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, $"branch {format}", 30);
-        if (timedOut) return new { error = "git branch timed out." };
-        if (exitCode != 0) return new { error = $"git branch failed: {stderr.Trim()}" };
+        if (timedOut) return GitBranchesResult.FromError("git branch timed out.");
+        if (exitCode != 0) return GitBranchesResult.FromError($"git branch failed: {stderr.Trim()}");
 
-        var branches = new List<object>();
+        var branches = new List<GitBranch>();
         string? current = null;
         foreach (var raw in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -267,44 +268,42 @@ public sealed class GitService : IGitService
             var isCurrent = fields[1].Trim() == "*";
             if (isCurrent) current = fields[0];
 
-            branches.Add(new
-            {
-                name = fields[0],
-                current = isCurrent,
-                upstream = string.IsNullOrWhiteSpace(fields[2]) ? null : fields[2],
-                lastCommitDate = string.IsNullOrWhiteSpace(fields[3]) ? null : fields[3],
-                lastCommit = string.IsNullOrWhiteSpace(fields[4]) ? null : fields[4],
-            });
+            branches.Add(new GitBranch(
+                fields[0],
+                isCurrent,
+                string.IsNullOrWhiteSpace(fields[2]) ? null : fields[2],
+                string.IsNullOrWhiteSpace(fields[3]) ? null : fields[3],
+                string.IsNullOrWhiteSpace(fields[4]) ? null : fields[4]));
         }
 
-        return new { repoDir, current, count = branches.Count, branches };
+        return new GitBranchesResult { RepoDir = repoDir, Current = current, Count = branches.Count, Branches = branches };
     }
 
-    public async Task<object> RemotesAsync(string? repoPath)
+    public async Task<GitRemotesResult> RemotesAsync(string? repoPath)
     {
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitRemotesResult.FromError(error.Message);
 
         var (exitCode, _, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, "remote -v", 20);
-        if (exitCode != 0) return new { error = $"git remote failed: {stderr.Trim()}" };
+        if (exitCode != 0) return GitRemotesResult.FromError($"git remote failed: {stderr.Trim()}");
 
-        var remotes = new List<object>();
+        var remotes = new List<GitRemote>();
         foreach (var raw in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = raw.TrimEnd('\r').Split('\t', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2) continue;
             var kind = parts[1].Contains("(push)") ? "push" : "fetch";
-            remotes.Add(new { name = parts[0], url = parts[1].Split(' ')[0], kind });
+            remotes.Add(new GitRemote(parts[0], parts[1].Split(' ')[0], kind));
         }
 
-        return new { repoDir, count = remotes.Count, remotes };
+        return new GitRemotesResult { RepoDir = repoDir, Count = remotes.Count, Remotes = remotes };
     }
 
     // ── diff ─────────────────────────────────────────────────────────────────
-    public async Task<object> DiffAsync(string target, string? path, bool summaryOnly, string? repoPath)
+    public async Task<GitDiffResult> DiffAsync(string target, string? path, bool summaryOnly, string? repoPath)
     {
         var (repoDir, error) = await ResolveAsync(repoPath);
-        if (error is not null) return error;
+        if (error is not null) return GitDiffResult.FromError(error.Message);
 
         var t = (target ?? "working").Trim();
         var args = "diff";
@@ -317,13 +316,14 @@ public sealed class GitService : IGitService
         if (!string.IsNullOrWhiteSpace(path)) args += $" -- {Q(path!)}";
 
         var (exitCode, timedOut, stdout, stderr, _) = await GitCli.RunAsync(repoDir!, args, 45);
-        if (timedOut) return new { error = "git diff timed out." };
-        if (exitCode != 0) return new { error = $"git diff failed: {stderr.Trim()}", command = $"git {args}" };
+        if (timedOut) return GitDiffResult.FromError("git diff timed out.");
+        if (exitCode != 0)
+            return new GitDiffResult { Error = $"git diff failed: {stderr.Trim()}", Command = $"git {args}" };
 
-        return new
+        return new GitDiffResult
         {
-            repoDir, target = t, pathFilter = path, summaryOnly, command = $"git {args}",
-            empty = string.IsNullOrWhiteSpace(stdout), diff = ProcessRunner.Truncate(stdout, 32_000),
+            RepoDir = repoDir, Target = t, PathFilter = path, SummaryOnly = summaryOnly, Command = $"git {args}",
+            Empty = string.IsNullOrWhiteSpace(stdout), Diff = ProcessRunner.Truncate(stdout, 32_000),
         };
     }
 
@@ -1316,7 +1316,7 @@ public sealed class GitService : IGitService
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────────
-    private Task<(string? repoDir, object? error)> ResolveAsync(string? repoPath) =>
+    private Task<(string? repoDir, GitError? error)> ResolveAsync(string? repoPath) =>
         GitCli.ResolveRepoAsync(repoPath, _workspace.LoadedSolutionPath);
 
     private static async Task<int> CountAsync(string repoDir, string reference)

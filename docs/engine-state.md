@@ -1,9 +1,10 @@
 # State of the engine and of the solution store
 
-Last updated: 2026-10-30. This document says, without beating around the bush, **what already exists**,
+Last updated: 2026-11-19. This document says, without beating around the bush, **what already exists**,
 **what is missing** and **why it is missing** — the four structural limitations of the rewrite engine, the
 coverage of Microsoft's IDE table, and the state of the solution database
-(`<solution>/.visualMCP/visualmcp.db`).
+(`<solution>/.visualMCP/`, split per domain: `visualmcp.db` for the main store, `board.db` for the plan,
+`metacode.db` for the indexes).
 
 Legend: ✅ done · 🟡 partial · ⬜ missing · ❌ out of scope by choice.
 
@@ -23,8 +24,8 @@ Legend: ✅ done · 🟡 partial · ⬜ missing · ❌ out of scope by choice.
 | Compiler gate | `StyleRewriteService.ErrorsAsync` (`StyleRewriteService.cs:608`): per project, all documents together and then one by one to isolate the culprit; the refused file is left untouched | ✅ per document, **not** per single change |
 | Output formatting | `Formatter.FormatAsync(..., Formatter.Annotation)`: reformats **only** the nodes the engine produced, not the file | ✅ |
 | Options channel | `StyleOptions` reads **five** C# keys from `AnalyzerConfigOptions` (`CSharpStyleLanguage.cs:49-73`): `csharp_prefer_braces`, `csharp_preferred_modifier_order`, `csharp_style_namespace_declarations`, `dotnet_style_prefer_foreach_explicit_cast_in_source`, `dotnet_style_require_accessibility_modifiers`; the VB layer reads three of its own (`visual_basic_preferred_modifier_order`, `dotnet_style_require_accessibility_modifiers`, `visual_basic_style_prefer_isnot_expression`) | 🟡 five C# keys and three VB ones out of all the IDE options |
-| **Symbol index** | `SNITCH\Libraries\Snitch.Metacode\Symbols\` (`SymbolIndexBuilder`, `CSharpSymbolIndexFrontend`, `SymbolIndexStore`, `SymbolIndexService`) + tables `si_symbol`, `si_usage`, `si_metacode`, `si_document` in the same `visualmcp.db`; tool `reference_index` (`build`/`status`/`find`/`describe`/`refs`/`callers`/`callees`/`hierarchy`/`outline`/`metacode`/`unused`) | ✅ incremental by content hash: where a member is declared, every use **with how it is used** (`call`, `read`, `write`, `instantiate`, `inherit`, `implement`, `override`, `attribute`, …), the member that contains it, and the **metacode tree** of every declaration ([metacode.md](metacode.md#the-symbol-index)) |
-| **Sources in the database** | tables `source_document` + `mc_document`/`mc_tree`/`mc_node` in `visualmcp.db`, written by the metacode index (the same pass that reads the file) | ✅ every **text file** of the solution — Roslyn documents in any language, Razor read from disk, and `README`/`.csproj`/`.json` — with text, language, hash and timestamp; a file with no frontend still lands here **and in the AST** as a `File` node, and every AST row carries `source_path` (file or binary) and the `decompiled` flag, so source code and decompiled code coexist without being confused |
+| **Symbol index** | `SNITCH\Libraries\Snitch.Metacode\Symbols\` (`SymbolIndexBuilder`, `CSharpSymbolIndexFrontend`, `SymbolIndexStore`, `SymbolIndexService`) + tables `si_symbol`, `si_usage`, `si_metacode`, `si_document` in `metacode.db`; tool `reference_index` (`build`/`status`/`find`/`describe`/`refs`/`callers`/`callees`/`hierarchy`/`outline`/`metacode`/`unused`) | ✅ incremental by content hash: where a member is declared, every use **with how it is used** (`call`, `read`, `write`, `instantiate`, `inherit`, `implement`, `override`, `attribute`, …), the member that contains it, and the **metacode tree** of every declaration ([metacode.md](metacode.md#the-symbol-index)) |
+| **Sources in the database** | tables `source_document` + `mc_document`/`mc_tree`/`mc_node` in `metacode.db`, written by the metacode index (the same pass that reads the file) | ✅ every **text file** of the solution — Roslyn documents in any language, Razor read from disk, and `README`/`.csproj`/`.json` — with text, language, hash and timestamp; a file with no frontend still lands here **and in the AST** as a `File` node, and every AST row carries `source_path` (file or binary) and the `decompiled` flag, so source code and decompiled code coexist without being confused |
 | Package facts | tables `package_fact` and `package_dependency` + tool `package_facts` | ✅ from `obj/project.assets.json`, with no restore and no network |
 | Decompiled artifacts | table `decompiled_artifact` + `decompile_assembly(persist=true)` | ✅ keyed on MVID, reused |
 | Edit history | table `applied_edit` + tool `edit_history`, with the previous text compressed | ✅ and revertible |
@@ -156,18 +157,22 @@ implemented.
 
 ## 4. The solution store
 
-The database is `<workspace>/.visualMCP/visualmcp.db`, SQLite, scoped per workspace (its primary
-solution), resolved once per process. The process model behind the file — one store per workspace, two
-sessions sharing it, the background lease, the per-instance dashboard ports — is in
+The database is `<workspace>/.visualMCP/`, SQLite, split **per domain** into three files —
+`visualmcp.db` (facts, logs, history, packages, text index), `board.db` (the plan), `metacode.db`
+(the indexes) — scoped per workspace (its primary solution), resolved once per process. A writer in
+one domain never serializes on a writer in another. The process model behind the files — one store
+per workspace, two sessions sharing it, the background lease, the per-instance dashboard ports, the
+one-time migration that moves the legacy tables into their own files — is in
 [workspace-and-store.md](workspace-and-store.md). Project rule: **only
 what is derived and rebuildable goes in, stamped with the hash of its inputs**; the code on disk remains the
 only truth. A datum without a freshness hash produces stale analysis, and stale analysis is worse than
 slowness because it is silent.
 
-The **schema is an EF Core model**, not six `CREATE TABLE` strings: `SNITCH/Storage/Schema/`
-(`VisualMcpDbContext.cs` declares tables, keys, indexes and columns; `VisualMcpSchema.cs` generates the
-script from the model and creates only what is missing). The six stores — `VisualMcpStore`, board, text
-index, metacode, symbols, native — still write SQL by hand on their own connections, because different
+The **schema is an EF Core model**, not `CREATE TABLE` strings: `SNITCH/Storage/Schema/`
+(`VisualMcpDbContext.cs` declares the three domain contexts, keys, indexes and columns;
+`VisualMcpSchema.cs` generates each domain's script from its model and creates only what is missing).
+The stores — `VisualMcpStore`, board, text index, metacode, symbols, native — still write SQL by hand
+on their own connections, because different
 paths (bulk index insert, transactions, compressed blobs) would only be made opaque by a query provider;
 but none of them owns the DDL any more. The two exceptions to the model are declared: `ti_line` is an FTS5
 virtual table and stays SQL in `VisualMcpSchema`, and `applied_edit.before_text` is added in place on a
@@ -187,8 +192,8 @@ database created before the column existed.
 | **Public surface per package version** | ⬜ | id + version | requires reading the package assemblies: it builds on the decompiled artifacts, so it comes later |
 | **Synthetic solution from the decompiled output** | ❌ | — | the native (Ghidra) pipeline that built it is no longer in this repo: the store is ready (artifacts per MVID) if it comes back |
 
-Operational note: **`visualmcp.db` is no longer tracked by git** (it left the index): a binary file that
-changed on every call dirtied every diff, and the folder is recreated when needed.
+Operational note: **the store files are no longer tracked by git** (they left the index): binary files that
+change on every call dirty every diff, and the folder is recreated when needed.
 
 ---
 

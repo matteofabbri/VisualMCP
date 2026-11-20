@@ -251,7 +251,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
     private async Task<MetacodeBuildReport> RunCoreAsync(bool force, string? projectName, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
             return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
 
@@ -399,7 +399,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         IReadOnlyList<string> paths, string? projectName = null, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
             return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
 
@@ -473,7 +473,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         MetacodeDecompilation decompilation, CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
             return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
 
@@ -574,7 +574,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
             return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
 
@@ -631,7 +631,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
         CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
             return Failure("No solution is loaded, so there is no metacode database. Call load_solution first.", stopwatch);
 
@@ -971,7 +971,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 
     public MetacodeIndexStatus Status()
     {
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is not null) _index.Open(database);
 
         var status = _index.Status();
@@ -1119,7 +1119,7 @@ public sealed class MetacodeIndexService : IMetacodeIndexService, IDisposable
 
     private bool TryOpen()
     {
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         return database is not null && _index.Open(database);
     }
 

@@ -12,7 +12,7 @@ public static class GitHubCliTool
         "issues, releases, runs, etc. Pass the gh arguments WITHOUT the leading 'gh' (e.g. 'repo create my-app " +
         "--public --source . --push', 'pr list', 'issue view 12', 'run list'). Returns stdout/stderr and exit " +
         "code. Requires the gh CLI to be installed and authenticated ('gh auth login').")]
-    public static Task<object> GitHub(
+    public static Task<GitHubCommandResult> GitHub(
         IGitHubService gh,
         [Description("Arguments passed to 'gh' (without the leading 'gh'). E.g. 'repo view', 'pr create --fill'.")] string args,
         [Description("Working directory (defaults to the loaded solution's repo / current directory).")] string? workingDirectory = null,

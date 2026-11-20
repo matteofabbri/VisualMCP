@@ -1182,7 +1182,7 @@ public sealed class BoardService : IBoardService
 
     private sealed record ExportRow(int Id, string Title, string? Description, string Priority, string[] Labels, string? Assignee);
 
-    private static List<ExportRow> ExportRows(VisualMcpDbContext context, string status)
+    private static List<ExportRow> ExportRows(BoardDbContext context, string status)
     {
         return context.BoardItems
             .AsNoTracking()
@@ -1196,7 +1196,7 @@ public sealed class BoardService : IBoardService
             .ToList();
     }
 
-    private static BoardItemRow? FindByTitle(VisualMcpDbContext context, string title)
+    private static BoardItemRow? FindByTitle(BoardDbContext context, string title)
     {
         return context.BoardItems
             .Where(item => item.Title == title)
@@ -1205,7 +1205,7 @@ public sealed class BoardService : IBoardService
     }
 
     /// <summary>Set one field when the draft supplies it, and record the history entry when it actually changes.</summary>
-    private static void UpdateField(VisualMcpDbContext context, BoardItemRow item, string field, string? value,
+    private static void UpdateField(BoardDbContext context, BoardItemRow item, string field, string? value,
         List<object> changes, DateTimeOffset at)
     {
         if (value is null) return;
@@ -1232,7 +1232,7 @@ public sealed class BoardService : IBoardService
     };
 
     // ── reading ──────────────────────────────────────────────────────────────
-    private static object? ReadItem(VisualMcpDbContext context, int id)
+    private static object? ReadItem(BoardDbContext context, int id)
     {
         var row = context.BoardItems
             .AsNoTracking()
@@ -1263,7 +1263,7 @@ public sealed class BoardService : IBoardService
         commentCount,
     };
 
-    private static List<object> Items(VisualMcpDbContext context, string status)
+    private static List<object> Items(BoardDbContext context, string status)
     {
         var rows = context.BoardItems
             .AsNoTracking()
@@ -1295,7 +1295,7 @@ public sealed class BoardService : IBoardService
         commentCount = comments.GetValueOrDefault(item.Id),
     };
 
-    private static Dictionary<int, int> CommentCounts(VisualMcpDbContext context, List<int> ids)
+    private static Dictionary<int, int> CommentCounts(BoardDbContext context, List<int> ids)
     {
         if (ids.Count == 0) return [];
 
@@ -1346,7 +1346,7 @@ public sealed class BoardService : IBoardService
         return File.Exists(candidate) || Directory.Exists(candidate);
     }
 
-    private static List<object> Comments(VisualMcpDbContext context, int id)
+    private static List<object> Comments(BoardDbContext context, int id)
     {
         return context.BoardComments
             .AsNoTracking()
@@ -1364,7 +1364,7 @@ public sealed class BoardService : IBoardService
             .ToList();
     }
 
-    private static List<object> History(VisualMcpDbContext context, int id)
+    private static List<object> History(BoardDbContext context, int id)
     {
         return context.BoardHistory
             .AsNoTracking()
@@ -1383,7 +1383,7 @@ public sealed class BoardService : IBoardService
     }
 
     // ── writing helpers ──────────────────────────────────────────────────────
-    private static int NextPosition(VisualMcpDbContext context, string status)
+    private static int NextPosition(BoardDbContext context, string status)
     {
         var highest = context.BoardItems
             .Where(item => item.Status == status)
@@ -1393,7 +1393,7 @@ public sealed class BoardService : IBoardService
     }
 
     /// <summary>Rewrite one column's positions to 0..n-1, so a move never leaves holes or ties.</summary>
-    private static void Renumber(VisualMcpDbContext context, string status)
+    private static void Renumber(BoardDbContext context, string status)
     {
         var items = context.BoardItems
             .Where(item => item.Status == status)
@@ -1405,7 +1405,7 @@ public sealed class BoardService : IBoardService
             items[index].Position = index;
     }
 
-    private static void Record(VisualMcpDbContext context, int id, string field, string? oldValue, string? newValue, DateTimeOffset at)
+    private static void Record(BoardDbContext context, int id, string field, string? oldValue, string? newValue, DateTimeOffset at)
     {
         context.BoardHistory.Add(new BoardHistoryRow
         {
@@ -1420,9 +1420,9 @@ public sealed class BoardService : IBoardService
     // ── plumbing ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Opens the board's own connection. The board is one of several writers of the workspace file
-    /// (two sessions, the indexes, the edit history), so it waits on the others instead of failing
-    /// while one of them is mid-write.
+    /// Opens the board's own connection. The board has a database file of its own now (board.db), so a
+    /// writer of the main store never serializes on it; it still waits on other board writers instead
+    /// of failing while one of them is mid-write.
     /// </summary>
     private static SqliteConnection Open(string path)
     {
@@ -1435,13 +1435,13 @@ public sealed class BoardService : IBoardService
             pragma.ExecuteNonQuery();
         }
 
-        VisualMcpSchema.Ensure(connection);
+        VisualMcpSchema.EnsureBoard(connection);
         return connection;
     }
 
-    private Task<object> With(Func<VisualMcpDbContext, object> work)
+    private Task<object> With(Func<BoardDbContext, object> work)
     {
-        var path = _store.EnsureDatabase();
+        var path = _store.EnsureBoardDatabase();
         if (path is null)
             return Task.FromResult<object>(new { error = NoStoreError });
 
@@ -1449,7 +1449,7 @@ public sealed class BoardService : IBoardService
         {
             using var connection = Open(path);
 
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateBoardContext(connection);
             return Task.FromResult(work(context));
         }
         catch (Exception ex) when (ex is SqliteException or DbUpdateException)
@@ -1459,16 +1459,16 @@ public sealed class BoardService : IBoardService
     }
 
     /// <summary>Like <see cref="With"/>, for a typed answer: a database failure is turned into <paramref name="failure"/>.</summary>
-    private Task<T> WithTyped<T>(Func<VisualMcpDbContext, T> work, Func<string, T> failure)
+    private Task<T> WithTyped<T>(Func<BoardDbContext, T> work, Func<string, T> failure)
     {
-        var path = _store.EnsureDatabase();
+        var path = _store.EnsureBoardDatabase();
         if (path is null) return Task.FromResult(failure(NoStoreError));
 
         try
         {
             using var connection = Open(path);
 
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateBoardContext(connection);
             return Task.FromResult(work(context));
         }
         catch (Exception ex) when (ex is SqliteException or DbUpdateException)
@@ -1478,16 +1478,16 @@ public sealed class BoardService : IBoardService
     }
 
     /// <summary>Like <see cref="With"/>, but an unavailable or empty board is null instead of an error object.</summary>
-    private BoardSummary? TryRead(Func<VisualMcpDbContext, BoardSummary?> work)
+    private BoardSummary? TryRead(Func<BoardDbContext, BoardSummary?> work)
     {
-        var path = _store.EnsureDatabase();
+        var path = _store.EnsureBoardDatabase();
         if (path is null) return null;
 
         try
         {
             using var connection = Open(path);
 
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateBoardContext(connection);
             return work(context);
         }
         catch (Exception ex) when (ex is SqliteException or DbUpdateException)
@@ -1556,7 +1556,7 @@ public sealed class BoardService : IBoardService
         $"'{kind}' is not a memory kind. Use one of: {string.Join(", ", MemoryKinds)}.";
 
     /// <summary>The one row of a topic that has no successor: the version that counts.</summary>
-    private static BoardMemoryRow? CurrentMemory(VisualMcpDbContext context, string topic) =>
+    private static BoardMemoryRow? CurrentMemory(BoardDbContext context, string topic) =>
         context.BoardMemories
             .Where(memory => memory.Topic == topic && memory.SupersededBy == null)
             .OrderByDescending(memory => memory.Id)

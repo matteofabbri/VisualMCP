@@ -92,7 +92,7 @@ public sealed class GitServiceTests
         ResultAssert.Succeeded(await repo.Service.RenameBranchAsync("feature", "feature-renamed", repo.Directory));
         Assert.Equal("feature-renamed", repo.Capture("rev-parse", "--abbrev-ref", "HEAD").Trim());
 
-        var branches = ResultAssert.Json(await repo.Service.BranchesAsync(repo.Directory));
+        var branches = ResultAssert.Wire(await repo.Service.BranchesAsync(repo.Directory));
         var names = branches.GetProperty("branches").EnumerateArray().Select(b => b.GetProperty("name").GetString()).ToList();
         Assert.Contains("feature-renamed", names);
         Assert.Contains("main", names);
@@ -101,7 +101,7 @@ public sealed class GitServiceTests
         ResultAssert.Succeeded(await repo.Service.CheckoutAsync("main", create: false, repo.Directory));
         ResultAssert.Succeeded(await repo.Service.DeleteBranchAsync("feature-renamed", force: false, repo.Directory));
 
-        var after = ResultAssert.Json(await repo.Service.BranchesAsync(repo.Directory));
+        var after = ResultAssert.Wire(await repo.Service.BranchesAsync(repo.Directory));
         Assert.DoesNotContain(after.GetProperty("branches").EnumerateArray(),
             b => b.GetProperty("name").GetString() == "feature-renamed");
     }
@@ -188,7 +188,7 @@ public sealed class GitServiceTests
         repo.Write("a.txt", "1");
         repo.Commit("first");
 
-        var show = ResultAssert.Json(await repo.Service.ShowAsync("HEAD", null, repo.Directory));
+        var show = ResultAssert.Wire(await repo.Service.ShowAsync("HEAD", null, repo.Directory));
         Assert.Equal("first", show.GetProperty("body").GetString()!.Split('\n')[0].Trim());
 
         var run = ResultAssert.Json(await repo.Service.RunAsync("rev-parse --abbrev-ref HEAD", repo.Directory, 30));

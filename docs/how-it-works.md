@@ -15,8 +15,9 @@ The process does four things:
 
 - **Loads the solution** with Roslyn's `MSBuildWorkspace`, so tools see the project graph, target
   frameworks, references and compiler diagnostics the way an IDE does.
-- **Keeps derived data** in `<workspace>/.visualMCP/visualmcp.db` — indexes, edit history, the board and
-  cached reports. The source files on disk remain the only truth.
+- **Keeps derived data** in `<workspace>/.visualMCP/` as SQLite, one file per domain — `visualmcp.db`
+  (indexes' facts, edit history, cached reports), `board.db` (the plan), `metacode.db` (the indexes).
+  The source files on disk remain the only truth.
 - **Serves an optional dashboard** on a loopback port (`http://127.0.0.1:4677` by default).
   Every page is read-only except `/board`, whose writes go through the board service;
   `VISUALMCP_DASHBOARD=off` disables it.
@@ -72,22 +73,27 @@ prefixed, e.g. `mcp__VisualMCP__find_references`.
 
 ## The solution store
 
-`<workspace>/.visualMCP/visualmcp.db` is a SQLite database scoped to one workspace, keyed on its
+`<workspace>/.visualMCP/` holds the store as SQLite, scoped to one workspace, keyed on its
 primary (shallowest) solution and resolved once per process — activating a nested `.sln` does not move
-it. The rule for what goes in it: **only derived, reconstructible data, always stamped with the hash or
+it. It is split **per domain** into three files, so a writer of one never queues behind a writer of
+another: `visualmcp.db` (activity, packages, full text), `board.db` (the plan), `metacode.db` (the
+metacode, symbol and native indexes). A store written by an older single-file build migrates on first
+use: each domain's tables are copied into their own file — verified, then dropped from the old one.
+The rule for what goes in it: **only derived, reconstructible data, always stamped with the hash or
 timestamp of its inputs**. The source on disk remains the only truth.
 
-| Area | Tables | What a row means |
-|---|---|---|
-| Activity | `command_log`, `applied_edit`, `file_snapshot`, `context` | Every tool call; every file this server wrote (with the previous text, compressed); whole-file local-history snapshots, deduplicated on their hash; cached inspection reports and small settings |
-| Board | `board_item`, `board_comment`, `board_history` | A kanban card, its comments, its change history |
-| Symbol index | `si_document`, `si_symbol`, `si_usage`, `si_metacode` | Declarations, typed usages (call/read/write/…), and one metacode tree per declaration |
-| Metacode index | `mc_document`, `mc_tree`, `mc_node`, `source_document` | One pseudocode tree per declaration with its complexity, the complete AST of each declaration node by node (parent link, property slot, position, depth, span, payload), and the file as its own language writes it. Every AST row carries `source_path` (the file, or the binary for decompiled code) and a `decompiled` flag, and a text file no frontend reads is in the same AST as a single `File` node |
-| Full-text index | `ti_document`, `ti_row`, `ti_line` (FTS5) | One row per line, identifiers split into words, BM25 ranking |
-| Packages | `package_fact`, `package_dependency` | The resolved NuGet graph from `obj/project.assets.json` |
-| Artifacts | `decompiled_artifact`, `native_artifact`, `native_function`, `native_call` | Decompiled assemblies keyed on their MVID; functions and call edges recovered from a native binary |
+| Area | File | Tables | What a row means |
+|---|---|---|---|
+| Activity | `visualmcp.db` | `command_log`, `applied_edit`, `file_snapshot`, `context` | Every tool call; every file this server wrote (with the previous text, compressed); whole-file local-history snapshots, deduplicated on their hash; cached inspection reports and small settings |
+| Board | `board.db` | `board_item`, `board_comment`, `board_history`, `board_memory` | A kanban card, its comments, its change history, the durable notes |
+| Symbol index | `metacode.db` | `si_document`, `si_symbol`, `si_usage`, `si_metacode` | Declarations, typed usages (call/read/write/…), and one metacode tree per declaration |
+| Metacode index | `metacode.db` | `mc_document`, `mc_tree`, `mc_node`, `source_document` | One pseudocode tree per declaration with its complexity, the complete AST of each declaration node by node (parent link, property slot, position, depth, span, payload), and the file as its own language writes it. Every AST row carries `source_path` (the file, or the binary for decompiled code) and a `decompiled` flag, and a text file no frontend reads is in the same AST as a single `File` node |
+| Full-text index | `visualmcp.db` | `ti_document`, `ti_row`, `ti_line` (FTS5) | One row per line, identifiers split into words, BM25 ranking |
+| Packages | `visualmcp.db` | `package_fact`, `package_dependency` | The resolved NuGet graph from `obj/project.assets.json` |
+| Artifacts | `visualmcp.db` / `metacode.db` | `decompiled_artifact`; `native_artifact`, `native_function`, `native_call` | Decompiled assemblies keyed on their MVID; functions and call edges recovered from a native binary |
 
-The tables are created from one **EF Core model** (`SNITCH/Storage/Schema/VisualMcpDbContext.cs`), which is
+Each domain's tables are created from its **EF Core model** (`SNITCH/Storage/Schema/VisualMcpDbContext.cs`
+declares the three contexts), which is
 the schema's only definition: a fresh database and one written by an older build get the same tables, and
 opening a store adds whatever that file is missing without touching what is there. The one exception is
 `ti_line`, an FTS5 virtual table that a relational model cannot describe, so its DDL is kept in SQL. Reads

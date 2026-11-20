@@ -38,20 +38,35 @@ public sealed record DecompiledArtifact(
     string Mvid, string AssemblyPath, string Name, string Directory, int Types, DateTimeOffset CreatedAt);
 
 /// <summary>
-/// The project's on-disk context store: a SQLite database at
-/// <c>&lt;solution directory&gt;/.visualMCP/visualmcp.db</c>. It keeps facts that are expensive to
-/// recompute (today: the last inspection report) so they survive a restart of the server.
+/// The project's on-disk context store, split per domain into three SQLite databases under
+/// <c>&lt;solution directory&gt;/.visualMCP/</c>: <c>visualmcp.db</c> keeps the facts that are expensive to
+/// recompute (today: the last inspection report) so they survive a restart of the server, while the
+/// board and the indexes live in their own files — see <see cref="EnsureBoardDatabase"/> and
+/// <see cref="EnsureMetacodeDatabase"/>.
 /// </summary>
 public interface IVisualMcpStore
 {
-    /// <summary>The database path, or null until a solution is known.</summary>
+    /// <summary>The main database path, or null until a solution is known.</summary>
     string? DatabasePath { get; }
 
     /// <summary>
-    /// Opens the store if it is not open yet and returns the database path, or null when it is
+    /// Opens the main store if it is not open yet and returns the database path, or null when it is
     /// unavailable. Other owners of the same file (the kanban board) open their own connection.
     /// </summary>
     string? EnsureDatabase();
+
+    /// <summary>
+    /// Ensures the board's own database (<c>board.db</c>) beside the main one and returns its path, or
+    /// null when the workspace has no store. First call copies the board tables an older build wrote
+    /// into <c>visualmcp.db</c> and drops them there.
+    /// </summary>
+    string? EnsureBoardDatabase();
+
+    /// <summary>
+    /// Ensures the indexes' own database (<c>metacode.db</c>) beside the main one and returns its path,
+    /// or null when the workspace has no store. Same first-call migration as the board.
+    /// </summary>
+    string? EnsureMetacodeDatabase();
 
     /// <summary>Stores a fact; <paramref name="stamp"/> is an opaque freshness token the caller compares.</summary>
     void Set(string key, string value, string? stamp = null);
@@ -127,17 +142,52 @@ public interface IVisualMcpStore
 }
 
 /// <summary>
-/// Lazily opens the one database of the workspace, keyed on its primary (shallowest) solution.
-/// Every operation degrades to a no-op when no solution is loaded or SQLite cannot be used: the
-/// store is an optimisation, never a dependency.
+/// Lazily opens the workspace's store databases, keyed on the primary (shallowest) solution. The store
+/// is split per domain into three files under <c>&lt;solution&gt;/.visualMCP/</c> — <c>visualmcp.db</c>
+/// (this class: facts, command log, history, packages, artifacts, leases, text index), <c>board.db</c>
+/// (the plan, through <see cref="EnsureBoardDatabase"/>) and <c>metacode.db</c> (the indexes, through
+/// <see cref="EnsureMetacodeDatabase"/>) — so a writer in one domain never serializes on a writer in
+/// another. Every operation degrades to a no-op when no solution is loaded or SQLite cannot be used:
+/// the store is an optimisation, never a dependency.
 /// </summary>
 public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 {
     private readonly IRoslynWorkspace _workspace;
-    private readonly object _gate = new();
+
+    /// <summary>
+    /// The one SQLite connection of a domain is the shared resource its gate protects, so the gates are
+    /// semaphores rather than monitors: a monitor is reentrant, and the discipline the codebase works
+    /// under is "collections get concurrent containers, resources get a semaphore" — with every
+    /// connection call made before the gate is taken, never inside it.
+    /// </summary>
+    private readonly SemaphoreSlim _gate = new(1, 1);
     private SqliteConnection? _connection;
     private string? _storeDirectory;
     private bool _unavailable;
+
+    /// <summary>The board domain's tables, which move from <c>visualmcp.db</c> into <c>board.db</c>.</summary>
+    private static readonly string[] BoardDomainTables =
+        ["board_item", "board_comment", "board_history", "board_memory"];
+
+    /// <summary>The indexes domain's tables, which move from <c>visualmcp.db</c> into <c>metacode.db</c>.</summary>
+    private static readonly string[] MetacodeDomainTables =
+    [
+        "mc_document", "mc_tree", "mc_node", "source_document",
+        "si_symbol", "si_usage", "si_document", "si_metacode",
+        "native_artifact", "native_function", "native_call",
+    ];
+
+    /// <summary>Takes the main gate; dispose the returned scope to release it (all paths, returns included).</summary>
+    private GateScope Gate()
+    {
+        _gate.Wait();
+        return new GateScope(_gate);
+    }
+
+    private readonly struct GateScope(SemaphoreSlim gate) : IDisposable
+    {
+        public void Dispose() => gate.Release();
+    }
 
     public VisualMcpStore(IRoslynWorkspace workspace) => _workspace = workspace;
 
@@ -147,6 +197,52 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
     {
         Connection();
         return DatabasePath;
+    }
+
+    /// <summary>
+    /// Ensures the board's own database (<c>board.db</c>) exists beside the main one and returns its
+    /// path, or null when the workspace has no store. On the first call the board tables an older
+    /// build wrote into <c>visualmcp.db</c> are copied over (verified, then dropped there); a database
+    /// that already exists is left exactly as it is.
+    /// </summary>
+    public string? EnsureBoardDatabase()
+    {
+        try
+        {
+            if (EnsureDatabase() is null) return null;
+            var path = Path.Combine(Path.GetDirectoryName(DatabasePath)!, "board.db");
+            VisualMcpStoreDomain.Prepare(path, DatabasePath!, BoardDomainTables, VisualMcpSchema.EnsureBoard);
+            using (Gate()) VisualMcpStoreDomain.DropLegacyTables(_connection!, BoardDomainTables);
+            return path;
+        }
+        catch (Exception cause) when (cause is SqliteException or IOException or InvalidOperationException)
+        {
+            // The store is an optimisation: a domain database that cannot be prepared right now
+            // degrades to no-board, and the next call retries the preparation from scratch.
+            _ = cause;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Ensures the indexes' own database (<c>metacode.db</c>) exists beside the main one and returns
+    /// its path, or null when the workspace has no store. Same first-call migration as the board.
+    /// </summary>
+    public string? EnsureMetacodeDatabase()
+    {
+        try
+        {
+            if (EnsureDatabase() is null) return null;
+            var path = Path.Combine(Path.GetDirectoryName(DatabasePath)!, "metacode.db");
+            VisualMcpStoreDomain.Prepare(path, DatabasePath!, MetacodeDomainTables, VisualMcpSchema.EnsureMetacode);
+            using (Gate()) VisualMcpStoreDomain.DropLegacyTables(_connection!, MetacodeDomainTables);
+            return path;
+        }
+        catch (Exception cause) when (cause is SqliteException or IOException or InvalidOperationException)
+        {
+            _ = cause;
+            return null;
+        }
     }
 
     public void Set(string key, string value, string? stamp = null)
@@ -231,7 +327,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
         var now = DateTimeOffset.UtcNow;
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 context.CommandLog.Add(new CommandLogRow
@@ -261,7 +357,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var query = context.CommandLog.AsNoTracking().AsQueryable();
@@ -289,7 +385,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 return context.CommandLog.Count();
@@ -310,7 +406,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 context.AppliedEdits.Add(new AppliedEditRow
@@ -344,7 +440,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var query = context.AppliedEdits.AsNoTracking().AsQueryable();
@@ -389,7 +485,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 return context.AppliedEdits.Count();
@@ -415,7 +511,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var edit = context.AppliedEdits
@@ -458,7 +554,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
         try
         {
-            lock (_gate)
+            using (Gate())
             {
                 using var context = VisualMcpSchema.CreateContext(connection);
                 var text = context.AppliedEdits
@@ -540,7 +636,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
     private SqliteConnection? Connection()
     {
-        lock (_gate)
+        using (Gate())
         {
             if (_unavailable) return null;
             if (_connection is not null) return _connection;
@@ -563,6 +659,10 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
                 using (var command = connection.CreateCommand())
                 {
                     command.CommandText = "PRAGMA busy_timeout=5000;";
+                    command.ExecuteNonQuery();
+                    // WAL lets readers run beside a writer and survives the crash of either; the mode
+                    // is persistent per file, so setting it on every open is idempotent.
+                    command.CommandText = "PRAGMA journal_mode=WAL;";
                     command.ExecuteNonQuery();
                 }
 
@@ -597,7 +697,7 @@ public sealed partial class VisualMcpStore : IVisualMcpStore, IDisposable
 
     public void Dispose()
     {
-        lock (_gate)
+        using (Gate())
         {
             _connection?.Dispose();
             _connection = null;

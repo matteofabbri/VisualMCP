@@ -69,6 +69,157 @@ public sealed class RiderInspectionTests
     }
 
     [Fact]
+    public async Task UseDiscardAssignment_reports_a_discardNamedVar_never_read()
+    {
+        const string source = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M() => Out();
+
+                private int Out() => 42;
+            }
+            """;
+
+        // The call's result must still be produced (the side effect stays), so the shape is a local.
+        const string withUnused = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M()
+                {
+                    var _ = Out();
+                    return 1;
+                }
+
+                private int Out() => 42;
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(withUnused, new UseDiscardAssignmentAnalyzer());
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("UseDiscardAssignment", diagnostic.Id);
+        Assert.Contains("_", diagnostic.GetMessage());
+        _ = source;
+    }
+
+    [Fact]
+    public async Task UseDiscardAssignment_accepts_the_unused_and_dummy_names_with_digits()
+    {
+        const string source = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M()
+                {
+                    var unused2 = Out();
+                    var dummy1 = Out();
+                    return 1;
+                }
+
+                private int Out() => 42;
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(source, new UseDiscardAssignmentAnalyzer());
+        Assert.Equal(2, diagnostics.Length);
+    }
+
+    [Fact]
+    public async Task UseDiscardAssignment_ignores_a_local_that_is_read()
+    {
+        const string source = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M()
+                {
+                    var used = Out();
+                    return used;
+                }
+
+                private int Out() => 42;
+            }
+            """;
+
+        Assert.Empty(await AnalyzeAsync(source, new UseDiscardAssignmentAnalyzer()));
+    }
+
+    [Fact]
+    public async Task UseDiscardAssignment_ignores_a_using_declaration_and_a_typed_declaration()
+    {
+        const string source = """
+            namespace Probe;
+
+            using System.IO;
+
+            internal class C
+            {
+                public int M()
+                {
+                    using var reader = Reader();
+                    var text = 42;
+                    return text;
+                }
+
+                private StreamReader Reader() => new("C.cs");
+            }
+            """;
+
+        Assert.Empty(await AnalyzeAsync(source, new UseDiscardAssignmentAnalyzer()));
+    }
+
+    [Fact]
+    public async Task UseDiscardAssignment_skips_when_a_competing_underscore_local_exists()
+    {
+        const string source = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M()
+                {
+                    var _ = 1;
+                    var _ = Out();
+                    return 1;
+                }
+
+                private int Out() => 42;
+            }
+            """;
+
+        // Two `_` declarations in one scope do not compile; the competing check skips the hint there,
+        // and the first `_ = 1` itself is not discard-like-with-initializer of a call, so nothing fires.
+        Assert.Empty(await AnalyzeAsync(source, new UseDiscardAssignmentAnalyzer()));
+    }
+
+    [Fact]
+    public async Task UseDiscardAssignment_skips_a_multi_declarator_statement()
+    {
+        const string source = """
+            namespace Probe;
+
+            internal class C
+            {
+                public int M()
+                {
+                    var _ = Out(), other = 1;
+                    return other;
+                }
+
+                private int Out() => 42;
+            }
+            """;
+
+        Assert.Empty(await AnalyzeAsync(source, new UseDiscardAssignmentAnalyzer()));
+    }
+
+    [Fact]
     public async Task ConvertToConstant_ignores_a_local_that_is_written_later()
     {
         const string source = """

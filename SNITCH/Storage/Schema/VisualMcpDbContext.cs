@@ -4,22 +4,60 @@ using Microsoft.EntityFrameworkCore;
 namespace Snitch.Storage.Schema;
 
 /// <summary>
-/// The EF Core model of <c>&lt;solution&gt;/.visualMCP/visualmcp.db</c>: every table the stores own is
-/// declared here once, and <see cref="VisualMcpSchema"/> creates the file's tables from this model.
+/// The EF Core models of the store's databases, split per domain: three files under
+/// <c>&lt;solution&gt;/.visualMCP/</c> instead of one, so the board, the metacode/symbol indexes and
+/// the main store never serialize on each other's writes. The row classes are shared; each context
+/// declares only its domain's tables, and <see cref="VisualMcpSchema"/> creates each file's tables
+/// from its context.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The model is the single source of truth for the schema and for queries: stores read and write
-/// through this context with LINQ. SQL text remains only where a query provider cannot express the
+/// through these contexts with LINQ. SQL text remains only where a query provider cannot express the
 /// statement — FTS5 <c>MATCH</c> on the virtual <c>ti_line</c> table, <c>PRAGMA</c> statements, and the
-/// DDL this model produces — and there it stays parameterized. A database created by an older build
-/// keeps its tables: <see cref="VisualMcpSchema.Ensure"/> creates only what is missing.
+/// DDL the models produce — and there it stays parameterized. A database created by an older build
+/// keeps its tables: the schema's <c>Ensure</c> creates only what is missing.
 /// </para>
 /// <para>
 /// Every column is spelled as the snake_case of its property, which is the convention the schema has
-/// always followed; the model applies it in one pass instead of at each property.
+/// always followed; the shared convention applies it in one pass instead of at each property.
 /// </para>
 /// </remarks>
+public static class VisualMcpSchemaConvention
+{
+    /// <summary>Applies the schema's snake_case column spelling to a model, in one pass.</summary>
+    public static void Apply(ModelBuilder model)
+    {
+        foreach (var entityType in model.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+                property.SetColumnName(SnakeCase(property.Name));
+        }
+
+        // The one column whose historical spelling is not the snake_case of the property that holds it.
+        if (model.Model.FindEntityType(typeof(TextIndexLineRow)) is { } textLine)
+            textLine.FindProperty(nameof(TextIndexLineRow.RowId))!.SetColumnName("rowid");
+    }
+
+    /// <summary>The schema's historical column spelling: <c>OccurredAt</c> is <c>occurred_at</c>.</summary>
+    private static string SnakeCase(string name)
+    {
+        var builder = new StringBuilder(name.Length + 4);
+        foreach (var character in name)
+        {
+            if (char.IsUpper(character) && builder.Length > 0) builder.Append('_');
+            builder.Append(char.ToLowerInvariant(character));
+        }
+
+        return builder.ToString();
+    }
+}
+
+/// <summary>
+/// The main store: the workspace's facts (and the cross-process leases, which live in the same
+/// <c>context</c> table), the command log, the local history, the package facts, the registry of
+/// decompiled artifacts and the text index.
+/// </summary>
 public sealed class VisualMcpDbContext : DbContext
 {
     public VisualMcpDbContext(DbContextOptions<VisualMcpDbContext> options) : base(options) { }
@@ -38,39 +76,9 @@ public sealed class VisualMcpDbContext : DbContext
 
     public DbSet<DecompiledArtifactRow> DecompiledArtifacts => Set<DecompiledArtifactRow>();
 
-    public DbSet<BoardItemRow> BoardItems => Set<BoardItemRow>();
-
-    public DbSet<BoardCommentRow> BoardComments => Set<BoardCommentRow>();
-
-    public DbSet<BoardHistoryRow> BoardHistory => Set<BoardHistoryRow>();
-
-    public DbSet<BoardMemoryRow> BoardMemories => Set<BoardMemoryRow>();
-
     public DbSet<TextIndexDocumentRow> TextIndexDocuments => Set<TextIndexDocumentRow>();
 
     public DbSet<TextIndexLineRow> TextIndexLines => Set<TextIndexLineRow>();
-
-    public DbSet<MetacodeDocumentRow> MetacodeDocuments => Set<MetacodeDocumentRow>();
-
-    public DbSet<MetacodeTreeRow> MetacodeTrees => Set<MetacodeTreeRow>();
-
-    public DbSet<SourceDocumentRow> SourceDocuments => Set<SourceDocumentRow>();
-
-    public DbSet<MetacodeNodeRow> MetacodeNodes => Set<MetacodeNodeRow>();
-
-    public DbSet<SymbolRow> Symbols => Set<SymbolRow>();
-
-    public DbSet<SymbolUsageRow> SymbolUsages => Set<SymbolUsageRow>();
-
-    public DbSet<SymbolDocumentRow> SymbolDocuments => Set<SymbolDocumentRow>();
-
-    public DbSet<SymbolMetacodeRow> SymbolMetacode => Set<SymbolMetacodeRow>();
-
-    public DbSet<NativeArtifactRow> NativeArtifacts => Set<NativeArtifactRow>();
-
-    public DbSet<NativeFunctionRow> NativeFunctions => Set<NativeFunctionRow>();
-
-    public DbSet<NativeCallRow> NativeCalls => Set<NativeCallRow>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -133,6 +141,40 @@ public sealed class VisualMcpDbContext : DbContext
             row.HasKey(artifact => artifact.Mvid);
         });
 
+        model.Entity<TextIndexDocumentRow>(row =>
+        {
+            row.ToTable("ti_document");
+            row.HasKey(document => document.Path);
+        });
+
+        // A map from a document's line numbers to the rowids of the FTS5 table; (path, line) is unique in
+        // practice, but the historical table has no key, so the model adds none.
+        model.Entity<TextIndexLineRow>(row =>
+        {
+            row.ToTable("ti_row");
+            row.HasNoKey();
+            row.HasIndex(line => line.Path).HasDatabaseName("ti_row_path");
+        });
+
+        VisualMcpSchemaConvention.Apply(model);
+    }
+}
+
+/// <summary>The board's own database: the kanban plan, its audit trail and the durable memory notes.</summary>
+public sealed class BoardDbContext : DbContext
+{
+    public BoardDbContext(DbContextOptions<BoardDbContext> options) : base(options) { }
+
+    public DbSet<BoardItemRow> BoardItems => Set<BoardItemRow>();
+
+    public DbSet<BoardCommentRow> BoardComments => Set<BoardCommentRow>();
+
+    public DbSet<BoardHistoryRow> BoardHistory => Set<BoardHistoryRow>();
+
+    public DbSet<BoardMemoryRow> BoardMemories => Set<BoardMemoryRow>();
+
+    protected override void OnModelCreating(ModelBuilder model)
+    {
         model.Entity<BoardItemRow>(row =>
         {
             row.ToTable("board_item");
@@ -164,21 +206,42 @@ public sealed class VisualMcpDbContext : DbContext
             row.HasIndex(memory => memory.SupersededBy).HasDatabaseName("board_memory_current");
         });
 
-        model.Entity<TextIndexDocumentRow>(row =>
-        {
-            row.ToTable("ti_document");
-            row.HasKey(document => document.Path);
-        });
+        VisualMcpSchemaConvention.Apply(model);
+    }
+}
 
-        // A map from a document's line numbers to the rowids of the FTS5 table; (path, line) is unique in
-        // practice, but the historical table has no key, so the model adds none.
-        model.Entity<TextIndexLineRow>(row =>
-        {
-            row.ToTable("ti_row");
-            row.HasNoKey();
-            row.HasIndex(line => line.Path).HasDatabaseName("ti_row_path");
-        });
+/// <summary>
+/// The indexes' own database: the metacode and the symbol index (the bulk of the stored bytes), plus
+/// the native-artifact registry Ghidra's runs write. Everything here is rebuildable.
+/// </summary>
+public sealed class MetacodeDbContext : DbContext
+{
+    public MetacodeDbContext(DbContextOptions<MetacodeDbContext> options) : base(options) { }
 
+    public DbSet<MetacodeDocumentRow> MetacodeDocuments => Set<MetacodeDocumentRow>();
+
+    public DbSet<MetacodeTreeRow> MetacodeTrees => Set<MetacodeTreeRow>();
+
+    public DbSet<SourceDocumentRow> SourceDocuments => Set<SourceDocumentRow>();
+
+    public DbSet<MetacodeNodeRow> MetacodeNodes => Set<MetacodeNodeRow>();
+
+    public DbSet<SymbolRow> Symbols => Set<SymbolRow>();
+
+    public DbSet<SymbolUsageRow> SymbolUsages => Set<SymbolUsageRow>();
+
+    public DbSet<SymbolDocumentRow> SymbolDocuments => Set<SymbolDocumentRow>();
+
+    public DbSet<SymbolMetacodeRow> SymbolMetacode => Set<SymbolMetacodeRow>();
+
+    public DbSet<NativeArtifactRow> NativeArtifacts => Set<NativeArtifactRow>();
+
+    public DbSet<NativeFunctionRow> NativeFunctions => Set<NativeFunctionRow>();
+
+    public DbSet<NativeCallRow> NativeCalls => Set<NativeCallRow>();
+
+    protected override void OnModelCreating(ModelBuilder model)
+    {
         model.Entity<MetacodeDocumentRow>(row =>
         {
             row.ToTable("mc_document");
@@ -267,27 +330,6 @@ public sealed class VisualMcpDbContext : DbContext
             row.HasIndex(call => new { call.Artifact, call.Callee }).HasDatabaseName("native_call_callee");
         });
 
-        // Applied last, so a table or key configured above cannot be missed by the convention.
-        foreach (var entityType in model.Model.GetEntityTypes())
-        {
-            foreach (var property in entityType.GetProperties())
-                property.SetColumnName(SnakeCase(property.Name));
-        }
-
-        // The one column whose historical spelling is not the snake_case of the property that holds it.
-        model.Entity<TextIndexLineRow>().Property(row => row.RowId).HasColumnName("rowid");
-    }
-
-    /// <summary>The schema's historical column spelling: <c>OccurredAt</c> is <c>occurred_at</c>.</summary>
-    private static string SnakeCase(string name)
-    {
-        var builder = new StringBuilder(name.Length + 4);
-        foreach (var character in name)
-        {
-            if (char.IsUpper(character) && builder.Length > 0) builder.Append('_');
-            builder.Append(char.ToLowerInvariant(character));
-        }
-
-        return builder.ToString();
+        VisualMcpSchemaConvention.Apply(model);
     }
 }

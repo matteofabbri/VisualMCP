@@ -98,13 +98,13 @@ public sealed class MetacodeIndexStore : IDisposable
 
                 using (var pragma = connection.CreateCommand())
                 {
-                    // Other owners of the same file (the store, the board, the symbol index) write too:
-                    // wait for them instead of failing the query.
+                    // Other owners of the same domain (the symbol index writes here too) and the other
+                    // domain databases write concurrently: wait instead of failing the query.
                     pragma.CommandText = "PRAGMA busy_timeout=5000;";
                     pragma.ExecuteNonQuery();
                 }
 
-                VisualMcpSchema.Ensure(connection);
+                VisualMcpSchema.EnsureMetacode(connection);
 
                 _connection = connection;
                 _path = databasePath;
@@ -132,7 +132,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             var documents = context.MetacodeDocuments
                 .AsNoTracking()
@@ -182,7 +182,7 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             using var transaction = context.Database.BeginTransaction();
 
             context.MetacodeNodes.Where(node => node.Path == facts.Path).ExecuteDelete();
@@ -332,7 +332,7 @@ public sealed class MetacodeIndexStore : IDisposable
     /// The native half of one document. Called inside <see cref="ReplaceAsync"/>'s transaction, so the
     /// text and the trees it produced never disagree about a file.
     /// </summary>
-    private static void WriteSource(VisualMcpDbContext context, MetacodeDocumentFacts facts)
+    private static void WriteSource(MetacodeDbContext context, MetacodeDocumentFacts facts)
     {
         var source = facts.Source!;
 
@@ -387,7 +387,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             context.MetacodeDocuments
                 .Where(document => document.Path == path)
                 .ExecuteUpdate(setters => setters.SetProperty(document => document.Mtime, mtime));
@@ -416,7 +416,7 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             using var transaction = context.Database.BeginTransaction();
             var removed = paths.Sum(path => DeletePath(context, path));
 
@@ -455,7 +455,7 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             using var transaction = context.Database.BeginTransaction();
             foreach (var path in stale)
                 DeletePath(context, path);
@@ -487,7 +487,7 @@ public sealed class MetacodeIndexStore : IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             // StartsWith is the framework's prefix comparison; it escapes the wildcards a hand-written
             // LIKE would have treated as patterns.
@@ -540,7 +540,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var path = prefix + fileName + "/";
 
             return context.MetacodeDocuments
@@ -576,7 +576,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var rows = context.MetacodeDocuments
                 .AsNoTracking()
                 .Where(document =>
@@ -638,7 +638,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var rows = context.MetacodeTrees
                 .AsNoTracking()
                 .Where(tree => tree.Path == path)
@@ -672,7 +672,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return context.MetacodeNodes
                 .AsNoTracking()
                 .Where(node => node.Path == path && node.DeclarationKey == declarationKey)
@@ -717,7 +717,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return context.MetacodeNodes.Count(node => node.Path == path && node.DeclarationKey == declarationKey);
         }
         catch (SqliteException)
@@ -739,7 +739,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var needle = $"%{query}%";
 
             var rows = context.MetacodeTrees
@@ -774,7 +774,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             var callables = new[]
             {
@@ -820,7 +820,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             var functionKinds = new[]
             {
@@ -879,7 +879,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return context.MetacodeTrees.Count(tree => tree.Path == path);
         }
         catch (SqliteException)
@@ -904,7 +904,7 @@ public sealed class MetacodeIndexStore : IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var source = context.SourceDocuments
                 .AsNoTracking()
                 .Where(document => document.Path == path)
@@ -942,7 +942,7 @@ public sealed class MetacodeIndexStore : IDisposable
     private SqliteConnection? Open() => _connection;
 
     /// <summary>Removes everything one path owns; the caller wraps the calls in its transaction.</summary>
-    private static int DeletePath(VisualMcpDbContext context, string path)
+    private static int DeletePath(MetacodeDbContext context, string path)
     {
         var removed = 0;
         removed += context.MetacodeNodes.Where(row => row.Path == path).ExecuteDelete();

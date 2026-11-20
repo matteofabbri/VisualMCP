@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Snitch.Languages.CSharp.Inspections.Rider;
 
@@ -1098,4 +1099,96 @@ public sealed class ReplaceWithStringIsNullOrEmptyAnalyzer : DiagnosticAnalyzer
         MemberAccessExpressionSyntax member => IsSideEffectFree(member.Expression),
         _ => false,
     };
+}
+
+/// <summary>
+/// UseDiscardAssignment: a <c>var</c> local whose name is discard-like (<c>_</c>, <c>__</c>,
+/// <c>unused…</c>/<c>dummy…</c> with digits) and which is never read is a discard assignment —
+/// <c>_ = expression;</c> says that directly. Ported from <c>UseDiscardAssignmentProblemAnalyzer</c>:
+/// exactly one declarator, a regular <c>var</c> declaration (not <c>using var</c>), an initializer, no
+/// usages of the declared symbol, and no competing <c>_</c> local anywhere in the enclosing body —
+/// JetBrains proves the trial replacement parses as a discard; this port conservatively skips the hint
+/// when any <c>_</c> declaration exists in the same member, which can only miss a hint, never misfire.
+/// </summary>
+public sealed class UseDiscardAssignmentAnalyzer : DiagnosticAnalyzer
+{
+    internal static readonly DiagnosticDescriptor Rule = RiderRules.Rule(
+        "UseDiscardAssignment", "Use discard assignment",
+        "'{0}' is never used: a discard assignment ('_ = …') says that directly",
+        DiagnosticSeverity.Info);
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.VariableDeclaration);
+    }
+
+    private static void Analyze(SyntaxNodeAnalysisContext context)
+    {
+        var declaration = (VariableDeclarationSyntax)context.Node;
+
+        // A regular var declaration: `using var …` is a resource lifetime, a typed declaration is not a
+        // discard candidate, and JetBrains' shape is exactly one declarator.
+        if (declaration.Parent is not LocalDeclarationStatementSyntax statement) return;
+        if (statement.UsingKeyword.IsKind(SyntaxKind.UsingKeyword)) return;
+        if (declaration.Type is not IdentifierNameSyntax { Identifier.ValueText: "var" }) return;
+        if (declaration.Variables.Count != 1) return;
+
+        var variable = declaration.Variables[0];
+        if (variable.Initializer is null) return;
+        if (!IsDiscardLikeName(variable.Identifier.ValueText)) return;
+
+        var symbol = context.SemanticModel.GetDeclaredSymbol(variable);
+        if (symbol is not ILocalSymbol local) return;
+        if (IsUsed(context.SemanticModel, local, declaration)) return;
+        if (HasCompetingDiscardDeclaration(declaration)) return;
+
+        // The range JetBrains highlights: the `var _` part, from the type keyword to the name's end.
+        var span = TextSpan.FromBounds(declaration.SpanStart, variable.Identifier.Span.End);
+        context.ReportDiagnostic(Diagnostic.Create(
+            Rule, Location.Create(declaration.SyntaxTree, span), variable.Identifier.ValueText));
+    }
+
+    /// <summary><c>_</c>, any all-underscore name, or <c>unused</c>/<c>dummy</c> followed by digits.</summary>
+    internal static bool IsDiscardLikeName(string name)
+    {
+        if (name.All(character => character == '_')) return true;
+
+        foreach (var prefix in (string[])["unused", "dummy"])
+        {
+            if (!name.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (name[prefix.Length..].All(char.IsDigit)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Any read of the local anywhere in the enclosing member body disqualifies the hint.</summary>
+    private static bool IsUsed(SemanticModel model, ILocalSymbol local, VariableDeclarationSyntax declaration)
+    {
+        var body = declaration.Ancestors().OfType<BlockSyntax>().LastOrDefault();
+        if (body is null) return false;
+
+        return body.DescendantNodes()
+            .OfType<IdentifierNameSyntax>()
+            .Where(identifier => identifier.Identifier.ValueText == local.Name)
+            .Where(identifier => !identifier.Span.IntersectsWith(declaration.Variables[0].Identifier.Span))
+            .Any(identifier => SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(identifier).Symbol, local));
+    }
+
+    /// <summary>
+    /// JetBrains proves the trial replacement by actually rewriting the statement; this port checks the
+    /// one thing that trial detects conservatively: a competing <c>_</c> declaration in the same member
+    /// means <c>_ = …</c> may bind to that local instead of the discard. Conservative on purpose — it
+    /// can only miss a hint, never misfire.
+    /// </summary>
+    private static bool HasCompetingDiscardDeclaration(VariableDeclarationSyntax declaration) =>
+        declaration.Ancestors().OfType<BlockSyntax>().LastOrDefault() is { } body &&
+        body.DescendantNodes()
+            .OfType<VariableDeclarationSyntax>()
+            .Where(other => !other.Span.IntersectsWith(declaration.Span))
+            .Any(other => other.Variables.Any(variable => variable.Identifier.ValueText == "_"));
 }

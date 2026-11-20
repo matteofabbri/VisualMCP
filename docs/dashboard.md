@@ -1,8 +1,9 @@
 # Web interface (the dashboard)
 
 A web view of the running server and of the solution store it writes
-(`<solution>/.visualMCP/visualmcp.db`). It is hosted **inside the MCP process** — no separate
-process to launch — and answers on loopback only.
+(`<solution>/.visualMCP/`, one SQLite file per domain: `visualmcp.db`, `board.db`, `metacode.db`;
+every query is routed to the file that owns its table). It is hosted **inside the MCP process** — no
+separate process to launch — and answers on loopback only.
 
 ```
 http://127.0.0.1:4677

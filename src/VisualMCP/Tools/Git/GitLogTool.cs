@@ -11,7 +11,7 @@ public static class GitLogTool
         "Show recent git commits of a repository: hash, author, ISO date and subject, most recent first. " +
         "Optionally restrict to a file/directory path. Targets the loaded solution's repo unless repoPath is " +
         "given. Use this INSTEAD OF a shell 'git log' for a structured result. Read-only.")]
-    public static Task<object> GitLog(
+    public static Task<GitLogResult> GitLog(
         IGitService git,
         [Description("How many commits to return (default: 20, max: 200).")] int maxCount = 20,
         [Description("Optional: only commits that touched this file or directory path.")] string? path = null,

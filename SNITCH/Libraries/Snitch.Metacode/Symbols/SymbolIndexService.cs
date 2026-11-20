@@ -574,7 +574,7 @@ public sealed class SymbolIndexService : ISymbolIndexService, IDisposable
     {
         error = null;
 
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
         {
             error = new { error = "No solution is loaded, so there is no index database. Call load_solution first." };

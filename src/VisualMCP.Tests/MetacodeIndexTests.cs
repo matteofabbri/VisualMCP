@@ -298,7 +298,7 @@ public sealed class MetacodeIndexTests
             await service.BuildAsync();
 
             // Exactly the state of a database written by an older build: metacode present, no source rows.
-            using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.EnsureDatabase()}"))
+            using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.EnsureMetacodeDatabase()}"))
             {
                 connection.Open();
                 using var delete = connection.CreateCommand();

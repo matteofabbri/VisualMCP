@@ -27,7 +27,7 @@ public sealed partial class VisualMcpStore
         var connection = Connection();
         if (connection is null) return false;
 
-        lock (_gate)
+        using (Gate())
         {
             try
             {
@@ -78,7 +78,7 @@ public sealed partial class VisualMcpStore
         var connection = Connection();
         if (connection is null) return;
 
-        lock (_gate)
+        using (Gate())
         {
             try
             {

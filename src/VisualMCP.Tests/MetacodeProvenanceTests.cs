@@ -315,7 +315,7 @@ public sealed class MetacodeProvenanceTests
                 create.ExecuteNonQuery();
             }
 
-            VisualMcpSchema.Ensure(connection);
+            VisualMcpSchema.EnsureMetacode(connection);
 
             using var read = connection.CreateCommand();
             read.CommandText = "SELECT source_path, decompiled FROM mc_document WHERE path = 'D:\\old\\Counter.cs';";
@@ -332,7 +332,7 @@ public sealed class MetacodeProvenanceTests
 
     private static int CountInStore(VisualMcpStore store, string sql, string path)
     {
-        using var connection = new SqliteConnection($"Data Source={store.EnsureDatabase()}");
+        using var connection = new SqliteConnection($"Data Source={store.EnsureMetacodeDatabase()}");
         connection.Open();
 
         using var command = connection.CreateCommand();

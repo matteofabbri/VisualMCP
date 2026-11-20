@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Reflection;
 using Microsoft.CodeAnalysis;
@@ -215,7 +216,8 @@ internal static class InspectionPackCatalog
                                     new Rider.ReplaceSequenceEqualWithConstantPatternAnalyzer(),
                                     new Rider.RedundantPatternParenthesesAnalyzer(),
                                     new Rider.MergeIntoPatternAnalyzer(),
-                                    new Rider.ReplaceWithStringIsNullOrEmptyAnalyzer()),
+                                    new Rider.ReplaceWithStringIsNullOrEmptyAnalyzer(),
+                                    new Rider.UseDiscardAssignmentAnalyzer()),
                                 ImmutableArray<DiagnosticAnalyzer>.Empty,
                                 ImmutableArray.Create<CodeFixProvider>(new Rider.RiderCodeFixProvider())),
                     _ => (ImmutableArray.Create<DiagnosticAnalyzer>(
@@ -423,23 +425,14 @@ internal static class InspectionPackCatalog
     /// </summary>
     private sealed class AnalyzerAssemblyLoader : IAnalyzerAssemblyLoader
     {
-        private readonly Dictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase);
 
         public void AddDependencyLocation(string fullPath)
         {
             // Single-assembly packs: dependencies resolve from the same folder via LoadFromPath.
         }
 
-        public Assembly LoadFromPath(string fullPath)
-        {
-            lock (_loaded)
-            {
-                if (_loaded.TryGetValue(fullPath, out var loaded)) return loaded;
-
-                var assembly = Assembly.LoadFrom(fullPath);
-                _loaded[fullPath] = assembly;
-                return assembly;
-            }
-        }
+        public Assembly LoadFromPath(string fullPath) =>
+            _loaded.GetOrAdd(fullPath, static path => Assembly.LoadFrom(path));
     }
 }

@@ -143,7 +143,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
 
         var rows = BuildRows(snapshot, document ?? analysis.ToMetacode());
         var ghidraVersion = VersionOf(analysis.HeadlessPath);
-        var database = _store.EnsureDatabase();
+        var database = _store.EnsureMetacodeDatabase();
         if (database is null)
         {
             return new NativeArtifactRecord(
@@ -166,7 +166,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var existing = context.NativeArtifacts.FirstOrDefault(row => row.Sha256 == sha);
             if (existing is not null && !force)
             {
@@ -277,7 +277,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var row = context.NativeArtifacts
                 .AsNoTracking()
                 .FirstOrDefault(artifact => artifact.Sha256 == sha256.Trim().ToLowerInvariant());
@@ -303,7 +303,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
 
             // SQLite cannot ORDER BY a DateTimeOffset through EF; artifacts are few, so the page is
             // ordered after it is read.
@@ -334,7 +334,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var query = context.NativeFunctions.AsNoTracking().Where(row => row.Artifact == artifactId);
 
             if (!string.IsNullOrWhiteSpace(filter))
@@ -372,7 +372,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             var row = context.NativeFunctions
                 .AsNoTracking()
                 .Where(function =>
@@ -403,7 +403,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return context.NativeCalls
                 .AsNoTracking()
                 .Where(row => row.Artifact == artifactId)
@@ -432,7 +432,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
         _gate.Wait();
         try
         {
-            using var context = VisualMcpSchema.CreateContext(connection);
+            using var context = VisualMcpSchema.CreateMetacodeContext(connection);
             return context.NativeFunctions.Count(row => row.Artifact == artifactId);
         }
         catch (SqliteException)
@@ -545,7 +545,7 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
 
     // ── connection ───────────────────────────────────────────────────────────────────
 
-    private SqliteConnection? OpenStore() => _store.EnsureDatabase() is { } database ? Open(database) : null;
+    private SqliteConnection? OpenStore() => _store.EnsureMetacodeDatabase() is { } database ? Open(database) : null;
 
     private SqliteConnection? Open(string database)
     {
@@ -568,12 +568,13 @@ public sealed class NativeCodeStore : INativeCodeStore, IDisposable
 
                 using (var pragma = connection.CreateCommand())
                 {
-                    // The store, the board and the other indexes write this file too.
+                    // The metacode index writes this domain database too: wait for it instead of
+                    // failing the query.
                     pragma.CommandText = "PRAGMA busy_timeout=5000;";
                     pragma.ExecuteNonQuery();
                 }
 
-                VisualMcpSchema.Ensure(connection);
+                VisualMcpSchema.EnsureMetacode(connection);
 
                 _connection = connection;
                 _path = database;

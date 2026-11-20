@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -295,8 +296,7 @@ public sealed class CodeFixService : ICodeFixService
     {
         private readonly ImmutableArray<DiagnosticAnalyzer> _analyzers;
         private readonly string _id;
-        private readonly Dictionary<ProjectId, ImmutableArray<Diagnostic>> _cache = new();
-        private readonly object _lock = new();
+        private readonly ConcurrentDictionary<ProjectId, ImmutableArray<Diagnostic>> _cache = new();
 
         public PackDiagnosticProvider(ImmutableArray<DiagnosticAnalyzer> analyzers, string id)
         {
@@ -327,10 +327,7 @@ public sealed class CodeFixService : ICodeFixService
 
         private async Task<ImmutableArray<Diagnostic>> ForProjectAsync(Project project, CancellationToken cancellationToken)
         {
-            lock (_lock)
-            {
-                if (_cache.TryGetValue(project.Id, out var cached)) return cached;
-            }
+            if (_cache.TryGetValue(project.Id, out var cached)) return cached;
 
             var compilation = await project.GetCompilationAsync(cancellationToken);
             if (compilation is null) return ImmutableArray<Diagnostic>.Empty;
@@ -343,7 +340,7 @@ public sealed class CodeFixService : ICodeFixService
                 .GetAnalyzerDiagnosticsAsync(cancellationToken);
 
             var matching = diagnostics.Where(diagnostic => diagnostic.Id == _id).ToImmutableArray();
-            lock (_lock) _cache[project.Id] = matching;
+            _cache[project.Id] = matching;
             return matching;
         }
     }
